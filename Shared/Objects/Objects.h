@@ -1,3 +1,7 @@
+// Si no pongo esto por alguna razon no compila, supongo que es porque se usa el compilador de microsoft y no el gcc pero realmente no estoy seguro
+#include <functional> 
+
+// Aca continua todo normalmente
 class Viewport3D;     // forward declaration válida
 extern Viewport3D* Viewport3DActive;
 
