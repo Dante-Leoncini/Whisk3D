@@ -712,6 +712,7 @@ bool CmdStreamTexRefs(std::istringstream& ss, std::string& err) {
         if (!m) continue;
         if (m->texture) ranuras[m->texture]++;
         if (m->normalTexture) ranuras[m->normalTexture]++;
+        if (m->texturaB) ranuras[m->texturaB]++;
         for (size_t c = 0; c < m->capas.size(); c++) if (m->capas[c].tex) ranuras[m->capas[c].tex]++;
     }
     for (size_t i = 0; i < AnimatedMaterials.size(); i++)

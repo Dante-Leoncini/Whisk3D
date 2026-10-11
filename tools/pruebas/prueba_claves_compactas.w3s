@@ -1,0 +1,129 @@
+# ==========================================================================
+#  CURVAS HORNEADAS COMPACTAS EN MEMORIA (W3dClaves, libs/Whisk3DCore/animation/Animation.h)
+#  Correr DESDE ESTA CARPETA:
+#    ../../platform/linux/build/whisk3d --script prueba_claves_compactas.w3s
+#
+#  Una curva HORNEADA (frames regulares, la misma interpolacion y el mismo tipo de handle en todas, los
+#  handles guardados en cero: lo que trae un glTF importado, un keyframe por frame) leida de un .w3da queda
+#  COMPACTA: ~4 B por clave en vez de los 32 de un keyFrame. Se prueba:
+#    - al abrir quedan compactas (menos de 5 B por clave) y no se expande ninguna; copiar (la VARIANTE de
+#      un esqueleto con los huesos en otro orden, el copy-on-write del que edita) las copia compactas;
+#    - evaluar da LO MISMO, bit a bit: la foto de la pose (editor y cabezal continuo del juego) con las
+#      curvas comunes recien creadas = con las compactas leidas; y cada curva (compacta o no) contra la
+#      evaluacion de ANTES en todos los frames, en fracciones, con frames enormes, +-1e30 y NaN;
+#    - jugar (modo juego, unos cuadros dibujados, la pose de cada clip) no expande nada;
+#    - guardar sin editar da los mismos bytes (sin expandir);
+#    - editar una clave (mover / insertar / borrar) expande SOLO esa curva y anda como siempre, con undo;
+#      el dope sheet tambien (mover, borrar, Ctrl+Z);
+#    - un animset editado se guarda bien y reabre igual (lo no editado vuelve a quedar compacto);
+#    - los clips de JERARQUIA (bloques JCLP) tambien: compactos al abrir, reproducirlos no expande.
+# ==========================================================================
+
+ventana 1280 720
+
+# ---- A) los clips horneados, creados en memoria (curvas COMUNES) y guardados en un .w3da. Tres armatures
+#         con los mismos clips; "Invertido" tiene los huesos en otro orden (el guardado le da su animset:
+#         se lo apunta al de los otros, asi al abrir usa sus clips por una VARIANTE) ----
+clavessintetica /tmp/w3d_claves_v.w3d invertido
+clavesinfo compactas 0
+posefoto claves_comunes.pose juego 1
+animsetsw3d /tmp/w3d_claves_v.w3d animsets 2 clips 4 armatures 3
+animsetapuntar /tmp/w3d_claves_v.w3d /tmp/w3d_claves_a.w3d Invertido Horneado
+
+# ---- B) al abrir quedan COMPACTAS: 38 curvas (22 de "Largo" + 16 de "Corto"), UNA copia para los dos
+#         "Horneado", y otras 38 en la VARIANTE de "Invertido" (la copia reindexada se copia compacta), a
+#         menos de 5 B por clave. Ninguna se expande. ----
+abrirw3d /tmp/w3d_claves_a.w3d
+clavesinfo marca compactas 76 maxbpc 5
+animsetinfo vivos 1 refs 3 clips 2 variantes 1 clipsvariante 2
+meminfo
+# la MISMA pose, bit a bit, en el editor y con el cabezal continuo del juego
+posefoto claves_compactas.pose juego 1
+posefotoigual claves_comunes.pose claves_compactas.pose
+# cada curva contra la evaluacion de antes (y contra una copia comun con las mismas claves): mirar no expande
+clavescomparar Horneado compactas 38
+clavescomparar Horneado.001 compactas 38 paso 0.0625
+clavescomparar Invertido compactas 38
+clavesinfo nuevas 0 compactas 76
+animsetsellos clips 4
+
+# ---- C) JUGAR: modo juego, unos cuadros simulados y dibujados, la pose de todos los clips en el cabezal del
+#         juego: no se expande NINGUNA curva ----
+juego on
+simplay 20
+glaudit 3
+simplay 7
+glaudit 2
+posefoto claves_juego.pose juego 1
+juego off
+clavesinfo nuevas 0 compactas 76
+posefoto claves_despues.pose juego 1
+posefotoigual claves_comunes.pose claves_despues.pose
+
+# ---- D) guardar SIN editar: los mismos bytes del .w3da (escrito desde las compactas, sin expandirlas) ----
+guardarw3d /tmp/w3d_claves_b.w3d
+w3diguales /tmp/w3d_claves_a.w3d /tmp/w3d_claves_b.w3d animaciones/
+clavesinfo nuevas 0 compactas 76
+abrirw3d /tmp/w3d_claves_b.w3d
+clavesinfo marca compactas 76
+guardarw3d /tmp/w3d_claves_c.w3d
+w3diguales /tmp/w3d_claves_b.w3d /tmp/w3d_claves_c.w3d
+clavesinfo nuevas 0
+
+# ---- E) EDITAR: copy-on-write del armature y UNA curva editada -> se expande SOLO esa; Ctrl+Z la devuelve
+#         (compacta otra vez), Ctrl+Y la rehace ----
+claveseditar Horneado 0 mover
+claveseditar Horneado 0 insertar
+claveseditar Horneado 0 borrar
+animsetarm Horneado compartido 0
+animsetarm Horneado.001 compartido 1
+# los clips de los otros armatures siguen compactos y sellados
+animsetsellos clips 4
+clavescomparar Horneado.001 compactas 38
+clavescomparar Invertido compactas 38
+# el dope sheet de verdad (mover / borrar / Ctrl+Z) sobre una curva compacta: anda como siempre
+animsetdope Horneado.001 1 mover compartido 0 copias 1
+animsetdope Horneado.001 1 undo compartido 0
+animsetdope Horneado.001 0 borrar compartido 0
+clavescomparar Horneado
+clavescomparar Horneado.001
+
+# ---- F) guardar lo EDITADO y reabrir: la misma pose; lo que no se edito vuelve compacto ----
+posefoto claves_editado.pose juego 1
+guardarw3d /tmp/w3d_claves_d.w3d
+abrirw3d /tmp/w3d_claves_d.w3d
+posefoto claves_editado2.pose juego 1
+posefotoigual claves_editado.pose claves_editado2.pose
+clavescomparar Horneado
+clavescomparar Horneado.001
+clavesinfo marca
+guardarw3d /tmp/w3d_claves_e.w3d
+w3diguales /tmp/w3d_claves_d.w3d /tmp/w3d_claves_e.w3d animaciones/
+clavesinfo nuevas 0
+
+# ---- G) CLIPS DE JERARQUIA (bloques JCLP): las mismas curvas compactas ----
+escenadefecto
+add cube
+objname Grua
+add cube
+objname Brazo
+parent Brazo Grua
+clipnuevo Grua girar 1 13
+# (5 claves cada 3 frames: bezier con handles automaticos, como inserta el editor)
+animcurva Grua:girar Brazo ry 1 0 4 30 7 60 10 90 13 120
+animcurva Grua:girar . y 1 0 4 0.5 7 1.5 10 1.5 13 3
+raizanim Scene
+jerplay Grua girar loop 0
+jertick 0.1 1
+rotat Brazo 0 30 0 0.001
+jerreset
+guardarw3d /tmp/w3d_claves_jer.w3d
+abrirw3d /tmp/w3d_claves_jer.w3d
+clavesinfo marca compactas 2
+clavescomparar Grua compactas 2
+jerplay Grua girar loop 0
+jertick 0.1 1
+rotat Brazo 0 30 0 0.001
+jertick 0.05 3
+jerreset
+clavesinfo nuevas 0 compactas 2

@@ -1,0 +1,10 @@
+# los dos materiales de prueba_mallas_solo_gpu.obj (la rutina de la prueba no los usa: dibuja con sus pasos)
+newmtl PiezaA
+Kd 1.0 0.6 0.6
+d 1.0
+NoLight
+
+newmtl PiezaB
+Kd 0.6 0.6 1.0
+d 1.0
+NoLight

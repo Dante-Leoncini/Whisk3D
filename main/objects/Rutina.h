@@ -41,6 +41,7 @@
 #include "objects/Objects.h"
 #include <vector>
 #include <string>
+#include <map>
 #include <utility>
 
 // los TIPOS de paso. El .w3d guarda el NOMBRE (W3dPasoNombre), no el numero: el orden del enum se puede cambiar.
@@ -80,6 +81,11 @@ enum W3dPasoTipo {
     PasoSaltarOculto,   // si el objeto (o un padre) esta oculto, saltea los proximos N pasos (lo que oculta un script)
     PasoVisible,        // la caja de una parte contra el frustum de la camara -> 1/0 en una memoria
     PasoLua,            // llama a una funcion del script de un objeto (ahi adentro: paso(...))
+    PasoMezclaTexturas, // MEZCLA DE TEXTURAS en una pasada (gfx::MezclaTexturas): la unidad 1 interpola la textura 'ref' (B)
+                        // con lo de la unidad 0; n[0] = cuanto de B (0..1, animable / de una memoria); off = una unidad
+    PasoSaltarSiNinguna,// si NINGUNA bandera de un array de rangos esta prendida (los mismos n[0] = rangos y n[1] = banderas
+                        // que un "Dibujar elementos" por array), saltea los proximos N pasos: el estado y el dibujo de una
+                        // parte sin ninguna pieza visible no cuestan nada
     PasoN
 };
 
@@ -89,14 +95,17 @@ enum W3dPasoGrupo { GrupoTransformar = 0, GrupoDibujar, GrupoTextura, GrupoNiebl
 // a que apunta la referencia por nombre de un paso
 enum W3dPasoRefTipo { RefNada = 0, RefObjeto, RefMalla, RefTextura, RefRutina, RefFuncion };
 // para que usa el ENTERO un paso
-enum W3dPasoEnteroUso { EnteroNada = 0, EnteroParte, EnteroLuz, EnteroBool, EnteroCuenta, EnteroBuffers };
+// (EnteroCapaUV: el puntero de UV a una CAPA de la malla: 0 = la UV de render, k = la capa extra k, uvExtra[k])
+enum W3dPasoEnteroUso { EnteroNada = 0, EnteroParte, EnteroLuz, EnteroBool, EnteroCuenta, EnteroBuffers, EnteroCapaUV };
 // "Clear": que buffers limpia (el campo 'entero', como la mascara de glClear)
 enum W3dLimpiarBits { LimpiarColor = 1, LimpiarProfundidad = 2, LimpiarStencil = 4 };
 // "Array on/off": que array (el campo 'modo'; el mismo orden que los pasos de puntero)
 enum W3dArrayRutina { ArrayVertices = 0, ArrayNormales, ArrayUV, ArrayColores, ArrayN };
 // las listas de OPCIONES del campo 'modo' (desplegables)
 enum W3dPasoOpciones { OpcNada = 0, OpcNieblaModo, OpcTexturaModo, OpcFuncionZ, OpcMezclaModo, OpcLuzComponente,
-                       OpcLuzTipo, OpcPrimitiva, OpcFiltro, OpcRepetir, OpcMaterialComp, OpcArray, OpcMatriz, OpcN };
+                       OpcLuzTipo, OpcPrimitiva, OpcFiltro, OpcRepetir, OpcMaterialComp, OpcArray, OpcMatriz,
+                       OpcMezclaTex,   // "Texture mix": Interpolate / Multiply (lightmap) / Multiply 2x
+                       OpcN };
 // el RANGO de "Dibujar elementos" (campo 'sub'): la parte entera, triangulos a mano o los rangos de un array
 enum W3dDibujarRango { RangoParte = 0, RangoManual, RangoArray };
 
@@ -244,6 +253,9 @@ void W3dRutinasPorDefecto(Object* raiz, const std::string& nombreConstructor, co
 // + estados + otras). Apagado no cuesta nada
 extern bool g_rutinaPerfil;
 extern long g_rutinaPerfilVeces[PasoN], g_rutinaPerfilGL[PasoN];
+extern double g_rutinaPerfilMs[PasoN];                              // ms por tipo de paso (los que no anidan)
+extern std::map<std::string, double> g_rutinaPerfilMsDe;          // ms por rutina (por nombre, inclusivo)
+extern std::map<std::string, long> g_rutinaPerfilTrisDe;          // triangulos por rutina (inclusivo)
 
 // el valor ACTUAL del campo de un paso para la animacion (componente de AnimPaso: id * 8 + campo)
 float W3dRutinaPasoValor(Rutina* r, int componente);

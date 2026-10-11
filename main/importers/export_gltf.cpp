@@ -229,6 +229,7 @@ bool ExportGLTF(const std::string& filepath, bool selectedOnly, bool binary) {
                 Texture* t = mat->capas[c].tex;
                 if (t && !texIdx.count(t)) { texIdx[t] = (int)texs.size(); texs.push_back(t); }
             }
+            if (mat->texturaB && !texIdx.count(mat->texturaB)) { texIdx[mat->texturaB] = (int)texs.size(); texs.push_back(mat->texturaB); }   // (la textura B)
         }
     }
     // texturas: se COPIAN al lado del archivo exportado y se referencian por BASENAME. Asi el reimport (y Blender)
@@ -278,6 +279,8 @@ bool ExportGLTF(const std::string& filepath, bool selectedOnly, bool binary) {
            + ",\"w3d_normalMap\":"   + (mat->normalMap?"true":"false")
            + ",\"w3d_reflectMode\":" + Itos((long)mat->reflectMode)
            + ",\"w3d_shininess\":"   + Ftos(mat->shininess);
+        if (mat->texturaB && texIdx.count(mat->texturaB))   // mezcla de texturas: la textura B (uri) y cuanto de ella
+            j += ",\"w3d_texturaB\":\"" + Jesc(imgUri[(size_t)texIdx[mat->texturaB]]) + "\",\"w3d_mezclaB\":" + Ftos(mat->mezclaB);
         if (!mat->capas.empty()) {   // capas de textura extra: [{textura (uri), mezcla, uv, on}]
             std::vector<std::string> cj;
             for (size_t c = 0; c < mat->capas.size(); c++) {

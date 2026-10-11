@@ -805,13 +805,18 @@ bool CmdMemInfoMallas(std::istringstream& ss, std::string& err, bool& manejado) 
     const int cargados = W3dMallasRecursosCargados(), vbo = W3dMallasVBOCompartidos();
     printf("      [meminfo] mallas como recurso: registro=%d cargadas=%d objetos vinculados=%d "
            "VBO compartidos=%d (%ld B de GPU)\n", (int)reg.size(), cargados, vinculados, vbo, W3dMallasVBOBytes());
+    // las que soltaron su RAM (opcion de proyecto "mallasSoloGPU": las dibujan solo rutinas y viven en sus VBO)
+    long ahorroGPU = 0;
+    const int soloGPU = W3dMallasSoloGPUCantidad(&ahorroGPU);
+    printf("      [meminfo] mallas solo en GPU: %d (opcion %s) RAM ahorrada=%ld B (%.1f KB) recargas=%d\n", soloGPU,
+           W3dMallasSoloGPUActiva() ? "prendida" : "apagada", ahorroGPU, ahorroGPU / 1024.0, W3dMallasSoloGPURecargas());
     // los asserts NUEVOS se atienden aca; los de siempre siguen en W3dScript.cpp (ss intacto)
     const std::streampos pos = ss.tellg();
     std::string sub; long esperado = -1;
-    if ((ss >> sub) && (sub == "recursosmalla" || sub == "vbocompartidos")) {
+    if ((ss >> sub) && (sub == "recursosmalla" || sub == "vbocompartidos" || sub == "sologpu")) {
         manejado = true;
         if (!(ss >> esperado)) { err = "meminfo: falta el numero del assert"; return false; }
-        const long real = (sub == "recursosmalla") ? cargados : vbo;
+        const long real = (sub == "recursosmalla") ? cargados : (sub == "sologpu") ? soloGPU : vbo;
         if (real != esperado) {
             char b[128]; snprintf(b, sizeof(b), "meminfo %s: hay %ld y se esperaba %ld", sub.c_str(), real, esperado);
             err = b; return false;

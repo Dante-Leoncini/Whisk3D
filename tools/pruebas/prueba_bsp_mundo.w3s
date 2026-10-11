@@ -1,0 +1,59 @@
+# ===========================================================================
+#  EL MUNDO DE UN .w3dbsp v2 DIBUJADO POR EL CULLING (MundoBsp): PVS + frustum
+#  por el arbol + un draw por material + hijos dinamicos
+#
+#  prueba_bsp_mundo.w3d (hecho por hl2-w3d/tools/fixtures_pruebas.py): el mismo
+#  arbol de prueba_bsp_pvs (4 salas en X = -2, 0, 2, 4, clusters 0..3; el PVS ve
+#  a los vecinos) y la GEOMETRIA adentro del .w3dbsp: por sala una pared (un
+#  quad en Z = -0.5 de frente a la camara CamBsp, en Z = 10, fov 90) con su
+#  textura: roja CON lightmap (pagina gris 64: x2 = la mitad), verde, azul y
+#  amarilla. El Culling 'MundoBsp' no tiene piezas como hijos: dibuja el mundo
+#  el solo. Su unico hijo es un cubo 'dinamico' (estatico: false, no figura en
+#  el dato) en la sala 3, que se mide por su caja contra el arbol cada cuadro.
+#
+#  Lo que se verifica:
+#   1) desde el cluster 0 el mundo dibuja 2 hojas, 2 caras y 2 draws (uno por
+#      material visible); la pared roja sale a la mitad (el lightmap en la
+#      unidad 1) y la verde entera; las salas 2 y 3 (en el frustum, fuera del
+#      PVS) quedan en el color de fondo; el cubo dinamico no pasa el PVS
+#   2) con la camara en el cluster 3: la amarilla aparece, la roja no, el cubo
+#      dinamico pasa
+#   3) con el Culling apagado se dibuja todo (4 hojas, 4 draws)
+#   4) round-trip: guardar y reabrir conserva el mundo y SUS TEXTURAS (entran
+#      al contenedor desde el dato: nadie mas las usa)
+#
+#  Correr DESDE ESTA CARPETA:
+#    ../../platform/linux/build/whisk3d --script prueba_bsp_mundo.w3s
+# ===========================================================================
+abrirw3d prueba_bsp_mundo.w3d
+loadtex
+
+# cluster 0 (X = -2): hojas 0 y 1
+bspinfo MundoBsp cluster 0 pvs 0 hojas 2 caras 2 draws 2
+escenapx -2 0 -0.5 es 128 0 0 16
+escenapx 0 0 -0.5 es 0 255 0 16
+escenapx 2 0 -0.5 es 13 13 13 10
+escenapx 4.6 0.6 -0.5 es 13 13 13 10
+
+# cluster 3 (X = 4): hojas 2 y 3, el cubo dinamico pasa
+selobj CamBsp
+objmove 6 0 0
+objat CamBsp 4 0 10 0.001
+bspinfo MundoBsp cluster 3 pvs 1 hojas 2 caras 2 draws 2
+escenapx 4.6 0.6 -0.5 es 255 255 0 16
+escenapx -2 0 -0.5 es 13 13 13 10
+
+# Culling apagado: el mundo entero, sin PVS
+cullactivo MundoBsp off
+bspinfo MundoBsp hojas 4 caras 4 draws 4
+escenapx -2 0 -0.5 es 128 0 0 16
+cullactivo MundoBsp on
+bspinfo MundoBsp cluster 3 hojas 2 draws 2
+
+# round-trip: el mundo y sus texturas sobreviven al guardado
+guardarw3d /tmp/w3d_prueba_bsp_mundo.w3d
+abrirw3d /tmp/w3d_prueba_bsp_mundo.w3d
+loadtex
+bspinfo MundoBsp cluster 3 pvs 1 hojas 2 draws 2
+escenapx 4.6 0.6 -0.5 es 255 255 0 16
+escenapx 2 0 -0.5 es 0 0 255 16

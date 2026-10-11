@@ -60,3 +60,40 @@ PVS ya usa como sector. Lo que el motor aporta para eso:
 Subir los atlas en 16 bits (RGBA4444 / RGB565) en una GPU sin compresión no pierde nada apreciable
 cuando el arte de origen ya es de paleta, y divide por dos el pico de memoria. Es una decisión del
 proyecto, no del motor: el motor sube lo que le den.
+
+## 5. Lo que no dibuja nada no apila su matriz
+
+El recorrido de la escena (`Object::Render`) saltea un subarbol entero, sin `glPushMatrix` / `glMultMatrixf` /
+`glPopMatrix`, cuando ni el objeto ni ninguno de sus hijos visibles dibuja algo (`Object::DibujaAlgo`). En el juego
+(overlays apagados) no dibujan nada: un emisor de particulas sin particulas vivas (las vivas van en el pase diferido;
+la flecha del emisor es un overlay), una hitbox, una camara (su gizmo es un overlay), un armature (sus huesos los dibuja
+el editor en una pasada aparte) y un vacio. Antes cada uno costaba sus 3 llamadas por cuadro aunque no se viera nada: en
+un nivel con ~50 emisores de efectos esperando (sangre, polvo, chispas) eran ~150 llamadas por cuadro.
+Prueba: `tools/pruebas/prueba_no_apila.w3s` (comando `noapila`: el render con el objeto visible y oculto hace las mismas
+llamadas GL).
+
+## 6. La matriz y los punteros llegan a GL solo cuando se usan
+
+En el N95 cada llamada GL cuesta ~15 us, y la mayoria de las de un cuadro no dibujaban: eran matrices, punteros y binds.
+Dos caches de `gfx` (pipeline fijo, PC y GL ES 1.1; GLES2/WebGL ya lo hacia por uniforms) las sacan sin cambiar la imagen:
+
+- **Pila perezosa de la modelview** (`gfx::g_matricesPerezosas`). Push/Pop/Mult/Load/Trasladar/Rotar/Escalar solo cambian
+  la sombra en la CPU (la que ya leia `GetMatrix`); cada nivel lleva una serie y GL la de lo que tiene cargado. Antes de lo
+  que usa la matriz (los `Draw*`, `Light0fv`/`LightNfv` de la posicion, `PlanosRecorte`) va UN `glLoadMatrixf` si cambio.
+  Un objeto que el autocull descarta cuesta 0 llamadas (antes 3); uno que dibuja, 1. Cambiar de matriz (el orto del HUD) no
+  obliga a mandarla: si un draw la necesita con otra activa, pasa a la modelview y vuelve. Sin la matriz en la sombra (pila
+  de mas de 32) se apila de verdad, como antes. El GL crudo que use la modelview (las luces de `Light.cpp`, el cursor de
+  Symbian) llama `gfx::MatricesSincronizar()` antes. La sombra rota y multiplica con las mismas cuentas que el `glRotatef`
+  y el `glMultMatrixf` de Mesa: los bits son los mismos y la imagen tambien.
+- **Cache de punteros y binds** (`gfx::g_punterosCache`). Un `glXxxPointer` igual al puesto no se repite, ni su bind (GL
+  guarda con cada puntero el buffer de ese momento); `BindIndexVBO` del IBO ya bindeado tampoco; `UnbindVBOs` no hace
+  nada: el 0 lo bindean el proximo puntero de RAM y el proximo draw con indices de RAM. `Mesh::RenderObject` ya no pone
+  los punteros de RAM que el camino del VBO pisaba (si al final no va por VBO, un esqueleto animando, los pone despues).
+  Una malla con VBO pasa de 21 llamadas (push, mult, 4 punteros de RAM, 4 binds+punteros, IBO, UV otra vez, draw, 2
+  binds en 0, pop) a 11 (4 binds+punteros, IBO, una carga de matriz, draw). `Invalidate` y `DeleteBuffer` olvidan lo
+  que corresponde; todo puntero y todo bind de buffer tiene que pasar por `gfx`.
+
+Medido en un nivel de 320x240 en modo juego: 469 -> 327 llamadas por cuadro, y 874 -> 529 en una escena con varios
+personajes skinneados; la misma imagen. Las dos opciones son para el A/B (harness `perezosas`, `punteroscache`,
+`menosllamadas`). Prueba: `tools/pruebas/prueba_menos_llamadas.w3s` (con las opciones prendidas y apagadas: la misma
+imagen, menos llamadas y `glaudit` sin desincronizaciones, que ademas compara la modelview, los binds y los punteros).

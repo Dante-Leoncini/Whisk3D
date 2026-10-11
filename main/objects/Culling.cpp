@@ -6,6 +6,9 @@
 #include "w3dGraphics.h"         // GetMatrix: P x MV vigentes (autocull de mallas por pase actual)
 #include "w3dFilesystem.h"       // metodo Riel: leer el .w3dvis de hijos por nodo
 #include "w3dlog.h"              // aviso si el dato no carga
+#include "Rutina.h"              // W3dMemoria: el PVS por hijo en una memoria (memoriaVisibles)
+#include "objects/Textures.h"    // TexturaTomar / TexturaSoltar: las texturas del mundo BSP
+#include <stdio.h>               // snprintf (el nombre de cada memoria de 256)
 #include <math.h>
 #include <algorithm> // std::sort (orden adelante -> atras)
 
@@ -109,6 +112,16 @@ bool W3dFrustumMedidaPlanos(float planos[24], float* posCamara) {
 bool W3dAabbEnPlanos(const float planos[24], const Vector3& mn, const Vector3& mx) {
     return AabbEnFrustum((const PlanoFrustum*)planos, mn, mx);
 }
+// la Rutina (paso "Test de visibilidad") los pide por hook: tambien la compila un juego 2D, que no trae este .cpp
+struct W3dInstalarPlanosRutina {
+    W3dInstalarPlanosRutina() {
+        extern bool (*g_rutinaPlanosHook)(float planos[24], float* posCamara);
+        extern bool (*g_rutinaAabbPlanosHook)(const float planos[24], const Vector3& mn, const Vector3& mx);
+        g_rutinaPlanosHook = W3dFrustumMedidaPlanos;
+        g_rutinaAabbPlanosHook = W3dAabbEnPlanos;
+    }
+};
+static W3dInstalarPlanosRutina gInstalarPlanosRutina;
 
 bool W3dAabbVisible(const Vector3& mn, const Vector3& mx) {
     CameraBase cam;
@@ -593,6 +606,21 @@ bool Culling::RielAplicarNodo(int nodo) {
     return true;
 }
 
+static bool PlanosLocales(Culling* cu, float planos[24]);
+// EL MUNDO del .w3dbsp v2: con el cluster y la fila vigentes (bspCluster / bspFila) y el frustum de la camara de
+// medida. Los ids GL de las texturas se refrescan por cuadro (se cargan despues de tomarlas)
+void Culling::MundoDibujar(int fase) {
+    if (!mundo.Valido()) return;
+    for (size_t i = 0; i < mundo.materiales.size() && i * 2 + 1 < mundoTex.size(); i++) {
+        mundo.materiales[i].idTex = mundoTex[i * 2]     ? (unsigned)mundoTex[i * 2]->iID     : 0u;
+        mundo.materiales[i].idLm  = mundoTex[i * 2 + 1] ? (unsigned)mundoTex[i * 2 + 1]->iID : 0u;
+    }
+    // apagado (checkbox Active): el mundo entero, sin PVS ni frustum (demo A/B, como con los hijos)
+    float pl[24];
+    const bool conFrustum = activo && PlanosLocales(this, pl);
+    mundo.Dibujar(bsp, activo ? bspCluster : -1, bspFila, conFrustum ? pl : NULL, fase);
+}
+
 // ---- metodo BSP: la camara baja por el arbol hasta su hoja -> cluster -> fila del PVS; cada hijo
 // pasa si alguno de sus clusters esta en la fila (AND de bitsets, cacheado mientras el cluster no
 // cambie); lo que pasa sigue por el frustum de siempre. Todo dato: cero geometria por frame.
@@ -616,17 +644,85 @@ bool Culling::BspCargar() {
             if (bytes.empty() || !bsp.Cargar(&bytes[0], bytes.size(), &err))
                 w3dLogfW("[Culling] '%s': no pude cargar el bsp %s (%s) -> frustum",
                          name.c_str(), bspArchivo.c_str(), err.c_str());
-            else
+            else {
                 w3dLogf("[Culling] '%s': bsp %s: %d nodos, %d hojas, %d clusters, %d hijos", name.c_str(),
                         bspArchivo.c_str(), (int)bsp.nodos.size(), (int)bsp.hojaCluster.size(), bsp.nClusters,
                         (int)bsp.hijos.size());
+                // version 2: EL MUNDO. Sus texturas se toman del cache por ruta (una vez; el destructor las suelta)
+                MundoSoltar();
+                if (bsp.geomOff) {
+                    if (!mundo.Cargar(&bytes[0], bytes.size(), bsp.geomOff, bsp, &err))
+                        w3dLogfW("[Culling] '%s': el mundo del bsp no carga (%s): solo PVS", name.c_str(), err.c_str());
+                    else {
+                        mundoTex.resize(mundo.materiales.size() * 2, (Texture*)NULL);
+                        for (size_t i = 0; i < mundo.materiales.size(); i++) {
+                            const MundoBsp::Material& m = mundo.materiales[i];
+                            if (!m.textura.empty())  mundoTex[i * 2]     = TexturaTomar(m.textura);
+                            if (!m.lightmap.empty()) mundoTex[i * 2 + 1] = TexturaTomar(m.lightmap);
+                        }
+                        w3dLogf("[Culling] '%s': mundo: %d materiales, %d grupos, %d caras, %d KB", name.c_str(),
+                                (int)mundo.materiales.size(), (int)mundo.grupos.size(), (int)mundo.caras.size(),
+                                (int)(mundo.Bytes() / 1024));
+                    }
+                }
+            }
         }
     }
     return bsp.Valido();
 }
 
+void Culling::MundoSoltar() {
+    for (size_t i = 0; i < mundoTex.size(); i++) if (mundoTex[i]) TexturaSoltar(mundoTex[i]);
+    mundoTex.clear();
+    mundo.Limpiar();
+}
+
+// los 6 planos del frustum de la camara de medida (como RenderFrustum/RenderGrid) en el espacio LOCAL de este objeto
+// (el mundo del bsp vive ahi). false = ortografica / sin vista: no se corta por frustum
+static bool PlanosLocales(Culling* cu, float planos[24]) {
+    CameraBase cam; float aspect; bool orto;
+    Camera* camMedida = W3dCamaraDeMedida(cu->soloCamaraActiva);
+    if (camMedida) {
+        cam.pos = camMedida->GetGlobalPosition(); cam.rot = camMedida->Rot();
+        cam.fov = camMedida->fov; cam.nearZ = camMedida->nearClip; cam.farZ = camMedida->farClip;
+        float adec = camMedida->AspectoDeclarado();
+        aspect = (adec > 0.01f) ? adec : ((g_renderAspect > 1e-4f) ? g_renderAspect : 1.0f);
+        orto = camMedida->orthographic;
+    } else {
+        cam.pos = g_renderCamPos; cam.rot = g_renderCamRot; cam.fov = g_renderCamFov;
+        cam.nearZ = g_renderCamNear; cam.farZ = g_renderCamFar;
+        aspect = (g_renderCamAspect > 1e-4f) ? g_renderCamAspect : 1.0f;
+        orto = g_renderCamOrto || !g_vistaBindeada;
+    }
+    if (orto) return false;
+    PlanoFrustum pl[6];
+    FrustumDeMatriz(cam.ProjectionMatrix(aspect) * cam.ViewMatrix(), pl);
+    // al espacio local: p' = p * W (un plano es un covector: p . (W x) = (p W) . x)
+    Matrix4 W; cu->GetWorldMatrix(W);
+    for (int i = 0; i < 6; i++) {
+        const float p[4] = { pl[i].a, pl[i].b, pl[i].c, pl[i].d };
+        for (int j = 0; j < 4; j++)
+            planos[i * 4 + j] = p[0] * W.m[j * 4] + p[1] * W.m[j * 4 + 1] + p[2] * W.m[j * 4 + 2] + p[3] * W.m[j * 4 + 3];
+    }
+    return true;
+}
+
+// el PVS por hijo a las memorias (memoriaVisibles): <nombre>0[0..255], <nombre>1[0..255]... en el orden de los hijos
+void Culling::BspEscribirMemoria() {
+    if (memoriaVisibles.empty()) return;
+    const size_t n = Childrens.size();
+    for (size_t i = 0; i < n; i += W3D_MEMORIA_TAM) {
+        char nom[96];
+        snprintf(nom, sizeof nom, "%s%d", memoriaVisibles.c_str(), (int)(i / W3D_MEMORIA_TAM));
+        float* m = W3dMemoria(nom);
+        for (size_t k = 0; k < (size_t)W3D_MEMORIA_TAM && i + k < n; k++)
+            m[k] = (bspCluster >= 0 && i + k < bspVisible.size()) ? (bspVisible[i + k] ? 1.0f : 0.0f) : 1.0f;
+    }
+}
+
 void Culling::RenderBsp() {
-    if (!activo || !BspCargar()) { bspCluster = -1; RenderFrustum(); return; }
+    if (!activo) { BspCargar(); bspCluster = -1; BspEscribirMemoria(); MundoDibujar(1); RenderFrustum(); MundoDibujar(2); return; }
+    if (!BspCargar()) { bspCluster = -1; BspEscribirMemoria(); RenderFrustum(); return; }
     // el ojo: la misma camara con la que mide el frustum (juego jugando / vista que dibuja)
     Vector3 ojo;
     Camera* camMedida = W3dCamaraDeMedida(soloCamaraActiva);
@@ -636,7 +732,7 @@ void Culling::RenderBsp() {
     // al espacio LOCAL del Culling (el dato esta en las coordenadas de sus hijos)
     { Matrix4 W, Wi; GetWorldMatrix(W); if (Matrix4::InvertirAfin(W, Wi)) ojo = Wi * ojo; }
     const int cl = bsp.ClusterEn(ojo.x, ojo.y, ojo.z);
-    if (cl < 0) { bspCluster = -1; RenderFrustum(); return; }   // en solido / fuera del arbol: se ve todo
+    if (cl < 0) { bspCluster = -1; BspEscribirMemoria(); MundoDibujar(1); RenderFrustum(); MundoDibujar(2); return; }   // en solido / fuera del arbol: se ve todo
     if (bspHijosSello != Childrens.size()) {   // los hijos cambiaron (editor): re-emparejar por nombre
         bspHijoIdx.resize(Childrens.size());
         for (size_t c = 0; c < Childrens.size(); c++) bspHijoIdx[c] = bsp.IndiceHijo(Childrens[c]->name);
@@ -644,7 +740,7 @@ void Culling::RenderBsp() {
         bspCluster = -1;
     }
     if (cl != bspCluster) {
-        if (!bsp.Fila(cl, bspFila)) { bspCluster = -1; RenderFrustum(); return; }
+        if (!bsp.Fila(cl, bspFila)) { bspCluster = -1; MundoDibujar(1); RenderFrustum(); MundoDibujar(2); return; }
         bspCluster = cl;
         bspVisible.assign(Childrens.size(), 0);
         for (size_t c = 0; c < Childrens.size(); c++) {
@@ -652,7 +748,26 @@ void Culling::RenderBsp() {
             bspVisible[c] = (k < 0) ? 1 : (VisBsp::Interseca(bspFila, bsp.hijos[(size_t)k].bits) ? 1 : 0);
         }
     }
-    RenderFrustum(&bspVisible);
+    // los hijos DINAMICOS (Object::estatico == false) que no estan en el dato: sus clusters por su caja, por cuadro
+    // (un NPC que camina: se ve si alguna hoja que toca esta en el PVS). Los estaticos sin dato se dibujan siempre
+    for (size_t c = 0; c < Childrens.size(); c++) {
+        Object* h = Childrens[c];
+        if (bspHijoIdx[c] >= 0 || h->estatico || !h->visible) continue;
+        Vector3 mn, mx;
+        if (!W3dBoundsSubarbol(h, mn, mx)) { mn = mx = h->GetGlobalPosition(); }
+        { Matrix4 W, Wi; GetWorldMatrix(W);
+          if (Matrix4::InvertirAfin(W, Wi)) {
+              Vector3 e[2] = { Wi * mn, Wi * mx };
+              mn = Vector3(e[0].x < e[1].x ? e[0].x : e[1].x, e[0].y < e[1].y ? e[0].y : e[1].y, e[0].z < e[1].z ? e[0].z : e[1].z);
+              mx = Vector3(e[0].x > e[1].x ? e[0].x : e[1].x, e[0].y > e[1].y ? e[0].y : e[1].y, e[0].z > e[1].z ? e[0].z : e[1].z);
+          } }
+        const float a[3] = { mn.x, mn.y, mn.z }, b[3] = { mx.x, mx.y, mx.z };
+        bspVisible[c] = (bsp.ClustersDeCaja(a, b, bspBitsTmp) && !VisBsp::Interseca(bspFila, bspBitsTmp)) ? 0 : 1;
+    }
+    BspEscribirMemoria();   // (cada cuadro: barato, y asi una memoria recien nombrada se llena sin esperar un cambio)
+    MundoDibujar(1);            // el mundo opaco
+    RenderFrustum(&bspVisible); // los hijos (entidades, lo que mueve el script)
+    MundoDibujar(2);            // lo mezclado del mundo (vidrios, haces aditivos): sobre los hijos, como una luz diferida
 }
 
 // ---- DISPATCHER: elige el path segun el metodo elegido en el panel.

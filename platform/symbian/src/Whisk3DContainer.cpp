@@ -400,6 +400,7 @@ static const char* W3dJuegoNombreTecla(TInt sc){
 		case EStdKeyDevice3:    // centro del D-pad (select)
 		case EStdKeyEnter:      return "enter";
 		case 164:               return "softizq"; // softkey IZQUIERDO: reservado para juegos (solo dentro de un viewport de juego)
+		case 165:               return "softder"; // softkey DERECHO: idem (en pausa sigue alternando el cursor virtual)
 		case '1':               return "1";       // digitos del keypad: van al juego durante el play (tecla("1").."tecla("6"))
 		case '2':               return "2";
 		case '3':               return "3";

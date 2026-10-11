@@ -139,6 +139,8 @@ class Properties : public ViewportBase, public WithBorder, public Scrollable {
         PropBool*  propMatLineas;      // LINEAS: dibujar las aristas de la malla con el material
         PropFloat* propMatGrosorLinea; // grosor de esas lineas en px (glLineWidth); visible con Lines ON
         PropFloat* propMatAlfa;        // ALPHA TEST: Material::alphaTest 0..1 (0 = apagado; clave "alfaCorte" del .w3d)
+        PropButton* propBtnTexB;       // MEZCLA DE TEXTURAS: la textura B (Material::texturaB, desplegable como el normal map)
+        PropFloat*  propMatMezclaB;    // ... y cuanto de B (Material::mezclaB 0..1; clave "mezclaB" del .w3d)
         GroupPropertie* propLight;
         PropBool* propLightIgnOrden;   // "Ignorar orden del arbol" (pre-pase) vs solo lo que sigue en el arbol   // pestania de luz: TODAS las propiedades editables de la luz GL
         // tarjeta del elemento TEXTO 2D (se edita en el Editor 2D)

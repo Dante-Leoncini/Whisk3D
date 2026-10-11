@@ -152,7 +152,7 @@ std::string* TexturaPendienteRefDe(const Material* mat) {
 }
 
 void TexturasDormir(const TexDormida& d) {
-    if (!d.mat || (d.base.empty() && d.normal.empty() && d.capas.empty())) return;
+    if (!d.mat || (d.base.empty() && d.normal.empty() && d.texB.empty() && d.capas.empty())) return;
     TexDormida* ya = TexturasDormidasDe(d.mat);
     if (ya) *ya = d; else g_texDormidas.push_back(d);
 }
@@ -177,6 +177,10 @@ static void DespertarUna(const TexDormida& d) {
     if (!d.normal.empty() && !m->normalTexture) {
         m->normalTexture = TexturaTomar(d.normal);
         if (!m->normalTexture) w3dLogfW("[W3D] no pude cargar la textura '%s'", d.normal.c_str());
+    }
+    if (!d.texB.empty() && !m->texturaB) {   // la textura B (mezcla de texturas): como el normal map
+        m->texturaB = TexturaTomar(d.texB);
+        if (!m->texturaB) w3dLogfW("[W3D] no pude cargar la textura '%s'", d.texB.c_str());
     }
     std::vector<TexLayer> capas;
     for (size_t c = 0; c < d.capas.size(); c++) {
@@ -220,6 +224,7 @@ bool TexturasAdormecer(Material* m) {
             g_texPendientes[i].mat = NULL;
         }
     if (m->normalTexture) d.normal = m->normalTexture->path;
+    if (m->texturaB) d.texB = m->texturaB->path;
     // las capas duermen TODAS o ninguna (despiertan adelante de las que tenga: el orden se conserva)
     bool capasTodas = !m->capas.empty();
     for (size_t c = 0; c < m->capas.size(); c++) if (!m->capas[c].tex) capasTodas = false;
@@ -233,11 +238,13 @@ bool TexturasAdormecer(Material* m) {
         }
         m->capas.clear();
     }
-    if (d.base.empty() && d.normal.empty() && d.capas.empty()) return false;
+    if (d.base.empty() && d.normal.empty() && d.texB.empty() && d.capas.empty()) return false;
     sueltas.push_back(m->texture);
     sueltas.push_back(m->normalTexture);
+    sueltas.push_back(m->texturaB);
     m->texture = NULL;
     m->normalTexture = NULL;
+    m->texturaB = NULL;
     TexturasDormir(d);
     // las ranuras sueltan su referencia (la textura que ningun otro material retiene se libera YA)
     for (size_t i = 0; i < sueltas.size(); i++) TexturaSoltar(sueltas[i]);

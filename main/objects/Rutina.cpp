@@ -3,7 +3,6 @@
 #include "objects/Textures.h"
 #include "objects/MallaRecurso.h"
 #include "objects/MallaFlujos.h"
-#include "objects/Culling.h"       // los planos de la camara (paso "Test de visibilidad")
 #include "script/W3dScript.h"      // W3dScriptEvento (paso "Llamar Lua")
 #include "w3dGraphics.h"
 #include "io/JsonW3d.h"            // JVal / JsonNumTexto: los campos del .w3d
@@ -12,6 +11,7 @@
 #include <math.h>                  // cosf / sinf (el giro de "Matriz del objeto")
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>                  // el reloj del perfil sin el perfilador: clock()
 
 namespace gfx = w3dEngine;
 
@@ -44,7 +44,7 @@ static const PasoInfo kPasos[PasoN] = {
     { "array",           "Array on/off",      GrupoDibujar,     0, RefNada,    EnteroNada,   OpcArray,         true,  "On", { 0 } },
     { "punteroVertices", "Vertex pointer",    GrupoDibujar,     0, RefMalla,   EnteroNada,   OpcNada,          false, 0, { 0 } },
     { "punteroNormales", "Normal pointer",    GrupoDibujar,     0, RefMalla,   EnteroNada,   OpcNada,          false, 0, { 0 } },
-    { "punteroUV",       "UV pointer",        GrupoDibujar,     0, RefMalla,   EnteroNada,   OpcNada,          false, 0, { 0 } },
+    { "punteroUV",       "UV pointer",        GrupoDibujar,     0, RefMalla,   EnteroCapaUV, OpcNada,          false, 0, { 0 } },
     { "punteroColores",  "Color pointer",     GrupoDibujar,     0, RefMalla,   EnteroNada,   OpcNada,          false, 0, { 0 } },
     { "dibujar",         "Draw elements",     GrupoDibujar,     0, RefMalla,   EnteroParte,  OpcPrimitiva,     false, 0, { 0 } },
     { "tamPunto",        "Point size",        GrupoDibujar,     1, RefNada,    EnteroNada,   OpcNada,          false, 0, { "Pixels" } },
@@ -91,6 +91,8 @@ static const PasoInfo kPasos[PasoN] = {
     { "saltarOculto",    "Skip if hidden",    GrupoControl,     0, RefObjeto,  EnteroCuenta, OpcNada,          false, 0, { 0 } },
     { "visible",         "Visibility test",   GrupoControl,     3, RefMalla,   EnteroParte,  OpcNada,          false, 0, { "Write to", "Box (memory)", "Max distance" } },
     { "lua",             "Call Lua",          GrupoControl,     0, RefFuncion, EnteroNada,   OpcNada,          false, 0, { 0 } },
+    { "mezclaTexturas",  "Texture mix",       GrupoTextura,     1, RefTextura, EnteroCapaUV, OpcMezclaTex,     true,  "On", { "Mix" } },
+    { "saltarSiNinguna", "Skip if no flag",   GrupoControl,     2, RefNada,    EnteroCuenta, OpcNada,          false, 0, { "Ranges (memory)", "Flags (memory)" } },
 };
 static const char* const kGrupos[GrupoN] = { "Transform", "Draw", "Texture", "Fog", "Lights", "Alpha test", "Color",
                                              "Depth & clear", "Blending", "Face culling", "Control" };
@@ -111,6 +113,7 @@ static const char* const kOpcRepetir[] = { "Repeat", "Clamp" };
 static const char* const kOpcMatComp[] = { "Ambient", "Diffuse", "Specular", "Emission" };          // gfx::MatParam
 static const char* const kOpcArray[]   = { "Vertices", "Normals", "UV", "Colors" };                 // W3dArrayRutina
 static const char* const kOpcMatriz[]  = { "Multiply", "Load (camera x object)" };
+static const char* const kOpcMezclaTex[] = { "Interpolate (mix)", "Multiply (lightmap)", "Multiply 2x" };   // gfx::MezclaTexturas modo
 struct OpcInfo { const char* titulo; const char* const* opciones; int n; };
 static const OpcInfo kOpc[OpcN] = {
     { "", NULL, 0 },
@@ -126,6 +129,7 @@ static const OpcInfo kOpc[OpcN] = {
     { "Component", kOpcMatComp, 4 },
     { "Array",     kOpcArray,   (int)ArrayN },
     { "Mode",      kOpcMatriz,  2 },
+    { "Mode",      kOpcMezclaTex, 3 },
 };
 // la primitiva en el .w3d (por nombre: un numero no dice nada al leer el archivo)
 static const char* const kPrimNombre[RPrimN] = { "puntos", "lineas", "tiraLineas", "lazoLineas", "triangulos", "tira",
@@ -188,6 +192,7 @@ W3dPaso W3dPasoNuevo(int tipo) {
     case PasoAlfaRef:        p.n[0].v = 0.5f; break;
     case PasoMezclaModo:     p.modo = gfx::MezclaAlpha; break;
     case PasoTexturaFiltro:  p.modo = 1; break;                                       // lineal
+    case PasoMezclaTexturas: p.n[0].v = 0.5f; break;                                  // mitad y mitad
     case PasoMaterialColor:  p.modo = 1; p.n[0].v = p.n[1].v = p.n[2].v = p.n[3].v = 1.0f; break;   // difuso blanco
     case PasoBrillo:         p.n[0].v = 12.0f; break;
     case PasoMatrizUV:       p.n[2].v = p.n[3].v = 1.0f; break;                      // identidad
@@ -195,7 +200,7 @@ W3dPaso W3dPasoNuevo(int tipo) {
     case PasoTamPunto:       p.n[0].v = 4.0f; break;
     case PasoAnchoLinea:     p.n[0].v = 1.0f; break;
     case PasoSesgoZ:         p.n[0].v = -1.0f; p.n[1].v = -4.0f; break;              // acerca (calcomanias)
-    case PasoSaltarSi: case PasoSaltarOculto: p.entero = 1; break;
+    case PasoSaltarSi: case PasoSaltarOculto: case PasoSaltarSiNinguna: p.entero = 1; break;
     case PasoVisible:        p.entero = -1; break;                                    // la malla entera
     case PasoArray:          p.modo = ArrayNormales; break;
     default: break;
@@ -318,9 +323,16 @@ static void ResolverPaso(W3dPaso& p, Object* desde, Object* noSoy, std::vector<M
     else                 p.ptr = o;
 }
 
+// (en RAM o, si la malla solto su RAM, en su VBO: MallaRecurso.h, soloGPU)
+static const unsigned kArrayMascara[ArrayN] = { W3DMD_POS, W3DMD_NOR, W3DMD_UV, W3DMD_COL };
 static bool MallaTieneArray(const MallaRecurso* r, int k) {
-    return k == ArrayVertices ? r->vertex != 0 : k == ArrayNormales ? r->normals != 0 :
-           k == ArrayUV ? r->uv != 0 : r->vertexColor != 0;
+    return W3dMallaRecursoTieneArray(r, kArrayMascara[k]);
+}
+// la capa UV k (> 0) a la que puede apuntar el puntero de UV: no vacia en RAM o, soloGPU, la que subio a su VBO
+static bool HayCapaUV(const MallaRecurso* r, int k) {
+    if (!r || k <= 0) return false;
+    if (r->soloGPU) return W3dMallaRecursoTieneCapaUV(r, k);
+    return k < (int)r->uvExtra.size() && !r->uvExtra[(size_t)k].empty();
 }
 W3dPaso* Rutina::PasoPorId(unsigned id) {
     if (!id) return NULL;
@@ -384,6 +396,7 @@ static void ReponerMV() { if (gMVCargada) { gfx::LoadMatrix(gBaseMV.m); gMVCarga
 // cada corrida y despues de lo que puede poner otros punteros (los hijos, lua). Prender o apagar un array NO es
 // cosa del puntero: es el paso "Array on/off" (se prende UNA vez y queda; el cache de gfx no repite)
 static const MallaRecurso* gPtrMalla[4] = { 0, 0, 0, 0 };
+static int gPtrCapaUV = 0;   // (la capa de UV a la que apunta el de UV: 0 = la de render)
 static void OlvidarPunteros() { for (int k = 0; k < 4; k++) gPtrMalla[k] = 0; }
 
 static void AbrirCorrida() {
@@ -398,24 +411,37 @@ static void CerrarCorrida() {
     gVboEnUso = false; gIboActual = 0xFFFFFFFFu;
     OlvidarPunteros();
     ReponerMV();
+    // (opcion de proyecto "mallasSoloGPU") las mallas que esta corrida subio y solo dibujan rutinas sueltan su RAM:
+    // recien aca, cuando la corrida ya armo sus flujos y sus cajas. Sin anotadas no cuesta nada
+    W3dMallasSoloGPUSoltarPendientes();
 }
 
 // un PUNTERO: el array de esa malla (VBO si lo tiene, si no RAM). Solo apunta (glXxxPointer): el array lo prende o lo
 // apaga el paso "Array on/off". Una malla sin ese array no cambia nada (el editor no deja dibujar con ese array
-// prendido apuntando ahi)
+// prendido apuntando ahi). El de UV puede apuntar a una CAPA de la malla (entero k > 0: uvExtra[k]): la misma malla
+// dibujada con otras UV sin otra copia de posiciones (los 39 rivales: una carroceria, una capa por auto)
 static void Puntero(int tipo, const W3dPaso& p) {
     MallaRecurso* r = (MallaRecurso*)p.ptr;
     const int k = tipo - PasoPunteroVertices;
-    const void* datos = !r ? NULL : tipo == PasoPunteroVertices ? (const void*)r->vertex :
-                        tipo == PasoPunteroNormales ? (const void*)r->normals :
-                        tipo == PasoPunteroUV ? (const void*)r->uv : (const void*)r->vertexColor;
-    if (!datos) return;
-    if (gPtrMalla[k] == r) return;   // (ya apunta ahi: ni bind ni puntero)
+    const int capa = (tipo == PasoPunteroUV && p.entero > 0 && HayCapaUV(r, p.entero)) ? p.entero : 0;
+    if (tipo == PasoPunteroUV && p.entero > 0 && !capa) return;   // (una capa que la malla no tiene)
+    // (la malla tiene el array en RAM o, si solto su RAM -soloGPU-, en su VBO)
+    if (!r || !(capa || MallaTieneArray(r, k))) return;
+    if (gPtrMalla[k] == r && (tipo != PasoPunteroUV || gPtrCapaUV == capa)) return;   // (ya apunta ahi: ni bind ni puntero)
     gPtrMalla[k] = r;
+    if (tipo == PasoPunteroUV) gPtrCapaUV = capa;
     unsigned h = 0;
     if (W3dMallaRecursoAsegurarVBO(r))
         h = tipo == PasoPunteroVertices ? r->vboPos : tipo == PasoPunteroNormales ? r->vboNor :
-            tipo == PasoPunteroUV ? r->vboUV : r->vboCol;
+            tipo == PasoPunteroUV ? (capa ? (capa < (int)r->vboUVx.size() ? r->vboUVx[(size_t)capa] : 0u) : r->vboUV) : r->vboCol;
+    // sin VBO para ese array (no deberia pasar con una malla soloGPU): de RAM, que se recupera y ya no se suelta
+    if (!h && r->soloGPU) { r->ramFija = true; W3dMallaRecursoAsegurarRAM(r); }
+    const void* datos = tipo == PasoPunteroVertices ? (const void*)r->vertex :
+                        tipo == PasoPunteroNormales ? (const void*)r->normals :
+                        tipo == PasoPunteroUV ? (capa ? (capa < (int)r->uvExtra.size() && !r->uvExtra[(size_t)capa].empty() ?
+                                                         (const void*)&r->uvExtra[(size_t)capa][0] : NULL) : (const void*)r->uv) :
+                        (const void*)r->vertexColor;
+    if (!h && !datos) return;
     if (h) {
         switch (tipo) {
         case PasoPunteroVertices: gfx::VertexVBO(h); break;
@@ -429,7 +455,7 @@ static void Puntero(int tipo, const W3dPaso& p) {
         switch (tipo) {
         case PasoPunteroVertices: gfx::VertexPointer3f(0, r->vertex); break;
         case PasoPunteroNormales: gfx::NormalPointer3b(r->normals); break;
-        case PasoPunteroUV:       gfx::TexCoordPointer2f(0, r->uv); break;
+        case PasoPunteroUV:       gfx::TexCoordPointer2f(0, (const GLfloat*)datos); break;
         default:                  gfx::ColorPointer4ub(r->vertexColor); break;
         }
     }
@@ -440,6 +466,7 @@ static const gfx::VArray kArrayGfx[ArrayN] = { gfx::VertexArray, gfx::NormalArra
 static void Mandar(const W3dFlujo& f, int desde, int cuantos) {
     int n = f.cantidad, primero = f.primero;
     const MeshIndex* idx = f.idx;
+    if (!f.ibo && !idx) return;   // (ni IBO ni indices en RAM: una malla soloGPU que no pudo volver a subir su IBO)
     if (cuantos >= 0) { n = cuantos; primero += desde; idx += desde; }
     if (n <= 0) return;
     if (f.ibo) {
@@ -483,9 +510,14 @@ static void Dibujar(const W3dPaso& p) {
     }
 }
 
+// los planos de la camara los da Culling.cpp por hook (lo instala su constructor estatico): un juego 2D compila la
+// Rutina sin el pase 3D (BindsJuego usa sus memorias) y sin hook "Test de visibilidad" no corta nada
+bool (*g_rutinaPlanosHook)(float planos[24], float* posCamara) = 0;
+bool (*g_rutinaAabbPlanosHook)(const float planos[24], const Vector3& mn, const Vector3& mx) = 0;
+
 // la caja de la parte (movida por la matriz de un objeto, si hay) contra los planos de la camara
 static bool Visible(const W3dPaso& p) {
-    if (gPlanosEstado == 0) gPlanosEstado = W3dFrustumMedidaPlanos(gPlanos, gCamPos) ? 1 : -1;
+    if (gPlanosEstado == 0) gPlanosEstado = (g_rutinaPlanosHook && g_rutinaPlanosHook(gPlanos, gCamPos)) ? 1 : -1;
     if (gPlanosEstado < 0) return true;
     // la caja: la de la parte de la malla o, sin malla, 6 numeros de una memoria (minimo y maximo: las celdas de un mundo
     // unido, que no son partes)
@@ -520,11 +552,21 @@ static bool Visible(const W3dPaso& p) {
         }
         if (d2 > lim * lim) return false;
     }
-    return W3dAabbEnPlanos(gPlanos, a, b);
+    return g_rutinaAabbPlanosHook(gPlanos, a, b);
 }
 
 bool g_rutinaPerfil = false;
 long g_rutinaPerfilVeces[PasoN], g_rutinaPerfilGL[PasoN];
+// el TIEMPO (ms acumulados) de los pasos Dibujar y por rutina (inclusivo: una rutina adentro de otra suma en las dos), con el
+// reloj de relojMs (script/BindsJuego.cpp: el del perfilador o clock()). En el N95 el reloj es de 1 ms: un paso suelto
+// marca 0 o 1, pero la suma de muchos cuadros da el promedio
+double g_rutinaPerfilMs[PasoN];
+std::map<std::string, double> g_rutinaPerfilMsDe;
+std::map<std::string, long> g_rutinaPerfilTrisDe;   // los triangulos que mando cada rutina (inclusivo)
+extern double (*g_w3dRelojMsHook)();
+static double RelojPerfil() {
+    return g_w3dRelojMsHook ? g_w3dRelojMsHook() : (double)clock() * 1000.0 / (double)CLOCKS_PER_SEC;
+}
 static int LlamadasGL() {
     return gfx::g_statDrawTris + gfx::g_statTexBinds + gfx::g_statStateChanges + gfx::g_statOtras;
 }
@@ -535,9 +577,14 @@ static void EjecutarPaso(W3dPaso& p, size_t& i, Rutina* yo) {
     if (!g_rutinaPerfil) { EjecutarPasoCrudo(p, i, yo); return; }
     const int antes = LlamadasGL();
     const bool anida = (p.tipo == PasoRutina || p.tipo == PasoHijos || p.tipo == PasoLua);
+    // el tiempo, solo de los DIBUJAR (ahi trabaja el driver): leer el reloj en los ~2000 pasos chicos de un cuadro costaba
+    // mas que ellos (en el N95 cada lectura es una llamada al kernel). Lo que no es dibujar sale de la rutina entera
+    const bool medir = (p.tipo == PasoDibujar);
+    const double t0 = medir ? RelojPerfil() : 0.0;
     EjecutarPasoCrudo(p, i, yo);
     g_rutinaPerfilVeces[p.tipo]++;
     if (!anida) g_rutinaPerfilGL[p.tipo] += LlamadasGL() - antes;   // (lo de adentro lo cuentan sus propios pasos)
+    if (medir) g_rutinaPerfilMs[p.tipo] += RelojPerfil() - t0;
 }
 static void EjecutarPasoCrudo(W3dPaso& p, size_t& i, Rutina* yo) {
     switch (p.tipo) {
@@ -599,11 +646,31 @@ static void EjecutarPasoCrudo(W3dPaso& p, size_t& i, Rutina* yo) {
         break;
     case PasoTexturaFiltro:  gfx::TexFilter(p.modo == 1); break;
     case PasoTexturaRepetir: gfx::TexWrap(p.modo == 0); break;
+    case PasoMezclaTexturas: {   // la unidad 1 con la textura B (ref): Interpolate (B * mix + unidad0 * (1 - mix)), Multiply o
+        // Multiply 2x (un lightmap en la misma pasada). 'entero' = la capa UV de la malla del ultimo puntero de UV con la
+        // que se muestrea B (0 = las mismas UV que la unidad 0)
+        Texture* tx = (Texture*)p.ptr;
+        if (!p.on || !tx || !tx->iID) { gfx::MezclaTexturasOff(); break; }
+        gfx::MezclaTexturas(tx->iID, p.n[0].Valor(), true, true, p.modo);
+        MallaRecurso* r = (MallaRecurso*)gPtrMalla[ArrayUV];
+        if (p.entero > 0 && HayCapaUV(r, p.entero)) {
+            const unsigned h = (gVboEnUso && p.entero < (int)r->vboUVx.size()) ? r->vboUVx[(size_t)p.entero] : 0u;
+            // (de RAM sin el VBO: una malla soloGPU la recupera y ya no la suelta)
+            if (!h && r->soloGPU) { r->ramFija = true; W3dMallaRecursoAsegurarRAM(r); }
+            if (h) gfx::MezclaTexturasUVVBO(h);
+            else if (p.entero < (int)r->uvExtra.size() && !r->uvExtra[(size_t)p.entero].empty())
+                gfx::MezclaTexturasUV(&r->uvExtra[(size_t)p.entero][0]);
+            else gfx::MezclaTexturasUV(NULL);
+        } else gfx::MezclaTexturasUV(NULL);
+        break;
+    }
     case PasoMatrizUV: gfx::TexMatrixUV(p.n[0].Valor(), p.n[1].Valor(), p.n[2].Valor(), p.n[3].Valor()); break;
     case PasoMatcap: {
         // las NORMALES de la malla como UV (de RAM: el GL de PC no acepta bytes en un VBO de UV) y la matriz que las
         // lleva al matcap con la modelview de AHORA: va despues de la matriz del objeto, antes de dibujar
         MallaRecurso* r = (MallaRecurso*)p.ptr;
+        // (las normales se leen de RAM en cada cuadro: una malla soloGPU las recupera y ya no las suelta)
+        if (p.on && r && r->soloGPU && W3dMallaRecursoTieneArray(r, W3DMD_NOR)) { r->ramFija = true; W3dMallaRecursoAsegurarRAM(r); }
         if (!p.on || !r || !r->normals) { gfx::TexMatrixMatcap(false); break; }
         if (gVboEnUso) { gfx::UnbindVBOs(); gVboEnUso = false; gIboActual = 0; OlvidarPunteros(); }
         gfx::TexCoordPointer3b(r->normals, r->vertexSize);
@@ -681,6 +748,16 @@ static void EjecutarPasoCrudo(W3dPaso& p, size_t& i, Rutina* yo) {
     // ---- sueltos y control ----
     case PasoCaras: if (p.on) gfx::Enable(gfx::CullFace); else gfx::Disable(gfx::CullFace); break;
     case PasoSaltarSi: if (p.n[0].Valor() == 0.0f) i += (size_t)(p.entero > 0 ? p.entero : 0); break;
+    case PasoSaltarSiNinguna: {   // [cantidad, (primero, ultimo, bandera) x k] + las banderas: ninguna prendida -> saltear
+        const float* a = p.n[0].p;
+        const float* on = p.n[1].p;
+        if (!a || !on) break;
+        const int k = (int)a[0];
+        bool alguna = false;
+        for (int j = 0; j < k && !alguna; j++) if (on[(int)a[1 + 3 * j + 2]] != 0.0f) alguna = true;
+        if (!alguna) i += (size_t)(p.entero > 0 ? p.entero : 0);
+        break;
+    }
     case PasoSaltarOculto: {
         const Object* o = (const Object*)p.ptr;
         while (o && o->visible) o = o->Parent;
@@ -694,6 +771,31 @@ static void EjecutarPasoCrudo(W3dPaso& p, size_t& i, Rutina* yo) {
         OlvidarPunteros();   // (paso() puede haber apuntado a otras mallas: igual pasa por este mismo cache)
         break;
     default: break;
+    }
+}
+
+// la precarga de las mallas de una lista (ver RenderObject)
+static void PrecargarMallas(std::vector<W3dPaso>& L, int prof) {
+    for (size_t i = 0; i < L.size(); i++) {
+        // (opcion "mallasSoloGPU") tambien las de sus SUBRUTINAS: una malla que suelta su RAM al cerrar esta corrida
+        // ya no puede armar el flujo derivado (una tira) que una subrutina dibuja recien mas adelante
+        if (L[i].tipo == PasoRutina && L[i].ptr && prof < 8 && W3dMallasSoloGPUActiva()) {
+            Rutina* sub = (Rutina*)L[i].ptr;
+            if (sub->sucia) sub->Resolver();
+            PrecargarMallas(sub->ListaActual(), prof + 1);
+            continue;
+        }
+        if (W3dPasoRef(L[i].tipo) != RefMalla || !L[i].ptr) continue;
+        MallaRecurso* m = (MallaRecurso*)L[i].ptr;
+        // (opcion "mallasSoloGPU") el matcap lee las normales de RAM en cada cuadro: esa malla no la suelta (y si ya la
+        // habia soltado, la recupera). Un flujo derivado (tira, aristas...) nuevo se arma de los indices: se relee y
+        // se vuelve a soltar al cerrar la corrida. (ramFija no cambia nada con la opcion apagada)
+        if (L[i].tipo == PasoMatcap) { m->ramFija = true; if (m->soloGPU) W3dMallaRecursoAsegurarRAM(m); }
+        if (m->soloGPU && L[i].tipo == PasoDibujar && !W3dMallaFlujoListo(m, L[i].entero, L[i].modo))
+            W3dMallaRecursoAsegurarRAM(m);
+        W3dMallaRecursoAsegurarVBO(m);
+        W3dFlujo f;
+        if (L[i].tipo == PasoDibujar) W3dMallaFlujo(m, L[i].entero, L[i].modo, f);
     }
 }
 
@@ -712,20 +814,19 @@ void Rutina::RenderObject() {
         // los VBO y los indices de TODAS sus mallas (tambien las de los bloques que hoy se saltean: el humo, los rivales
         // cercanos): subirlos cuando aparecen era un tiron a mitad de la carrera
         precargada = true;
-        std::vector<W3dPaso>& L = ListaActual();
-        for (size_t i = 0; i < L.size(); i++) {
-            if (W3dPasoRef(L[i].tipo) != RefMalla || !L[i].ptr) continue;
-            MallaRecurso* m = (MallaRecurso*)L[i].ptr;
-            W3dMallaRecursoAsegurarVBO(m);
-            W3dFlujo f;
-            if (L[i].tipo == PasoDibujar) W3dMallaFlujo(m, L[i].entero, L[i].modo, f);
-        }
+        PrecargarMallas(ListaActual(), 0);
     }
+    const double t0 = g_rutinaPerfil ? RelojPerfil() : 0.0;
+    const long tris0 = (long)gfx::g_statTrisOpacos + gfx::g_statTrisBlend;
     AbrirCorrida();
     Rutina* antes = gEnCurso; gEnCurso = this;
     Ejecutar(ListaActual());
     gEnCurso = antes;
     CerrarCorrida();
+    if (g_rutinaPerfil) {
+        g_rutinaPerfilMsDe[name] += RelojPerfil() - t0;
+        g_rutinaPerfilTrisDe[name] += (long)gfx::g_statTrisOpacos + gfx::g_statTrisBlend - tris0;
+    }
 }
 
 // con "Dibujar hijos" en la lista, los hijos los dibuja ella (ahi); si no corrio (invalida), el recorrido de siempre
@@ -1047,7 +1148,7 @@ static void LeerLista(JVal* l, std::vector<W3dPaso>& L, std::string (*refTextura
     for (size_t i = 0; i < items.size(); i++)
         for (size_t k = 0; k < items[i].size(); k++) {
             W3dPaso q = items[i][k];
-            if ((q.tipo == PasoSaltarSi || q.tipo == PasoSaltarOculto) && q.entero > 0) {
+            if ((q.tipo == PasoSaltarSi || q.tipo == PasoSaltarOculto || q.tipo == PasoSaltarSiNinguna) && q.entero > 0) {
                 size_t fin = i + (size_t)q.entero;
                 if (fin >= items.size()) fin = items.size() - 1;
                 q.entero = (int)(inicio[fin + 1] - inicio[i + 1]);

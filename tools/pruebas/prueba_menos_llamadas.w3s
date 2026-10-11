@@ -1,0 +1,110 @@
+# ==========================================================================
+#  MENOS LLAMADAS GL POR CUADRO, LA MISMA IMAGEN
+#  Correr DESDE ESTA CARPETA:
+#    ../../platform/linux/build/whisk3d --script prueba_menos_llamadas.w3s
+#
+#  Dos caches de gfx (libs/Whisk3DCore/gfx/w3dGraphics.h), cada uno con su opcion para el A/B:
+#   - la PILA PEREZOSA de la modelview (perezosas): Push/Pop/Mult/Load solo cambian la sombra en la CPU y la
+#     matriz va a GL (un glLoadMatrixf) recien antes de lo que la usa: los draws, las luces, los planos de recorte.
+#     Un objeto que el autocull descarta no cuesta nada; uno que dibuja, 1 llamada en vez de 3
+#   - el CACHE DE PUNTEROS y de binds (punteroscache): un puntero igual al puesto no se repite (ni su bind), el
+#     IBO tampoco, UnbindVBOs es perezoso, y la malla que dibuja por VBO no pone antes los punteros de RAM
+#
+#  La escena (llamadasarmar) junta lo que puede romperse: jerarquias con transform, mallas por VBO y de RAM
+#  (reflejo matcap y equirect, normal map, capa, malla generada), mezcla de texturas, lineas del material, una
+#  calcomania, mallas afuera de la camara, dos esqueletos (uno quieto, uno que se posa entre cuadros), una luz
+#  puntual y una spot con padres rotados, un espejo con recorte, un Recorte con su camara, un Culling,
+#  particulas, una UI 2D con un rectangulo rotado y una rutina con "Matriz del objeto" (multiplicar y cargar,
+#  y rotaciones). Con las opciones prendidas y apagadas: la MISMA imagen (hash de los pixeles de toda la
+#  ventana), MENOS llamadas (con los mismos draws) y el cache coherente con GL ('glaudit' compara tambien la
+#  modelview, los binds de buffers y los punteros; 'matrizaudit' cada lectura de la matriz).
+# ==========================================================================
+escenadefecto
+llamadasarmar
+selobj LlamGenerada
+modadd array
+deselectall
+# la rutina: dibuja el cubo del proyecto con la matriz de un vacio (multiplicada, y cargada con giro) y rotaciones
+rutina LlamRut
+rutinapaso LlamRut array modo=0 on=1
+rutinapaso LlamRut array modo=1 on=0
+rutinapaso LlamRut array modo=2 on=0
+rutinapaso LlamRut array modo=3 on=0
+rutinapaso LlamRut luz on=0
+rutinapaso LlamRut textura on=0
+rutinapaso LlamRut color n0=1 n1=0.5 n2=0.1 n3=1
+rutinapaso LlamRut punteroVertices ref=Cubo
+rutinapaso LlamRut apilar
+rutinapaso LlamRut matrizObjeto ref=LlamAnclaRut modo=0
+rutinapaso LlamRut rotar n0=30 n1=1 n2=1 n3=0
+rutinapaso LlamRut dibujar ref=Cubo
+rutinapaso LlamRut desapilar
+rutinapaso LlamRut matrizObjeto ref=LlamAnclaRut2 modo=1 n0=45
+rutinapaso LlamRut rotar n0=90 n1=0 n2=0 n3=1
+rutinapaso LlamRut trasladar n0=0.5 n1=0 n2=0
+rutinapaso LlamRut escalar n0=0.8 n1=0.8 n2=0.8
+rutinapaso LlamRut dibujar ref=Cubo
+rutinainfo LlamRut
+
+# ---- 1) EL EDITOR: viewport con overlays (grilla, gizmos), vista con luces ----
+ventana 640 480
+vpvista rendered
+menosllamadas off
+llamadascuadro calent vp
+llamadascuadro ed_off vp
+menosllamadas on
+llamadascuadro calent vp
+llamadascuadro ed_on vp
+llamadasigual ed_off ed_on
+llamadasbajan ed_off ed_on 40
+glaudit 3
+matrizaudit on
+llamadascuadro ed_audit vp
+matrizaudit cero
+matrizaudit off
+llamadasigual ed_off ed_audit
+
+# ---- 2) EL JUEGO: la camara de la escena, sin editor, como en el telefono (la ventana chica) ----
+juego on
+vpcamara on
+juegopuro
+ventana 320 240
+simplay 2
+# quieto: dos cuadros iguales seguidos (los esqueletos con la pose ya subida al VBO)
+menosllamadas off
+llamadascuadro calent
+llamadascuadro j_off
+menosllamadas on
+llamadascuadro calent
+llamadascuadro j_on
+llamadasigual j_off j_on
+llamadasbajan j_off j_on 40
+# animando: la pose cambia antes de cada cuadro (la malla skinneada va por arrays de RAM)
+menosllamadas off
+llamadaspose LlamRigAnima 20
+llamadascuadro calent
+llamadaspose LlamRigAnima 40
+llamadascuadro a_off
+menosllamadas on
+llamadaspose LlamRigAnima 20
+llamadascuadro calent
+llamadaspose LlamRigAnima 40
+llamadascuadro a_on
+llamadasigual a_off a_on
+llamadasdistinto j_on a_on
+llamadasbajan a_off a_on 30
+glaudit 3
+# cada opcion sola tambien da la misma imagen (la pose quedo en 40: la de a_off)
+perezosas off
+punteroscache on
+llamadascuadro calent
+llamadascuadro solo_punteros
+llamadasigual a_off solo_punteros
+perezosas on
+punteroscache off
+llamadascuadro calent
+llamadascuadro solo_perezosas
+llamadasigual a_off solo_perezosas
+menosllamadas on
+perezosas es 1
+punteroscache es 1

@@ -585,8 +585,8 @@ void BorrarKeyframeObjeto(){
 	for (size_t s=0;s<ObjSelects.size();s++){ Object* o=ObjSelects[s]; if (!o) continue;
 		std::vector<AnimProperty>& props = CurvasActivas(o);
 		for (size_t p=0;p<props.size();p++){
-			std::vector<keyFrame>& kf = props[p].keyframes;
-			for (size_t k=0;k<kf.size();k++) if (kf[k].frame==CurrentFrame){ kf.erase(kf.begin()+k); break; } } }
+			W3dClaves& kf = props[p].keyframes;   // (Frame(k) no expande: solo la curva que pierde una clave)
+			for (size_t k=0;k<kf.size();k++) if (kf.Frame(k)==CurrentFrame){ kf.erase(kf.begin()+k); break; } } }
 	g_redraw = true;
 }
 // Clear Keyframe: borra TODA la animacion de los objetos seleccionados

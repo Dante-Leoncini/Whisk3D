@@ -23,7 +23,8 @@ objrel Cuerpo padre Enemigo
 raizcamara Suelta
 raizinfo objetos 3
 raizabrir Scene
-raizinfo objetos 4
+# (los 4 de la escena + las 2 rutinas que trae todo proyecto: Constructor y Limpiar pantalla)
+raizinfo objetos 6
 
 # ---- guardar: la entrada del prefab, con su raiz, sus hijos y lo suelto ----
 guardarw3d /tmp/w3d_f6_prefab.w3d

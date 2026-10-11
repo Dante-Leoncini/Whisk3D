@@ -5025,12 +5025,15 @@ bool W3dRunCommand(const std::string& linea, std::string& err) {
             MallaRecurso* r = reg[i];
             if (!r || r->borrado) continue;
             const bool ok = W3dMallaRecursoRetener(r);
+            // (una malla solo en GPU se relee: las tiras se arman de sus indices; la proxima corrida la vuelve a soltar)
+            if (ok && r->soloGPU) W3dMallaRecursoAsegurarRAM(r);
             float mn[3] = { 0, 0, 0 }, mx[3] = { 0, 0, 0 };
             if (ok) W3dMallaParteCaja(r, -1, mn, mx);
             fprintf(f, "%s  {\"nombre\": \"%s\", \"carpeta\": \"%s\", \"verts\": %d, \"normales\": %d, \"uv\": %d, "
                        "\"colores\": %d, \"caja\": [%g, %g, %g, %g, %g, %g], \"partes\": [",
-                    n ? ",\n" : "", r->nombre.c_str(), r->carpeta.c_str(), r->vertexSize, r->normals ? 1 : 0, r->uv ? 1 : 0,
-                    r->vertexColor ? 1 : 0, mn[0], mn[1], mn[2], mx[0], mx[1], mx[2]);
+                    n ? ",\n" : "", r->nombre.c_str(), r->carpeta.c_str(), r->vertexSize, W3dMallaRecursoTieneArray(r, W3DMD_NOR) ? 1 : 0,
+                    W3dMallaRecursoTieneArray(r, W3DMD_UV) ? 1 : 0, W3dMallaRecursoTieneArray(r, W3DMD_COL) ? 1 : 0,
+                    mn[0], mn[1], mn[2], mx[0], mx[1], mx[2]);
             for (size_t k = 0; ok && k < r->partes.size(); k++) {
                 const W3dMallaBinParte& pa = r->partes[k];
                 float a[3], b[3];
@@ -5068,6 +5071,27 @@ bool W3dRunCommand(const std::string& linea, std::string& err) {
         std::string nom; int i = 0; float v = 0; ss >> nom >> i >> v;
         if (i < 0 || i >= W3D_MEMORIA_TAM) return false;
         W3dMemoria(nom)[i] = v;
+        return true;
+    }
+    // ---- memoriaes <nombre> <i> <valor> [tol] : ASSERTEA una memoria (lo que escribio una rutina, un Culling o lua) ----
+    if (cmd == "memoriaes") {
+        std::string nom; int i = 0; float v = 0, tol = 1e-4f; ss >> nom >> i >> v; ss >> tol;
+        if (i < 0 || i >= W3D_MEMORIA_TAM) { err = "memoriaes: indice fuera de rango"; return false; }
+        const float real = W3dMemoria(nom)[i];
+        if (fabsf(real - v) > tol) {
+            char b[160]; snprintf(b, sizeof(b), "memoriaes: @%s[%d] = %g, se esperaba %g", nom.c_str(), i, real, v);
+            err = b; return false;
+        }
+        printf("      [memoriaes] @%s[%d] = %g OK\n", nom.c_str(), i, real);
+        return true;
+    }
+    // ---- cullmemoria <culling> <nombre> : el PVS por hijo del Culling (metodo bsp) a las memorias <nombre>0, <nombre>1... ----
+    if (cmd == "cullmemoria") {
+        std::string nom, mem; ss >> nom >> mem;
+        Object* o = SceneCollection ? FindObjectByName(SceneCollection, nom) : NULL;
+        if (!o || o->getType() != ObjectType::culling) { err = "cullmemoria: no hay un Culling '" + nom + "'"; return false; }
+        ((Culling*)o)->memoriaVisibles = mem;
+        g_redraw = true;
         return true;
     }
     // ---- skinbench <frames> : mide el costo de SkinearMesh (forzando recompute cada frame) sobre la 1er malla skinneada. ----
@@ -5177,10 +5201,13 @@ bool W3dRunCommand(const std::string& linea, std::string& err) {
         if (sub == "archivo") { std::string r; ss >> r; cu->bspArchivo = r; cu->bspCargado = false; cu->bspCluster = -1; cu->metodo = Culling::Bsp; }
         // ASSERTS opcionales (prueba_bsp_pvs.w3s): `cluster <n>` = la hoja donde cayo la camara activa,
         // `pvs <n>` = cuantos hijos pasaron el PVS (antes del frustum). Se pueden encadenar: cluster 0 pvs 2
-        int clusterEsp = -2, pvsEsp = -1;
+        int clusterEsp = -2, pvsEsp = -1, hojasEsp = -1, drawsEsp = -1, carasEsp = -1;
         for (std::string k = sub; !k.empty(); k.clear(), ss >> k) {
             if (k == "cluster") ss >> clusterEsp;
             else if (k == "pvs") ss >> pvsEsp;
+            else if (k == "hojas") ss >> hojasEsp;      // (el mundo del v2) hojas dibujadas
+            else if (k == "draws") ss >> drawsEsp;      // glDrawElements del mundo (uno por material visible)
+            else if (k == "caras") ss >> carasEsp;      // caras juntadas
         }
         g_cullHijosTotal = 0; g_cullHijosVisibles = 0;
         if (rootViewport) rootViewport->Render();
@@ -5200,6 +5227,15 @@ bool W3dRunCommand(const std::string& linea, std::string& err) {
             char b[160]; snprintf(b, sizeof(b), "bspinfo: pasaron el PVS %d hijos y se esperaban %d", pasanPvs, pvsEsp);
             err = b; return false;
         }
+        if (cu->mundo.Valido()) {
+            const MundoBsp::Estad& u = cu->mundo.ultimo;
+            printf("      [bspinfo] mundo: materiales=%d grupos=%d caras=%d | dibujadas: hojas=%d caras=%d draws=%d tris=%d\n",
+                   (int)cu->mundo.materiales.size(), (int)cu->mundo.grupos.size(), (int)cu->mundo.caras.size(),
+                   u.hojas, u.caras, u.draws, u.tris);
+            if (hojasEsp >= 0 && u.hojas != hojasEsp) { char b[160]; snprintf(b, sizeof(b), "bspinfo: el mundo dibujo %d hojas y se esperaban %d", u.hojas, hojasEsp); err = b; return false; }
+            if (drawsEsp >= 0 && u.draws != drawsEsp) { char b[160]; snprintf(b, sizeof(b), "bspinfo: el mundo hizo %d draws y se esperaban %d", u.draws, drawsEsp); err = b; return false; }
+            if (carasEsp >= 0 && u.caras != carasEsp) { char b[160]; snprintf(b, sizeof(b), "bspinfo: el mundo junto %d caras y se esperaban %d", u.caras, carasEsp); err = b; return false; }
+        } else if (hojasEsp >= 0 || drawsEsp >= 0 || carasEsp >= 0) { err = "bspinfo: el Culling no tiene mundo (.w3dbsp v2)"; return false; }
         return true;
     }
     if (cmd == "cullactivo") {
@@ -6006,6 +6042,35 @@ bool W3dRunCommand(const std::string& linea, std::string& err) {
             }
         } else if (!sub.empty()) { mt->alphaTest = (float)atof(sub.c_str()); g_redraw = true; }
         printf("      [matalfa] '%s' alfaCorte=%g transparente=%s\n", nombre.c_str(), mt->alphaTest, mt->transparent ? "si" : "no");
+        return true;
+    }
+    // ---- matmezcla <mat> [k | es <k> | textura <ruta> | sintextura] : la MEZCLA DE TEXTURAS del material
+    //      (Material::texturaB / mezclaB: una pasada por multitextura, gfx::MezclaTexturas). Sin argumento la imprime;
+    //      <k> la setea; `es <k>` ASSERTEA; `textura <ruta>` pone la textura B (la carga si hace falta); `sintextura`
+    //      la saca. ----
+    if (cmd == "matmezcla") {
+        std::string nombre, sub; ss >> nombre >> sub;
+        Material* mt = BuscarMaterialPorNombre(nombre);
+        if (!mt) { err = "matmezcla: no existe el material '" + nombre + "'"; return false; }
+        if (sub == "es") {
+            float esp = 0; ss >> esp;
+            if (fabsf(mt->mezclaB - esp) > 1e-4f) {
+                char b[160]; snprintf(b, sizeof(b), "matmezcla: '%s' tiene mezclaB %g y se esperaba %g", nombre.c_str(), mt->mezclaB, esp);
+                err = b; return false;
+            }
+        } else if (sub == "textura") {
+            std::string ruta; ss >> ruta;
+            Texture* t = TexturaBuscar(ruta);
+            const bool tomada = (t == NULL);
+            if (!t) t = TexturaTomar(ruta);
+            if (!t) { err = "matmezcla: no pude cargar la textura '" + ruta + "'"; return false; }
+            TexturaPonerEn(mt->texturaB, t);
+            if (tomada) TexturaSoltar(t);   // (la ranura ya tiene la suya)
+            g_redraw = true;
+        } else if (sub == "sintextura") { TexturaPonerEn(mt->texturaB, NULL); g_redraw = true; }
+        else if (!sub.empty()) { mt->mezclaB = (float)atof(sub.c_str()); g_redraw = true; }
+        printf("      [matmezcla] '%s' texturaB=%s mezclaB=%g multitextura=%s\n", nombre.c_str(),
+               mt->texturaB ? mt->texturaB->path.c_str() : "(ninguna)", mt->mezclaB, w3dEngine::MezclaTexturasSoportada() ? "si" : "no");
         return true;
     }
     if (cmd == "matcapa") {
@@ -7826,11 +7891,11 @@ bool W3dRunCommand(const std::string& linea, std::string& err) {
             if (it->icon == (int)IconType::gamepad) iconoGamepad++;   // el viejo objeto "Script"
         }
         printf("\n");
-        // la PRIMERA fila es el submenu de mallas (8 primitivas); la ultima, Imports; y el de los PREFABS
-        // del proyecto (Add > Prefab)
+        // la PRIMERA fila es el submenu de mallas (8 primitivas); despues los de los PREFABS y las ESCENAS del
+        // proyecto (Add > Prefab / Escena), Imports y, al final, el Nucleo (avanzado): 5 submenus
         if (!MenuAdd->items.empty() && MenuAdd->items[0]->submenu)
             primitivas = (int)MenuAdd->items[0]->submenu->items.size();
-        const bool menuOk = (primitivas >= 6 && conSubmenu == 3 && iconoGamepad == 0);
+        const bool menuOk = (primitivas >= 6 && conSubmenu == 5 && iconoGamepad == 0);
         printf("      [uxeditor] D primera fila = submenu de mallas con %d primitivas | submenus=%d "
                "| filas con el icono del viejo objeto Script=%d %s\n",
                primitivas, conSubmenu, iconoGamepad,
@@ -8881,10 +8946,12 @@ bool W3dRunCommand(const std::string& linea, std::string& err) {
           printf("      [quadsave] remapeos por cercania de posicion al abrir: %d (esperado 0)\n", g_w3dVaRemapeos);
           if (g_w3dVaRemapeos != 0) ok = false;
           if (!W3dSaltearSinCorpus("quadsave", "6 (vertex anim vieja en GLB: el remapeo por cercania)")) {
-            // ...y el gemelo positivo: en un .w3d VIEJO de verdad (vertex anim + GLB SIN el bloque
-            // "topologia") el GLB re-splitteaba los verts (24 -> 45) y el remapeo por cercania era
-            // lo unico que habia. Tiene que seguir disparandose ahi, y no volver a hacer falta
-            // nunca mas despues de migrar.
+            // ...y el gemelo: un .w3d VIEJO de verdad (vertex anim + GLB SIN el bloque "topologia").
+            // Antes el import del GLB re-splitteaba los verts (24 -> 45) y solo el remapeo por cercania
+            // salvaba la animacion; con el import indexado (las esquinas de un mismo vertice del glTF
+            // comparten su vertice de render) el GLB vuelve con sus 24 verts y la animacion entra
+            // DIRECTO. Lo que se exige: que abra con la animacion ALINEADA (por cualquiera de los dos
+            // caminos) y que despues de migrar el remapeo no vuelva a hacer falta.
             std::string cva = W3dCorpusFile("v4_glb_vertexanim.w3d");
             if (cva.empty()) { err = "quadsave: falta formato/corpus/v4_glb_vertexanim.w3d (corpus de oro)"; return false; }
             std::string cvaViejo = pref + "_va_viejo.w3d";
@@ -8892,15 +8959,18 @@ bool W3dRunCommand(const std::string& linea, std::string& err) {
             g_w3dVaRemapeos = 0;
             AbrirProyectoAhora(cvaViejo);
             int viejo = g_w3dVaRemapeos;
+            Mesh* rViejo = QsBuscarMesh("AnimCubo");
+            const bool alineadaVieja = rViejo && !rViejo->animations.empty() && rViejo->animations[0] &&
+                                       rViejo->animations[0]->vcount == rViejo->vertexSize;
             std::string hm = pref + "_va_migrada.w3d";
             if (!GuardarW3D(hm)) { err = "quadsave: fallo el guardado de la vertex anim migrada"; return false; }
             g_w3dVaRemapeos = 0;
             AbrirProyectoAhora(hm);
             Mesh* rv = QsBuscarMesh("AnimCubo");
             int vc = (rv && !rv->animations.empty() && rv->animations[0]) ? rv->animations[0]->vcount : -1;
-            printf("      [quadsave] corpus vertex anim en GLB: remapeos al abrirlo=%d (esperado >0) | ya migrado=%d (esperado 0) vcount=%d/%d\n",
-                   viejo, g_w3dVaRemapeos, vc, rv?rv->vertexSize:-1);
-            if (viejo <= 0 || g_w3dVaRemapeos != 0 || !rv || vc != rv->vertexSize) ok = false; }
+            printf("      [quadsave] corpus vertex anim en GLB: remapeos al abrirlo=%d, alineada al abrir=%s | ya migrado=%d (esperado 0) vcount=%d/%d\n",
+                   viejo, alineadaVieja ? "si" : "NO", g_w3dVaRemapeos, vc, rv?rv->vertexSize:-1);
+            if (!alineadaVieja || g_w3dVaRemapeos != 0 || !rv || vc != rv->vertexSize) ok = false; }
         }
 
         // ============== 7) LA MALLA CON TODO, POR EL FLUJO REAL DEL EDITOR (T3.1) ==============
@@ -29480,6 +29550,37 @@ bool W3dRunCommand(const std::string& linea, std::string& err) {
     //      dibujadas/total" del overlay de estadisticas). ----
     // ---- memtex : la MEMORIA de las texturas subidas (bytes con mips, cuantas y cuantas en 16 bits) ----
     if (cmd == "memtex") {
+        std::string sub; ss >> sub;
+        if (sub == "lista") {
+            // memtex lista: cada textura subida con su tamano, si es de 16 bits y lo que ocupa (de mayor a menor)
+            std::vector<std::pair<long, std::string> > filas;
+            std::set<unsigned int> vistos;
+            char b[512];
+            for (size_t i = 0; i < Textures.size(); i++) {
+                const Texture* t = Textures[i];
+                long by = 0, bp = 0; bool d16 = false; int w = 0, h = 0;
+                if (!t || !t->iID || !w3dEngine::TexturaMemoriaDe((unsigned)t->iID, by, bp, d16)) continue;
+                w3dEngine::TextureSize((unsigned)t->iID, w, h);
+                vistos.insert((unsigned)t->iID);
+                snprintf(b, sizeof b, "3D %4dx%-4d %s %7.1f KB (N95 %7.1f)  %s", w, h, d16 ? "16" : "32", by / 1024.0, bp / 1024.0, t->path.c_str());
+                filas.push_back(std::make_pair(bp, std::string(b)));
+            }
+            std::vector<std::string> rutas;
+            extern void Textura2DListar(std::vector<std::string>&);
+            extern unsigned Textura2DObtener(const std::string&, int*, int*);
+            Textura2DListar(rutas);
+            for (size_t i = 0; i < rutas.size(); i++) {
+                const unsigned id = Textura2DObtener(rutas[i], NULL, NULL);
+                long by = 0, bp = 0; bool d16 = false; int w = 0, h = 0;
+                if (!id || vistos.count(id) || !w3dEngine::TexturaMemoriaDe(id, by, bp, d16)) continue;
+                w3dEngine::TextureSize(id, w, h);
+                vistos.insert(id);
+                snprintf(b, sizeof b, "2D %4dx%-4d %s %7.1f KB (N95 %7.1f)  %s", w, h, d16 ? "16" : "32", by / 1024.0, bp / 1024.0, rutas[i].c_str());
+                filas.push_back(std::make_pair(bp, std::string(b)));
+            }
+            std::sort(filas.begin(), filas.end());
+            for (size_t i = filas.size(); i-- > 0; ) printf("      [memtex] %s\n", filas[i].second.c_str());
+        }
         const w3dEngine::MemoriaTexturas m = w3dEngine::TexturasMemoria();
         printf("      [memtex] %d texturas (%d en 16 bits), %.2f MiB (todas en RGBA8 serian %.2f MiB; en el N95 ~%.2f MiB)\n",
                m.cantidad, m.de16, m.bytes / 1048576.0, m.bytes32 / 1048576.0, m.bytesPot / 1048576.0);
@@ -31927,9 +32028,11 @@ bool W3dRunCommand(const std::string& linea, std::string& err) {
                 Mesh* r = QsBuscarMesh("Mixta");
                 int nv = r ? r->vertexSize : -1, nf = r ? (int)r->faces3d.size() : -1;
                 // 'verts' negativo NO es destructivo: se deduce de los indices y los poligonos vuelven
-                // (29 verts / 7 caras). Los otros dos son inconsistentes -> fallback triangulado
-                // (45 verts / 15 tris). En los tres casos la malla queda USABLE y abre rapido.
-                bool usable = r && ((nv == 45 && nf == 15) || (nv == 29 && nf == 7));
+                // (29 verts / 7 caras). Los otros dos son inconsistentes -> fallback triangulado: 15 tris
+                // con los 29 verts del GLB (las esquinas de un mismo vertice del glTF comparten su vertice
+                // de render; antes del import indexado salian 45). En los tres casos la malla queda USABLE
+                // y abre rapido.
+                bool usable = r && ((nv == 29 && nf == 15) || (nv == 29 && nf == 7));
                 bool rapido = (seg < kTope);
                 printf("      [w3dcotas] %-28s -> abre=%s verts=%d faces3d=%d %.2fs %s\n",
                        nombres[c], r?"OK":"MAL", nv, nf, seg, (usable && rapido)?"OK":"MAL");

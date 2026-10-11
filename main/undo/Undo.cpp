@@ -952,32 +952,33 @@ class MaterialModUndo : public UndoCmd {
     bool b[NFLAGS]; int rmode; float shin; // rmode = reflectMode (era el bool chromeEquirect, ahora int de 3 modos)
     float glinea;                          // grosorLinea (px): viaja con el flag lineas
     float acorte;                          // alphaTest (recorte por alfa, 0 = apagado): fila "Alpha Test" del panel
-    static void Leer(Material* s, bool* bo, int& rm, float& sh, float& gl, float& ac) {
+    float mezb;                            // mezclaB (mezcla de texturas, 0 = solo la base): fila "Texture mix"
+    static void Leer(Material* s, bool* bo, int& rm, float& sh, float& gl, float& ac, float& mb) {
         bo[0]=s->textureOn; bo[1]=s->filtrado; bo[2]=s->transparent; bo[3]=s->vertexColor;
         bo[4]=s->lighting; bo[5]=s->repeat; bo[6]=s->uv8bit; bo[7]=s->culling;
         bo[8]=s->depth_test; bo[9]=s->chrome; bo[10]=s->lineas;
-        rm=s->reflectMode; sh=s->shininess; gl=s->grosorLinea; ac=s->alphaTest;
+        rm=s->reflectMode; sh=s->shininess; gl=s->grosorLinea; ac=s->alphaTest; mb=s->mezclaB;
     }
-    static void Escribir(Material* s, const bool* bo, int rm, float sh, float gl, float ac) {
+    static void Escribir(Material* s, const bool* bo, int rm, float sh, float gl, float ac, float mb) {
         s->textureOn=bo[0]; s->filtrado=bo[1]; s->transparent=bo[2]; s->vertexColor=bo[3];
         s->lighting=bo[4]; s->repeat=bo[5]; s->uv8bit=bo[6]; s->culling=bo[7];
         s->depth_test=bo[8]; s->chrome=bo[9]; s->lineas=bo[10];
-        s->reflectMode=rm; s->shininess=sh; s->grosorLinea=gl; s->alphaTest=ac;
+        s->reflectMode=rm; s->shininess=sh; s->grosorLinea=gl; s->alphaTest=ac; s->mezclaB=mb;
     }
 public:
-    MaterialModUndo(Material* M) : mat(M), rmode(0), shin(0), glinea(1.0f), acorte(0.0f) { if (mat) Leer(mat, b, rmode, shin, glinea, acorte); }
+    MaterialModUndo(Material* M) : mat(M), rmode(0), shin(0), glinea(1.0f), acorte(0.0f), mezb(0.0f) { if (mat) Leer(mat, b, rmode, shin, glinea, acorte, mezb); }
     Material* Mat() const { return mat; }
     bool Difiere() const {
         if (!MaterialVivo(mat)) return false;
-        bool cb[NFLAGS]; int crm; GLfloat cs, cg, ca; Leer(mat, cb, crm, cs, cg, ca);
+        bool cb[NFLAGS]; int crm; GLfloat cs, cg, ca, cm; Leer(mat, cb, crm, cs, cg, ca, cm);
         for (int i=0;i<NFLAGS;i++) if (cb[i]!=b[i]) return true;
-        return crm != rmode || cs != shin || cg != glinea || ca != acorte;
+        return crm != rmode || cs != shin || cg != glinea || ca != acorte || cm != mezb;
     }
     void Aplicar() {
         if (!MaterialVivo(mat)) return;   // (a): el puntero se REVALIDA al aplicar, no se usa a ciegas
-        bool cb[NFLAGS]; int crm; GLfloat cs, cg, ca; Leer(mat, cb, crm, cs, cg, ca);   // estado vivo
-        Escribir(mat, b, rmode, shin, glinea, acorte);                                  // restaura el guardado
-        for (int i=0;i<NFLAGS;i++) b[i]=cb[i]; rmode=crm; shin=cs; glinea=cg; acorte=ca; // guarda lo vivo (para rehacer)
+        bool cb[NFLAGS]; int crm; GLfloat cs, cg, ca, cm; Leer(mat, cb, crm, cs, cg, ca, cm);   // estado vivo
+        Escribir(mat, b, rmode, shin, glinea, acorte, mezb);                                   // restaura el guardado
+        for (int i=0;i<NFLAGS;i++) b[i]=cb[i]; rmode=crm; shin=cs; glinea=cg; acorte=ca; mezb=cm; // guarda lo vivo (para rehacer)
     }
     // b[NFLAGS] es un arreglo FIJO de flags del material, NO un vector paralelo a una lista.
     W3D_UNDO_SIN_INDICES // mat: (a) Material* REVALIDADO al aplicar (MaterialVivo); b/rmode/shin/glinea/acorte: (d) valores propios
@@ -2661,7 +2662,10 @@ struct KFId {
         return comp < o.comp;
     }
 };
-struct KFCurva { std::vector<keyFrame>* c; KFId id; };
+// (W3dClaves y no std::vector<keyFrame>: capturar, comparar y el swap de Aplicar no expanden las curvas
+//  COMPACTAS del clip -Animation.h-; solo se expande la que la operacion edita: claveseditar en
+//  tools/pruebas/prueba_claves_compactas.w3s)
+struct KFCurva { W3dClaves* c; KFId id; };
 static void KFAgregar(std::vector<KFCurva>& out, std::vector<AnimProperty>& props, Object* obj, int bone){
     for (size_t p = 0; p < props.size(); p++){
         KFCurva k; k.c = &props[p].keyframes;
@@ -2729,7 +2733,7 @@ static int KFBuscar(const std::vector<KFCurva>& c, const KFId& id){
     return -1;
 }
 class KeyframesUndo : public UndoCmd {
-    struct KFGuardada { KFId id; std::vector<keyFrame> kf; };
+    struct KFGuardada { KFId id; W3dClaves kf; };   // (una curva compacta se guarda compacta)
     std::vector<KFGuardada> snap;
     KFLista lid;                 // de QUE lista de curvas salio el snapshot
     // snapshot de los FRAMES de vertices de la anim de objeto activa (kind 3). Se guarda
@@ -2762,10 +2766,10 @@ public:
             const int k = KFBuscar(c, snap[i].id);
             if (k < 0){ if (!snap[i].kf.empty()) return true; continue; } // la curva ya no existe
             visto[k] = 1;
-            const std::vector<keyFrame>& viva = *c[k].c; const std::vector<keyFrame>& g = snap[i].kf;
+            const W3dClaves& viva = *c[k].c; const W3dClaves& g = snap[i].kf;
             if (viva.size() != g.size()) return true;
             for (size_t q = 0; q < g.size(); q++){
-                const keyFrame& a = viva[q]; const keyFrame& b = g[q];
+                const keyFrame a = viva.Clave(q); const keyFrame b = g.Clave(q);   // (por valor: no expande)
                 // OJO: tambien la INTERPOLACION y los HANDLES. Curvar un tramo no mueve el keyframe (mismo frame y
                 // mismo valor): si solo se miraban esos dos, el undo de una curva se descartaba por "no hubo cambio".
                 if (a.frame != b.frame || a.value != b.value) return true;

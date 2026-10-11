@@ -223,6 +223,7 @@ SOURCE          VisSet.cpp MallaDatos.cpp
 SOURCE          MallaRecurso.cpp // las mallas 3D como RECURSO compartido (registro "mallas", vinculo, VBO compartidos)
 SOURCE          MallaFlujos.cpp // los flujos de indices por parte para las rutinas (tiras, aristas, vertices, quads simulados)
 SOURCE          VisBsp.cpp       // metodo Bsp del Culling: arbol BSP + PVS por cluster (.w3dbsp)
+SOURCE          MundoBsp.cpp     // el MUNDO del .w3dbsp v2: geometria por hoja y material, un draw por material (C++03)
 SOURCEPATH      ..\..\..\libs\Whisk3DCore\base
 SOURCE          W3dConfig.cpp W3dClipboardSymbian.cpp
 SOURCEPATH      ..\..\..\libs\WhiskUI\draw

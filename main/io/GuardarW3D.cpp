@@ -403,7 +403,7 @@ static void EscribirCurva(std::string& s, const AnimProperty& ap) {
     s += ", \"c\": "; JInt(s, ap.component);
     s += ", \"k\": [";
     for (size_t i = 0; i < ap.keyframes.size(); i++) {
-        const keyFrame& k = ap.keyframes[i];
+        const keyFrame k = ap.keyframes.Clave(i);   // (por valor: guardar no expande una curva compacta)
         if (i) s += ",";
         s += "["; JInt(s, k.frame); s += ","; JNum(s, k.value);
         s += ","; JInt(s, k.Interpolation); s += ","; JInt(s, k.handleType);
@@ -732,6 +732,10 @@ static void EscribirMateriales(std::string& s, CtxGuardar* cx) {
         std::string nrm = MatTextura(cx, mt->normalTexture);
         if (nrm.empty() && dz && !dz->normal.empty()) nrm = Asset(cx, dz->normal);
         if (!nrm.empty()) { s += ",\n      \"normalTextura\": "; JEsc(s, nrm); }
+        // MEZCLA DE TEXTURAS (Material::texturaB / mezclaB): la textura B (como el normal map) y cuanto de ella
+        std::string tb = MatTextura(cx, mt->texturaB);
+        if (tb.empty() && dz && !dz->texB.empty()) tb = Asset(cx, dz->texB);
+        if (!tb.empty()) { s += ",\n      \"texturaB\": "; JEsc(s, tb); s += ", \"mezclaB\": "; JNum(s, mt->mezclaB); }
         // capas de textura EXTRA (multi-pass): su textura y como se mezcla con lo de abajo (las
         // dormidas eran las primeras del material: van adelante, como cuando despiertan)
         if (!mt->capas.empty() || (dz && !dz->capas.empty())) {
@@ -1932,7 +1936,15 @@ static void EscribirObjeto(std::string& s, Object* o, int ind, CtxGuardar* cx, b
         // campo del metodo Bsp: el .w3dbsp (arbol + PVS + clusters por hijo)
         if (cu->metodo == Culling::Bsp && !cu->bspArchivo.empty()) {
             s += ",\n"; JSang(s, ind + 1); s += "\"bsp\": "; JEsc(s, cu->bspArchivo);
+            // las texturas del MUNDO del .w3dbsp v2 (nombradas adentro del dato): entran al contenedor como las de
+            // un material, asi un proyecto que solo las usa por el mundo no las pierde al guardar
+            for (size_t i = 0; i < cu->mundo.materiales.size(); i++) {
+                std::string t = cu->mundo.materiales[i].textura, l = cu->mundo.materiales[i].lightmap;
+                if (!t.empty()) Asset((CtxGuardar*)cx, t);
+                if (!l.empty()) Asset((CtxGuardar*)cx, l);
+            }
         }
+        if (!cu->memoriaVisibles.empty()) { s += ",\n"; JSang(s, ind + 1); s += "\"memoriaVisibles\": "; JEsc(s, cu->memoriaVisibles); }
     }
     else if (t == ObjectType::viszona) {
         // VISZONA (celda de visibilidad): todas sus propiedades, siempre (tipo nuevo:
@@ -2921,6 +2933,8 @@ bool GuardarW3D(const std::string& ruta) {
     // FORMATO DE LAS MALLAS: solo se escribe el que NO es el default (texto). Es la opcion del
     // PROYECTO; el forzado del harness no se guarda.
     if (g_w3dFormatoMallasProyecto == W3D_MALLAS_TEXTO) s += "  \"formatoMallas\": \"texto\",\n";
+    // MALLAS SOLO EN GPU (objects/MallaRecurso.h): solo prendida (default false: los .w3d de siempre no cambian)
+    if (W3dMallasSoloGPUActiva()) s += "  \"mallasSoloGPU\": true,\n";
     // CONFIG de la tarjeta Juego (Compilar juego): los valores VIGENTES del
     // editor, con strings legibles para editarlos a mano. Un .w3d viejo sin el
     // bloque abre con los defaults (W3dCompilarReset, ver import_w3d).

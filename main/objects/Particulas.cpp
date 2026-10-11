@@ -259,6 +259,11 @@ static std::vector<Particulas*> gPendientes;
 
 void W3dParticulasLimpiarPendientes() { gPendientes.clear(); }
 
+bool Particulas::DibujaAlgo() {
+    extern bool g_showParticulas;
+    return !sys.parts.empty() || (g_mostrarOverlays && g_showParticulas);
+}
+
 void Particulas::RenderObject() {
     // anotarse UNA sola vez por frame (un Mirror re-renderiza el subarbol y pasaria
     // de nuevo por aca: sin la guarda el flush dibujaria las particulas dos veces)

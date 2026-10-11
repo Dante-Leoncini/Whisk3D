@@ -3,6 +3,7 @@
 #include "objects/Objects.h"
 #include "objects/VisSet.h"     // metodo Riel: visibilidad de hijos por nodo (dato .w3dvis)
 #include "objects/VisBsp.h"     // metodo Bsp: arbol BSP + PVS + clusters por hijo (dato .w3dbsp)
+#include "objects/MundoBsp.h"   // metodo Bsp: el MUNDO del mapa (geometria del .w3dbsp v2) dibujado por el motor
 #include "WhiskUI/draw/icons.h" // el icono compartido del outliner
 #include <map>
 #include <vector>
@@ -54,6 +55,7 @@ extern int g_cullHijosVisibles;
 // jugando se midiera desde la camara del juego se habia terminado tocando la vista
 // del viewport; ahora LOD y Culling la piden aca y el viewport queda intacto.
 class Camera;
+class Texture;
 Camera* W3dCamaraDeMedida(bool soloCamaraActiva);
 // AABB vs el frustum de la camara de medida (juego jugando / vista que dibuja);
 // true si es visible o si no hay lente real (headless). Lo usa el Mirror para
@@ -152,7 +154,22 @@ public:
     std::vector<int>  bspHijoIdx; // por hijo: su indice en bsp.hijos (-1 = no esta: siempre visible)
     std::vector<char> bspVisible; // por hijo: se ve desde bspCluster
     size_t            bspHijosSello; // Childrens.size() con que se armo bspHijoIdx
+    // el PVS para las RUTINAS: con un nombre, cada cuadro escribe 1/0 por hijo i (en su orden) en la MEMORIA
+    // @<nombre><i/256>[i%256] (main/objects/Rutina.h): una rutina que dibuja el mundo horneado en mallas unidas saltea
+    // las celdas que el BSP no ve ("Saltar si" con esa memoria). Sin cluster (fuera del arbol) va todo en 1.
+    // Clave "memoriaVisibles" del .w3d
+    std::string memoriaVisibles;
+    void BspEscribirMemoria();
     bool BspCargar();             // lee el archivo (una vez); true si el dato es valido
+    // EL MUNDO (.w3dbsp version 2, formato/w3dbsp.md): la geometria del mapa, por hoja y por material, que este
+    // Culling dibuja ANTES de sus hijos con el mismo PVS y el frustum por el arbol (MundoBsp): un mapa de Quake /
+    // Half-Life entero sin un objeto por pieza. Las texturas de sus materiales se toman del cache (mundoTex) y
+    // entran al contenedor al guardar como las de un material. Sin geometria en el dato, el Culling solo cullea
+    MundoBsp              mundo;
+    std::vector<Texture*> mundoTex;     // por material: la textura base y la pagina del lightmap (2 por material)
+    std::vector<unsigned char> bspBitsTmp;   // (clusters de un hijo dinamico, por cuadro)
+    void MundoSoltar();           // suelta las texturas tomadas y la geometria
+    void MundoDibujar(int fase);  // dibuja el mundo con el PVS y el frustum vigentes (RenderBsp: 1 opaco antes de los hijos, 2 mezclado despues)
 
     Culling(Object* parent = NULL, Vector3 pos = Vector3(0,0,0))
         : Object(parent, "Culling", pos) {
@@ -173,6 +190,7 @@ public:
         frusJugaba = false;
         sello = 0;
     }
+    ~Culling() { MundoSoltar(); }
     ObjectType getType() W3D_OVERRIDE { return ObjectType::culling; }
     void RenderHijos() W3D_OVERRIDE;          // dispatcher por metodo
     // boton "Recalcular": rearma la grilla del metodo Grid y el cache del Frustum

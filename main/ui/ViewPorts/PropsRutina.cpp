@@ -126,7 +126,7 @@ static std::string RuFilaTexto(Object* o, int i) {
     }
     if (p.tipo == PasoVisible) return t + " -> " + p.n[0].ref + (p.ref2.empty() ? std::string() : " (" + p.ref2 + ")");
     if (p.tipo == PasoLua) return t + (p.ref2.empty() ? std::string() : " (" + p.ref2 + ")");
-    if (p.tipo == PasoSaltarSi || p.tipo == PasoSaltarOculto) { snprintf(b, sizeof b, " skip %d", p.entero); t += b; }
+    if (p.tipo == PasoSaltarSi || p.tipo == PasoSaltarOculto || p.tipo == PasoSaltarSiNinguna) { snprintf(b, sizeof b, " skip %d", p.entero); t += b; }
     const int nn = W3dPasoNumeros(p);
     if (nn > 0 && !ColorFijo(p)) {
         t += " (";
@@ -605,6 +605,7 @@ static const char* EtiquetaEntero(int t) {
     switch (W3dPasoEntero(t)) {
     case EnteroParte:  return "Part (-1 = all)";
     case EnteroCuenta: return "Steps to skip";
+    case EnteroCapaUV: return "UV layer (0 = active)";
     default:           return "Value";
     }
 }
@@ -687,6 +688,8 @@ void PropsRutinaActualizar(Properties* p, bool visible) {
     MallaRecurso* m = MallaDe(paso);
     if (m) {
         char b[200];
+        // una malla que solto su RAM (soloGPU) se relee para armar un flujo que no estaba (una vez: queda en el cache)
+        if (dib && m->soloGPU && !W3dMallaFlujoListo(m, paso->entero, paso->modo)) W3dMallaRecursoAsegurarRAM(m);
         if (UsaPartes(t)) {
             snprintf(b, sizeof b, "%s: %d", T("Triangles"), W3dMallaFlujoIndices(m, paso->entero, RPrimTriangulos) / 3); fil[0] = b;
             if (!dib) { snprintf(b, sizeof b, "%s: %d", T("Vertices"), m->vertexSize); fil[1] = b; }
@@ -697,9 +700,9 @@ void PropsRutinaActualizar(Properties* p, bool visible) {
             }
         } else {
             snprintf(b, sizeof b, "%s: %d", T("Vertices"), m->vertexSize); fil[0] = b;
-            const void* datos = t == PasoPunteroNormales ? (const void*)m->normals : t == PasoPunteroUV ? (const void*)m->uv :
-                                t == PasoPunteroColores ? (const void*)m->vertexColor : (const void*)m->vertex;
-            if (!datos) fil[1] = T("This mesh does not have this array: do not draw with the array on");
+            const unsigned arr = t == PasoPunteroNormales ? W3DMD_NOR : t == PasoPunteroUV ? W3DMD_UV :
+                                 t == PasoPunteroColores ? W3DMD_COL : W3DMD_POS;
+            if (!W3dMallaRecursoTieneArray(m, arr)) fil[1] = T("This mesh does not have this array: do not draw with the array on");
         }
     }
     for (int k = 0; k < 5; k++) Fila(p->propRuInfo[k], fil[k], firma, 1u << (16 + k));
@@ -799,7 +802,7 @@ void PropsRutinaActualizar(Properties* p, bool visible) {
     }
     // el entero (la parte se elige en el desplegable de la malla; aca solo los pasos a saltear)
     const int eu = paso ? W3dPasoEntero(t) : EnteroNada;
-    p->propRuEntero->oculto = !(eu == EnteroCuenta);
+    p->propRuEntero->oculto = !(eu == EnteroCuenta || eu == EnteroCapaUV);
     if (!p->propRuEntero->oculto) {
         firma |= 128;
         p->propRuEntero->name = T(EtiquetaEntero(t));

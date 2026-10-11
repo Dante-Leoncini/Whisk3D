@@ -56,6 +56,7 @@ static void PCWarpMouse(int x, int y) {
 extern void RebindMaterialMeshPart(); // Properties.cpp
 static Material* gTexMat = NULL;
 extern bool gCargarTexturaComoNormal; // Properties.cpp: el "Load Texture" del normal map lo prende (compartido 4 OS)
+extern bool gCargarTexturaComoB;      // Properties.cpp: idem el de la TEXTURA B (mezcla de texturas)
 extern int  gCargarTexturaCapa;       // Properties.cpp: >= 0 = el "Load Texture" de ESA capa de textura del material
 static void TexturaElegida(const std::string& pathElegido) {
     if (!gTexMat) return;
@@ -73,6 +74,10 @@ static void TexturaElegida(const std::string& pathElegido) {
             Texture* anterior = gTexMat->capas[n].tex;
             gTexMat->capas[n].tex = t;
             if (anterior && anterior != t) TexturaSoltar(anterior);
+        } else if (gCargarTexturaComoB) {   // a la TEXTURA B (mezcla de texturas en una pasada)
+            Texture* anterior = gTexMat->texturaB;
+            gTexMat->texturaB = t;
+            if (anterior && anterior != t) TexturaSoltar(anterior);
         } else {
             Texture* anterior = gCargarTexturaComoNormal ? gTexMat->normalTexture : gTexMat->texture;
             if (gCargarTexturaComoNormal) { gTexMat->normalTexture = t; }
@@ -81,7 +86,7 @@ static void TexturaElegida(const std::string& pathElegido) {
         }
         RebindMaterialMeshPart();
     }
-    gTexMat = NULL; gCargarTexturaComoNormal = false; gCargarTexturaCapa = -1;
+    gTexMat = NULL; gCargarTexturaComoNormal = false; gCargarTexturaComoB = false; gCargarTexturaCapa = -1;
 }
 // "Load Texture" (base Y normal map): el MISMO browser. Quien lo llama ya dejo gCargarTexturaComoNormal en el
 // valor correcto (false=textura, true=normal); el callback de arriba decide el destino.

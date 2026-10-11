@@ -65,14 +65,14 @@ Cada paso fija **un** estado, como OpenGL.
 |---|---|
 | Transform | Push / Pop matrix, Translate, Rotate, Scale, Object matrix (la matriz de mundo de un objeto: **Multiply**, o **Load** = cámara x objeto en UNA llamada, sin apilar) |
 | Draw | **Array on/off**, **Vertex / Normal / UV / Color pointer**, **Draw elements**, Point size, Line width, Draw children, Call routine |
-| Texture | Texture on/off, Bind texture (de una lista por carpetas), Texture mode (modular, reemplazar, **normal map DOT3**, **solo alfa**), Texture filter, Texture wrap, **UV offset** (la matriz de textura), **Matcap** |
+| Texture | Texture on/off, Bind texture (de una lista por carpetas), Texture mode (modular, reemplazar, **normal map DOT3**, **solo alfa**), Texture filter, Texture wrap, **UV offset** (la matriz de textura), **Matcap**, **Texture mix** (la unidad 1 con su textura B en la misma pasada: modo *Interpolate* (`Mix` 0..1, animable o de una memoria), *Multiply* o *Multiply 2x* (un lightmap); el entero es la **capa UV** de la malla del último puntero de UV con la que se muestrea B, 0 = las mismas UV; ver `formato/material-capas.md`). La unidad 1 recuerda su combiner, su textura y su puntero al apagarse: prenderla de nuevo con lo mismo son 6 llamadas |
 | Fog | on/off, mode, start, end, density, color |
 | Lights | Lighting on/off, Light on/off (GL_LIGHT0..7), Light color (ambiente/difuso/especular), Light position (puntual/direccional), Ambient light |
 | Alpha test | on/off, reference |
 | Color | Color, Vertex color (COLOR_MATERIAL), Material color (ambiente/difuso/especular/emisión), Shininess, **Smooth shading** |
 | Depth & clear | Depth test, Depth write, Depth function, Depth bias (polygon offset), Depth shift (m), **Depth range**, **Clear color**, **Clear** (color / profundidad / estencil) |
 | Blending | on/off, Blend mode |
-| Control | Skip if zero, **Skip if hidden** (el objeto o un padre ocultos), **Visibility test**, **Call Lua** |
+| Control | Skip if zero, **Skip if no flag** (saltea N pasos si ninguna bandera de un array de rangos está prendida: el estado y el dibujo de una parte cuyas piezas no se ven no se tocan), **Skip if hidden** (el objeto o un padre ocultos), **Visibility test**, **Call Lua** |
 
 Los colores se eligen con el **selector de color** de Whisk3D (o, con "Números / memorias", con los 4 números). Cualquier
 número puede ser fijo o `@nombre[i]`: una memoria de 256 floats que escribe lua (`setMemoria`, `setMemorias`, `memoria`).
@@ -105,6 +105,11 @@ los arrays de una **malla 3D de la biblioteca** (el recurso, no un objeto) y **D
 - Los punteros pueden ser de mallas distintas: UV, colores o normales **compartidos** (menos memoria). Un puntero
   solo apunta (no prende nada); a una malla sin ese array no cambia nada. Apuntar otra vez al mismo array no llama
   al driver (cache de punteros): 63 instancias de una pieza ponen sus punteros una vez.
+- El **UV pointer** puede apuntar a una **capa de UV** de la malla (el campo "UV layer": 0 = la UV de render, k = la
+  capa extra k del `.w3db`, bloque `RUVX`). La misma malla dibujada con otras UV sin otra copia de las posiciones: los
+  39 rivales de Daytona son UNA carrocería con una capa por auto y UNA textura con las variantes de todos; por auto
+  cambia solo el puntero de UV (la textura se pone una vez). Cada capa tiene su VBO; el editor avisa si la malla no
+  tiene esa capa.
 - El motor no toca los arrays: una rutina los encuentra como los dejó lo que se dibujó antes (el constructor, otra
   malla, los hijos).
 - La malla y la parte se eligen de un desplegable por **carpetas → mallas → partes** (una malla de una sola parte se
@@ -122,9 +127,16 @@ los arrays de una **malla 3D de la biblioteca** (el recurso, no un objeto) y **D
   (otra memoria, opcional) cada rango lleva la suya (`cantidad, primero, último, bandera, ...`) y se dibujan los de
   bandera prendida; los seguidos (uno empieza donde terminó el anterior) van en UNA llamada. Es lo que usa un mundo
   en una sola malla: un VBO para todo, una parte por material con los triángulos celda por celda, y las banderas las
-  escriben los tests de visibilidad de las celdas.
+  escriben los tests de visibilidad de las celdas. Con **Skip if no flag** (el mismo array y las mismas banderas) se saltea
+  también lo que esa parte pone antes de dibujar (textura, lightmap, estado): un mundo con 400 partes y 100 a la vista paga
+  100 binds, no 400.
 - "Dibujar elementos" solo elige la **parte** (un desplegable: carpetas → mallas → partes) y la primitiva: con qué
   arrays se dibuja es estado de los pasos de puntero (dibujar 40 veces el mismo auto = los punteros una vez).
+
+**El PVS de un Culling BSP en una memoria**: un `Culling` con método Bsp y `"memoriaVisibles": "celda"` escribe cada
+cuadro 1/0 por hijo (en su orden) en `@celda0[i]`, `@celda1[i - 256]`...: sus hijos pueden ser vacíos con el nombre de
+cada celda del `.w3dbsp` y la rutina que dibuja el mundo horneado en mallas unidas saltea con "Skip if zero" lo que el
+BSP no ve. Harness: `cullmemoria <culling> <nombre>`, `memoriaes <nombre> <i> <valor>`.
 
 **Test de visibilidad**: la caja de una parte (movida por la matriz de un objeto, opcional) o, sin malla, 6 números
 de una memoria (mínimo y máximo: una celda o una pieza de un mundo unido) contra el frustum de la cámara (los planos se
@@ -195,9 +207,42 @@ array y el "Clear" llevaba el color) se convierte al abrir: cada puntero prendid
 si la malla no tiene ese array), uno apagado a "Array off", y el "Clear" viejo a "Clear color" + "Clear"; los "Saltar
 si" se recuentan.
 
+## Mallas solo en GPU (`"mallasSoloGPU"`)
+
+Opción de **proyecto** (`"mallasSoloGPU": true` en `proyecto.json`, tilde **GPU-only meshes** de la tarjeta Render;
+apagada por defecto). Una malla del registro que **ningún objeto usa** y que dibujan **solo rutinas** (el mundo unido)
+vivía dos veces: los arrays en el heap y los VBO del driver, que en el N95 son la misma RAM. Con la opción, cuando
+sus VBO quedaron subidos (todos sus arrays, también las capas UV extra) la malla **suelta su RAM** al cerrar la
+corrida de rutinas: no antes, porque esa corrida (la precarga) todavía arma los flujos y las cajas. Antes de soltarla
+deja en el cache la caja y el índice máximo de cada parte y de toda la malla; las partes, `vertexSize` y `facesSize`
+se quedan. Sin la RAM:
+
+- los punteros bindean el VBO (el recurso recuerda qué arrays tenía) y "Dibujar elementos" con triángulos manda el
+  rango del IBO, también por array de rangos y banderas; "Test de visibilidad" usa la caja cacheada;
+- un flujo **derivado** (tira, aristas, puntos, simuladas) sale si ya estaba armado. Uno nuevo lo arma la precarga
+  de la rutina (un paso que se agrega o cambia) o el panel, releyendo la malla; desde Lua (`paso()`) no se puede: no
+  se dibuja y queda un aviso en el log (una vez);
+- el paso **Matcap** lee las normales de RAM en cada cuadro: esa malla se relee y ya no se suelta.
+
+Lo que necesite la RAM después la **relee de sus bytes** (como al cargarla) y la malla queda como cualquier otra; si
+sigue sin usuarios se vuelve a soltar en la próxima corrida: un objeto que pasa a usarla, la miniatura de la
+biblioteca, `mallasinfo`, el contexto GL perdido (`W3dMallasVBOPerdidos`: los VBO se olvidan y se vuelven a subir).
+Guardar no la toca (la entrada se copia tal cual) y apagar la opción las devuelve a RAM. `meminfo` dice cuántas
+están solo en GPU, la RAM que soltaron y cuántas veces se releyó una. Prueba: `tools/pruebas/prueba_mallas_solo_gpu.w3s`
+(la imagen y las llamadas GL del cuadro son las mismas con la opción prendida y apagada).
+
 ## Perfil
 
 `rutinaperfil on` / `ver` (harness): por tipo de paso, cuántas veces corrió y cuántas llamadas GL hizo.
+
+`perfilLua(cuadros [, etiqueta [, instrucciones [, lineas]]])` (lua, también en el N95): llamada al empezar cada
+`actualizar()`, muestrea el script cada `instrucciones` instrucciones de la VM (1000 por defecto) y cada `cuadros`
+cuadros vuelca al log, en ms por cuadro, las líneas más caras, el tiempo propio y el inclusivo de cada función (por
+la línea donde se define). Prende además el perfil de las rutinas y lo vuelca en los mismos cuadros: por tipo de paso
+veces y llamadas GL por cuadro, ms solo de los Dibujar (leer el reloj en los ~2000 pasos chicos de un cuadro costaba
+más que ellos), y por rutina ms y triángulos por cuadro (inclusivo). Si cambia la etiqueta (la fase del juego) arranca
+de cero sin volcar la mezcla; `perfilLua(0)` lo apaga. En el N95 el reloj es de 1 ms: cada muestra sale gruesa pero el
+promedio de muchos cuadros es bueno; conviene muestrear cada ~5000 instrucciones (el hook cuesta).
 
 ## Medido: Daytona USA en modo avanzado
 

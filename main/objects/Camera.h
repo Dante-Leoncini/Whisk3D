@@ -113,6 +113,7 @@ class Camera : public Object, public Target {
         void AplicarMiradaDelRiel();
 
         void RenderObject() W3D_OVERRIDE;
+        bool DibujaAlgo() W3D_OVERRIDE;    // su gizmo, solo con el overlay "Camera"
 
         void UpdatePosition();
 

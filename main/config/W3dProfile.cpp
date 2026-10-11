@@ -27,6 +27,10 @@ double W3dNowMs() {
 #endif
 }
 
+// el reloj de relojMs() en lua (script/BindsJuego.cpp: sin el perfilador, como en un juego compilado, usa clock())
+extern double (*g_w3dRelojMsHook)();
+namespace { struct RegistrarRelojMs { RegistrarRelojMs() { g_w3dRelojMsHook = W3dNowMs; } } gRegistrarRelojMs; }
+
 void W3dProfBegin() {
     g_prof.logic = g_prof.scene = g_prof.viewport3d = g_prof.render = g_prof.swap = 0.0;
     w3dEngine::StatsCuadro();   // (las llamadas GL del cuadro anterior, completo: escena + HUD + editor)

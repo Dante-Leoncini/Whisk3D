@@ -1514,6 +1514,9 @@ void BuildScene(Node* root){
     w3dEngine::SetTexturas16Siempre(root->props.count("texturas16") &&
                                     (w3dMapAt(root->props, "texturas16") == "true" || w3dMapAt(root->props, "texturas16") == "1"));
     w3dEngine::SetTexturasMitadDesde(GetIntOrDefault(root->props, "texturasMitadDesde", 0));   // (en el N95)
+    // MALLAS SOLO EN GPU (ausente = false): las que solo dibujan rutinas sueltan su RAM al quedar en VBO (MallaRecurso.h)
+    W3dMallasSoloGPUActivar(root->props.count("mallasSoloGPU") &&
+                            (w3dMapAt(root->props, "mallasSoloGPU") == "true" || w3dMapAt(root->props, "mallasSoloGPU") == "1"));
 
     // CACHE DE JUEGO (rewind) del proyecto: un .w3d puede abrir con el cache YA destildado -> un JUEGO se juega
     // FLUIDO (no rebobina). Si el .w3d no declara "cacheJuego", gSimCacheOn queda como estaba (pref de sesion).
@@ -3187,6 +3190,7 @@ static Object* JsonObjetoCrear(JVal* j, Object* parent, const std::string& base)
         cu->rielNombre       = JS(j, "riel", "");             // metodo riel: la Curve del recorrido
         cu->visHijosArchivo  = RutaJsonCampo(JS(j, "visHijos", ""), base);   // metodo riel: hijos visibles por nodo
         cu->bspArchivo       = RutaJsonCampo(JS(j, "bsp", ""), base);        // metodo bsp: arbol + PVS + clusters por hijo (.w3dbsp)
+        cu->memoriaVisibles  = JS(j, "memoriaVisibles", "");                 // metodo bsp: el PVS por hijo a una memoria (rutinas)
         return cu;
     }
     if (tipo == "gridcull") {   // COMPAT: gridcull viejo -> Culling con metodo=Grid (objeto unificado)
@@ -3597,6 +3601,7 @@ static bool W3dMismoMaterial(const Material* v, const Material& n, const std::st
         v->normalMap != n.normalMap || v->uv8bit != n.uv8bit) return false;
     if (v->depth_write != n.depth_write || v->orden_pasada != n.orden_pasada ||
         v->mezcla != n.mezcla || !W3dMatCasi(v->depth_bias, n.depth_bias) || !W3dMatCasi(v->sesgo_metros, n.sesgo_metros) || !W3dMatCasi(v->alphaTest, n.alphaTest)) return false;
+    if (!W3dMatCasi(v->mezclaB, n.mezclaB)) return false;
     if (v->lineas != n.lineas || !W3dMatCasi(v->grosorLinea, n.grosorLinea)) return false;
     if (W3dMatRutaTex(v) != texPath) return false;
     return true;
@@ -3614,7 +3619,7 @@ static void W3dCopiarMaterial(const Material& src, Material* dst) {
     dst->culling = src.culling; dst->depth_test = src.depth_test; dst->chrome = src.chrome;
     dst->normalMap = src.normalMap; dst->uv8bit = src.uv8bit;
     dst->depth_write = src.depth_write; dst->depth_bias = src.depth_bias; dst->sesgo_metros = src.sesgo_metros; dst->alphaTest = src.alphaTest;
-    dst->orden_pasada = src.orden_pasada; dst->mezcla = src.mezcla;
+    dst->orden_pasada = src.orden_pasada; dst->mezcla = src.mezcla; dst->mezclaB = src.mezclaB;
     dst->lineas = src.lineas; dst->grosorLinea = src.grosorLinea;
 }
 // (el normal map y las capas extra de un material se cargan al DESPERTAR sus texturas, sincronicas
@@ -3645,6 +3650,7 @@ static void CargarMateriales(JVal* raiz, const std::string& base, const std::str
         tmp.depth_bias    = JF(e, "sesgoProfundidad", tmp.depth_bias);
         tmp.sesgo_metros  = JF(e, "sesgoMetros",      tmp.sesgo_metros);   // sesgo de profundidad en metros (ausente = 0)
         tmp.alphaTest     = JF(e, "alfaCorte",        tmp.alphaTest);   // recorte por alfa (rejas); ausente = 0
+        tmp.mezclaB       = JF(e, "mezclaB",          tmp.mezclaB);     // mezcla de texturas (texturaB); ausente = 0
         tmp.orden_pasada  = JI(e, "ordenPasada",      tmp.orden_pasada);
         tmp.mezcla        = JI(e, "mezcla",           tmp.mezcla);
         // LINEAS (aristas por material). Ausentes en lo guardado hasta hoy -> default apagado.
@@ -3687,6 +3693,8 @@ static void CargarMateriales(JVal* raiz, const std::string& base, const std::str
             dz.base = texPath;
             std::string nrm = JS(e, "normalTextura", "");
             if (!nrm.empty()) dz.normal = RutaJson(nrm, base);
+            std::string tb = JS(e, "texturaB", "");
+            if (!tb.empty()) dz.texB = RutaJson(tb, base);
             JVal* jc = JHijo(e, "capas", 5);
             if (jc) for (size_t c = 0; c < jc->lista.size(); c++) {
                 JVal* ce = jc->lista[c]; if (!ce || ce->tipo != 4) continue;
@@ -3716,6 +3724,8 @@ static void CargarMateriales(JVal* raiz, const std::string& base, const std::str
         dz.base = texPath;
         std::string nrm = JS(e, "normalTextura", "");
         if (!nrm.empty()) dz.normal = RutaJson(nrm, base);
+        std::string tb = JS(e, "texturaB", "");
+        if (!tb.empty()) dz.texB = RutaJson(tb, base);
         JVal* jc = JHijo(e, "capas", 5);
         if (jc) for (size_t c = 0; c < jc->lista.size(); c++) {
             JVal* ce = jc->lista[c]; if (!ce || ce->tipo != 4) continue;
@@ -4370,6 +4380,8 @@ static bool AbrirEscenaJson(const char* datos, size_t n, const std::string& base
     { JVal* j16 = JHijo(raiz, "texturas16", 3); w3dEngine::SetTexturas16Siempre(j16 && j16->b); }
     // TEXTURAS A LA MITAD EN EL N95 (ausente = 0, ninguna): un lado mayor a este se sube a la mitad. Idem: antes de la cola
     w3dEngine::SetTexturasMitadDesde(JI(raiz, "texturasMitadDesde", 0));
+    // MALLAS SOLO EN GPU (ausente = false): las que solo dibujan rutinas sueltan su RAM al quedar en VBO (MallaRecurso.h)
+    W3dMallasSoloGPUActivar(JB(raiz, "mallasSoloGPU", false));
     // icono del juego (opcional): ruta EXTERNA relativa al .w3d. La usa la tarjeta
     // Juego y Compilar juego (genera los tamanos chicos al compilar).
     AplicarIcono(RutaJson(JS(raiz, "icono", ""), base));
@@ -5157,6 +5169,9 @@ void ReiniciarEscena() {
     // LAS MALLAS CON NOMBRE son del proyecto: el arbol ya no existe (nadie las usa) y las
     // referencias transitorias se acaban de purgar -> se borra el registro entero
     W3dMallasRegistroLimpiar();
+    // "mallasSoloGPU" es DEL PROYECTO: el que abre la fija con su proyecto.json (despues de borrar el registro: apagarla
+    // antes releeria cada malla suelta de un contenedor que ya se desmonto)
+    W3dMallasSoloGPUActivar(false);
     // ANIMSETS: el registro es del proyecto; los recursos ya se soltaron con los armatures
     W3dAnimSetsCerrarProyecto();
     { extern void OlvidarTexturasPendientes(); OlvidarTexturasPendientes(); }

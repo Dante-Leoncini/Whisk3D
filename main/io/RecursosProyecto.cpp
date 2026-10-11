@@ -440,6 +440,7 @@ static Material* MaterialNuevoConUndo(const std::string& base, const Material* d
         n->name = nombre;
         TexturaRetener(n->texture);
         TexturaRetener(n->normalTexture);
+        TexturaRetener(n->texturaB);
         for (size_t c = 0; c < n->capas.size(); c++) TexturaRetener(n->capas[c].tex);
     }
     UndoMatCreado* u = new UndoMatCreado();
@@ -593,6 +594,7 @@ public:
         const std::string tex = m->texture ? BaseDeRuta(m->texture->path) : BaseDeRuta(TexturaPendienteDe(m));
         out.push_back(W3dRecursoDato(T("Texture"), tex.empty() ? std::string(T("(none)")) : tex));
         if (m->normalTexture) out.push_back(W3dRecursoDato(T("Normal map"), BaseDeRuta(m->normalTexture->path)));
+        if (m->texturaB) out.push_back(W3dRecursoDato(T("Texture B"), BaseDeRuta(m->texturaB->path)));
         if (!m->capas.empty()) out.push_back(W3dRecursoDato(T("Texture layers"), EnteroTexto((long)m->capas.size())));
         out.push_back(W3dRecursoDato(T("Transparent"), SiNo(m->transparent)));
         out.push_back(W3dRecursoDato(T("Users"), EnteroTexto(it.usuarios)));
@@ -794,6 +796,7 @@ static void UsuariosTexturas(std::map<std::string, TexUso>& uso, bool conObjetos
         if (m->texture && !m->texture->path.empty()) s.insert(ClaveTextura(m->texture->path));
         else { const std::string p = TexturaPendienteDe(m); if (!p.empty()) s.insert(ClaveTextura(p)); }
         if (m->normalTexture && !m->normalTexture->path.empty()) s.insert(ClaveTextura(m->normalTexture->path));
+        if (m->texturaB && !m->texturaB->path.empty()) s.insert(ClaveTextura(m->texturaB->path));
         for (size_t c = 0; c < m->capas.size(); c++)
             if (m->capas[c].tex && !m->capas[c].tex->path.empty()) s.insert(ClaveTextura(m->capas[c].tex->path));
         std::vector<std::string*> rd; RutasDormidas(m, rd);
@@ -1343,6 +1346,7 @@ static void UndoTexSacadaAplicar(void* d) {
         Texture* t = poner ? u->mats[i].t : NULL;
         if (u->mats[i].donde == -1) m->texture = t;
         else if (u->mats[i].donde == -2) m->normalTexture = t;
+        else if (u->mats[i].donde == -3) m->texturaB = t;
         else if (u->mats[i].donde < (int)m->capas.size()) m->capas[(size_t)u->mats[i].donde].tex = t;
     }
     for (size_t i = 0; i < u->objs.size(); i++) {
@@ -1773,6 +1777,7 @@ public:
             TexSacadaMat x; x.m = m;
             if (m->texture && ClaveTextura(m->texture->path) == id) { x.donde = -1; x.t = m->texture; u->mats.push_back(x); }
             if (m->normalTexture && ClaveTextura(m->normalTexture->path) == id) { x.donde = -2; x.t = m->normalTexture; u->mats.push_back(x); }
+            if (m->texturaB && ClaveTextura(m->texturaB->path) == id) { x.donde = -3; x.t = m->texturaB; u->mats.push_back(x); }
             for (size_t c = 0; c < m->capas.size(); c++)
                 if (m->capas[c].tex && ClaveTextura(m->capas[c].tex->path) == id) { x.donde = (int)c; x.t = m->capas[c].tex; u->mats.push_back(x); }
         }
@@ -2048,7 +2053,7 @@ public:
 // ============================================================================
 static bool MaterialNombraTextura(const Material* m, const Texture* t) {
     if (!m || !t) return false;
-    if (m->texture == t || m->normalTexture == t) return true;
+    if (m->texture == t || m->normalTexture == t || m->texturaB == t) return true;
     for (size_t c = 0; c < m->capas.size(); c++) if (m->capas[c].tex == t) return true;
     return false;
 }
@@ -2057,6 +2062,7 @@ static void RepuntarTextura(Material* m, Texture* de, Texture* a) {
     if (!m) return;
     if (m->texture == de) { TexturaRetener(a); m->texture = a; }
     if (m->normalTexture == de) { TexturaRetener(a); m->normalTexture = a; }
+    if (m->texturaB == de) { TexturaRetener(a); m->texturaB = a; }
     for (size_t c = 0; c < m->capas.size(); c++) if (m->capas[c].tex == de) { TexturaRetener(a); m->capas[c].tex = a; }
 }
 // cuantas RANURAS de material (y cuadros de materiales animados) apuntan a 't': lo que la textura revivida tiene que
@@ -2070,6 +2076,7 @@ static int RanurasDe(const Texture* t) {
         if (!m) continue;
         if (m->texture == t) n++;
         if (m->normalTexture == t) n++;
+        if (m->texturaB == t) n++;
         for (size_t c = 0; c < m->capas.size(); c++) if (m->capas[c].tex == t) n++;
     }
     for (size_t i = 0; i < AnimatedMaterials.size(); i++)

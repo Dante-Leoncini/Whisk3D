@@ -242,6 +242,9 @@ static bool Arbol(Lienzo& L, Object* raiz, Camera* cam) {
 static bool PixelesMalla(const std::string& id, Lienzo& L) {
     MallaRecurso* r = W3dMallaRecursoPorNombre(id);
     if (!r) return false;
+    // una malla que solto su RAM (soloGPU, la dibujan solo rutinas) se relee de sus bytes para mirarla; la
+    // proxima corrida de rutinas la vuelve a soltar (prueba_mallas_solo_gpu.w3s)
+    if (r->soloGPU) W3dMallaRecursoAsegurarRAM(r);
     Mesh* t = NULL;
     const float* vert = r->vertex; int nVert = r->vertexSize; const MeshIndex* caras = r->faces; int nIdx = r->facesSize;
     std::vector<int> ini, cant; std::vector<const Material*> mats;

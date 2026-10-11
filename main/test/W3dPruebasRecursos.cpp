@@ -782,6 +782,58 @@ static bool CmdEscenaDefecto(std::string& err) {
 }
 
 // ============================================================================
+//  noapilaarmar / noapila : lo que no dibuja nada en el juego no le cuesta NADA al GL. El recorrido de la escena
+//  saltea (ni push, ni mult, ni pop) el subarbol que no dibuja (Object::DibujaAlgo): un emisor sin particulas vivas,
+//  una hitbox, una camara y un armature (sus huesos los dibuja el editor aparte) con los overlays apagados
+// ============================================================================
+#include "objects/Empty.h"
+#include "objects/Particulas.h"
+#include "objects/Hitbox.h"
+// noapilaarmar: un vacio "NoApila" con un emisor (sin particulas), una hitbox, una camara (no la activa) y un armature
+static bool CmdNoApilaArmar(std::string& err) {
+    if (!SceneCollection) { err = "noapilaarmar: no hay escena"; return false; }
+    Object* padre = CollectionActive ? (Object*)CollectionActive : (Object*)SceneCollection;
+    Empty* v = new Empty(padre, Vector3(0, 0, 0));
+    v->name = "NoApila";
+    Particulas* pa = new Particulas(v, Vector3(0, 1, 0));
+    pa->name = "NoApila_emisor";
+    Hitbox* hb = new Hitbox(v, Vector3(1, 0, 0));
+    hb->name = "NoApila_hitbox";
+    Camera* ca = new Camera(v, Vector3(0, 0, 3), Vector3(0, 0, 0));
+    ca->name = "NoApila_camara";
+    Armature* ar = new Armature(v, Vector3(-1, 0, 0));
+    ar->name = "NoApila_armature";
+    printf("      [noapilaarmar] NoApila: emisor (%d particulas), hitbox, camara y armature\n", (int)pa->sys.parts.size());
+    return true;
+}
+// noapila <objeto> [cuesta] : el render del viewport activo con el objeto visible y oculto hace las MISMAS llamadas GL
+// (draws + binds + estados + otras). Con "cuesta" (el control) tienen que ser distintas
+static bool CmdNoApila(std::istringstream& ss, std::string& err) {
+    std::string nombre, modo; ss >> nombre >> modo;
+    Object* o = SceneCollection ? FindObjectByName(SceneCollection, nombre) : NULL;
+    if (!o) { err = "noapila: no existe '" + nombre + "'"; return false; }
+    Viewport3D* vp = Viewport3DActive;
+    if (!vp) { err = "noapila: no hay viewport 3D"; return false; }
+    const bool antes = o->visible;
+    int gl[2];
+    for (int k = 0; k < 2; k++) {
+        o->visible = (k == 0);
+        vp->Render();   // (el primer cuadro arrastra el estado que dejo el anterior: se mide el segundo)
+        vp->Render();
+        gl[k] = vp->statDrawsFrame + vp->statBindsFrame + vp->statEstadosFrame + vp->statOtrasFrame;
+    }
+    o->visible = antes;
+    printf("      [noapila] '%s': visible %d llamadas GL, oculto %d\n", nombre.c_str(), gl[0], gl[1]);
+    if (modo == "cuesta") {
+        if (gl[0] == gl[1]) { err = "noapila: '" + nombre + "' tendria que costar llamadas (control) y no cuesta"; return false; }
+    } else if (gl[0] != gl[1]) {
+        char b[160]; snprintf(b, sizeof(b), "noapila: '%s' cuesta %d llamadas GL sin dibujar nada", nombre.c_str(), gl[0] - gl[1]);
+        err = b; return false;
+    }
+    return true;
+}
+
+// ============================================================================
 //  viewports / layoutmaximizar / propsfoco / redopanel
 // ============================================================================
 // abrir un proyecto LIBERA el layout anterior (antes quedaba huerfano: ~0,2 MB de heap por
@@ -2475,6 +2527,8 @@ static bool CmdW3dbAjenos(std::istringstream& ss, std::string& err) {
 //  EL DESPACHADOR (lo llama W3dRunCommand antes de su cadena de comandos)
 // ============================================================================
 bool W3dPruebasMallasCmd(const std::string& cmd, std::istringstream& ss, std::string& err, bool& manejado);
+bool W3dPruebasSoloGPUCmd(const std::string& cmd, std::istringstream& ss, std::string& err, bool& manejado);
+bool W3dPruebasLlamadasCmd(const std::string& cmd, std::istringstream& ss, std::string& err, bool& manejado);
 bool W3dPruebasRecursosCmd(const std::string& cmd, std::istringstream& ss,
                            std::string& err, bool& manejado) {
     // los ANIMSETS (test/W3dPruebasAnims.cpp) van primero: antes de CADA comando VERIFICAN
@@ -2497,12 +2551,18 @@ bool W3dPruebasRecursosCmd(const std::string& cmd, std::istringstream& ss,
     { const bool r = W3dPruebasLibreriasCmd(cmd, ss, err, manejado); if (manejado) return r; }
     // el STREAMING (test/W3dPruebasStreaming.cpp)
     { const bool r = W3dPruebasStreamingCmd(cmd, ss, err, manejado); if (manejado) return r; }
+    // las MALLAS SOLO EN GPU (opcion de proyecto "mallasSoloGPU": test/W3dPruebasSoloGPU.cpp)
+    { const bool r = W3dPruebasSoloGPUCmd(cmd, ss, err, manejado); if (manejado) return r; }
+    // MENOS LLAMADAS GL (la pila perezosa y el cache de punteros de gfx: test/W3dPruebasLlamadas.cpp)
+    { const bool r = W3dPruebasLlamadasCmd(cmd, ss, err, manejado); if (manejado) return r; }
     manejado = true;
     if (cmd == "cargabench")      return CmdCargaBench(ss, err);
     if (cmd == "escenasintetica") return CmdEscenaSintetica(ss, err);
     if (cmd == "heapuso")         return CmdHeapUso(ss, err);
     if (cmd == "cachesproyecto")  return CmdCachesProyecto(ss, err);
     if (cmd == "escenadefecto")   return CmdEscenaDefecto(err);
+    if (cmd == "noapilaarmar")    return CmdNoApilaArmar(err);
+    if (cmd == "noapila")         return CmdNoApila(ss, err);
     if (cmd == "juego2dmin")      return CmdJuego2DMin(ss, err);
     if (cmd == "juego2dpx")       return CmdJuego2DPx(ss, err);
     if (cmd == "viewports")       return CmdViewports(ss, err);

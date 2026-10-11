@@ -44,7 +44,8 @@ raizcontexto activo CajaB sel 1 camara CamB luces 1
 # ---- volver: cada escena conserva lo suyo ----
 raizabrir Scene
 raizcontexto activo Cubo sel 1 camara Cámara luces 1 coleccion Colección
-raizinfo objetos 4
+# (los 4 de la escena + las 2 rutinas que trae todo proyecto: Constructor y Limpiar pantalla)
+raizinfo objetos 6
 # las LUCES son por escena: la del bloque llena sus 8 y la otra sigue pudiendo crear
 raizluces 9 creadas 7
 raizcontexto luces 8
@@ -61,7 +62,7 @@ objname Temporal
 raizinfo objetos 6
 raizabrir Scene
 undo
-raizinfo objetos 11
+raizinfo objetos 13
 raizabrir Scene.001
 raizinfo objetos 6
 undo

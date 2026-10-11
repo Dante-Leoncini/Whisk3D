@@ -45,6 +45,8 @@ void HitboxAristas(const W3dHitboxBase* h, float out[72]) {
         }
 }
 
+bool Hitbox::DibujaAlgo() { return HitboxSeDibuja(); }
+
 void Hitbox::RenderObject() {
     if (!HitboxSeDibuja()) return;
     float c[4];

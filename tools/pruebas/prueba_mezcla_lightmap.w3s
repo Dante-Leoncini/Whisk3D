@@ -1,0 +1,69 @@
+# ===========================================================================
+#  UN LIGHTMAP EN LA MISMA PASADA (la capa Multiply 2x en la unidad 1 de textura)
+#
+#  prueba_mezcla_lightmap.glb (hl2-w3d/tools/fixtures_pruebas.py): un quad en el plano XY
+#  con la textura roja de base y una CAPA Multiply 2x (capas_lightmap.png: degrade 0..127
+#  en X, guardado /2 como los lightmaps de un mapa) con la capa UV 1. Antes era una segunda
+#  pasada (DST_COLOR, SRC_COLOR); ahora AplicarMaterial la manda a la unidad 1 con su UV
+#  propia (gfx::MezclaTexturas modo 2 + MezclaTexturasUV) y el pase de capas la saltea: la
+#  mitad de los draws de un mundo con lightmaps. El pixel tiene que dar rojo * degrade * 2:
+#  a u = 0.25 -> 255 * 0.249 = 64; a u = 0.75 -> 255 * 0.747 = 190.
+#
+#  Lo que se verifica:
+#   1) el material clasico con la capa: los pixeles de la mezcla en una pasada
+#   2) una RUTINA que dibuja el mismo recurso con el paso "Texture mix" en modo Multiply 2x
+#      con la capa UV 1 (la malla clasica oculta) da los mismos pixeles
+#
+#  Correr DESDE ESTA CARPETA:
+#    ../../platform/linux/build/whisk3d --script prueba_mezcla_lightmap.w3s
+# ===========================================================================
+selobj Cubo
+delete
+importgltf prueba_mezcla_lightmap.glb
+loadtex
+deselectall
+matcapa mezcla_lm capas 1
+vpvista material
+vporbita 0 0 0 4
+escenapx -0.5 0.5 0 es 64 0 0 16
+escenapx 0.5 0.5 0 es 190 0 0 16
+
+# la misma superficie por una rutina (la malla clasica oculta): punteros, textura base en la unidad 0 y el lightmap en la 1
+visible 0 prueba_mezcla_lightmap
+rutina LmRut
+rutinapaso LmRut array modo=0 on=1
+rutinapaso LmRut array modo=2 on=1
+rutinapaso LmRut array modo=1 on=0
+rutinapaso LmRut array modo=3 on=0
+rutinapaso LmRut luz on=0
+rutinapaso LmRut color n0=1 n1=1 n2=1 n3=1
+rutinapaso LmRut punteroVertices ref=prueba_mezcla_lightmap
+rutinapaso LmRut punteroUV ref=prueba_mezcla_lightmap
+rutinapaso LmRut textura on=1
+rutinapaso LmRut fijarTextura ref=mezcla_a.png
+rutinapaso LmRut texturaModo modo=0
+rutinapaso LmRut mezclaTexturas ref=capas_lightmap.png modo=2 entero=1 n0=1 on=1
+rutinapaso LmRut dibujar ref=prueba_mezcla_lightmap
+rutinainfo LmRut
+escenapx -0.5 0.5 0 es 64 0 0 16
+escenapx 0.5 0.5 0 es 190 0 0 16
+
+# "Skip if no flag" (saltarSiNinguna): un array de rangos en @rg (cantidad, primero, ultimo, bandera...) y las banderas
+# en @fl. Con la bandera en 0 saltea los 3 pasos que siguen (test de profundidad afuera -el segundo dibujo va a la
+# misma profundidad-, la textura azul y otro dibujo): queda lo rojo. Con la bandera en 1 los corre y el plano sale
+# azul (mezcla_b.png, con el mismo lightmap)
+memoria rg 0 1
+memoria rg 1 0
+memoria rg 2 0
+memoria rg 3 0
+memoria fl 0 0
+rutinapaso LmRut saltarSiNinguna entero=3 n0=@rg[0] n1=@fl[0]
+rutinapaso LmRut testZ on=0
+rutinapaso LmRut fijarTextura ref=mezcla_b.png
+rutinapaso LmRut dibujar ref=prueba_mezcla_lightmap
+rutinainfo LmRut
+escenapx -0.5 0.5 0 es 64 0 0 16
+escenapx 0.5 0.5 0 es 190 0 0 16
+memoria fl 0 1
+escenapx -0.5 0.5 0 es 0 0 64 16
+escenapx 0.5 0.5 0 es 0 0 190 16

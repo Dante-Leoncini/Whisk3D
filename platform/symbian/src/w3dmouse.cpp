@@ -143,8 +143,11 @@ void CWhisk3D::DrawMouseCursor(){
         W3D_GL_CRUDO(glEnable(GL_POINT_SPRITE_OES));
         W3D_GL_CRUDO(glTexEnvf(GL_POINT_SPRITE_OES, GL_COORD_REPLACE_OES, GL_TRUE));
         W3D_GL_CRUDO(glPointSize(32.0f));
-        W3D_GL_CRUDO(glVertexPointer(2, GL_FLOAT, 0, MousePt));
-        W3D_GL_CRUDO(glTexCoordPointer(2, GL_FLOAT, 0, MousePt)); // dummy (COORD_REPLACE)
+        // los punteros por el motor (desbindea el VBO que haya dejado la escena y lleva su cache de punteros) y la
+        // modelview perezosa en GL antes del draw crudo
+        w3dEngine::VertexPointer2f(0, MousePt);
+        w3dEngine::TexCoordPointer2f(0, MousePt); // dummy (COORD_REPLACE)
+        w3dEngine::MatricesSincronizar();
         W3D_GL_CRUDO(glDrawArrays(GL_POINTS, 0, 1));
         W3D_GL_CRUDO(glTexEnvf(GL_POINT_SPRITE_OES, GL_COORD_REPLACE_OES, GL_FALSE));
         W3D_GL_CRUDO(glDisable(GL_POINT_SPRITE_OES));
@@ -156,10 +159,11 @@ void CWhisk3D::DrawMouseCursor(){
         w3dEngine::Disable(w3dEngine::Texture2D);
         w3dEngine::DisableArray(w3dEngine::TexCoordArray);
         W3D_GL_CRUDO(glColor4f(0.0f, 0.0f, 0.0f, 1.0f));
-        W3D_GL_CRUDO(glVertexPointer(3, GL_FLOAT, 0, ArrowShadow));
+        w3dEngine::VertexPointer3f(0, ArrowShadow);   // (por el motor, como el sprite de arriba)
+        w3dEngine::MatricesSincronizar();
         W3D_GL_CRUDO(glDrawArrays(GL_TRIANGLES, 0, 3));
         W3D_GL_CRUDO(glColor4f(1.0f, 1.0f, 1.0f, 1.0f));
-        W3D_GL_CRUDO(glVertexPointer(3, GL_FLOAT, 0, ArrowVerts));
+        w3dEngine::VertexPointer3f(0, ArrowVerts);
         W3D_GL_CRUDO(glDrawArrays(GL_TRIANGLES, 0, 3));
         w3dEngine::EnableArray(w3dEngine::TexCoordArray);
         w3dEngine::Enable(w3dEngine::Texture2D);

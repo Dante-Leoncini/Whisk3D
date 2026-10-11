@@ -299,6 +299,8 @@ Vector3 Camera::PuntoDelRiel(float indice) const {
 
 extern bool g_showCamera; // toggle del submenu "Objects" (overlays)
 
+bool Camera::DibujaAlgo() { return g_showCamera; }
+
 void Camera::RenderObject() {
     if (!g_showCamera) return; // oculto por el toggle "Camera" del menu de overlays
 #ifdef W3D_SYMBIAN

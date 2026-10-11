@@ -31,6 +31,7 @@ class Hitbox : public W3dHitboxBase {
 public:
     Hitbox(Object* parent = NULL, Vector3 pos = Vector3(0, 0, 0));
     void RenderObject() W3D_OVERRIDE;
+    bool DibujaAlgo() W3D_OVERRIDE;    // solo con su overlay (el juego no la dibuja)
 };
 
 // las 12 aristas de la caja (24 vertices, 72 floats) en el espacio LOCAL del hitbox:

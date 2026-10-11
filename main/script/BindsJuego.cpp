@@ -5,7 +5,7 @@
 // ============================================================================
 #include "objects/Rutina.h"
 #include "objects/MallaFlujos.h"    // paso(): los nombres de las primitivas
-#include "config/W3dProfile.h"   // W3dNowMs (relojMs)
+#include <time.h>                 // relojMs sin el perfilador: clock()
 #include <ctype.h>   // setMemoria / memoria: las memorias que leen las rutinas
 #include "script/BindsJuego.h"
 #include "script/W3dScript.h"          // W3dScriptParamObjeto
@@ -29,6 +29,8 @@
 //  traiga camara, en vez de ser un stub mudo segun el #ifdef del build.)
 #include "io/UI2DFormato.h"            // g_w3dDirProyecto: base de las rutas relativas de sonido()
 #include "W3dAlmacen.h"                // W3dAlmacenMontado(): setTextura respeta las entradas del contenedor v4
+#include "objects/Materials.h"         // setTexturaB / setMezclaTextura: la mezcla de texturas de un material
+#include "objects/Textures.h"
 #include "base/W3dConfig.h"            // ConfigMudo(): mute global del Core
 #include "W3dAviso.h"                  // W3dAvisof: el aviso de control conectado/desconectado
 
@@ -39,6 +41,7 @@ extern "C" {
 
 #include <math.h>   // fabsf() para chocan()
 #include <map>      // cache de sonidos cargados por sonido()
+#include <algorithm> // perfilLua: lo mas caro primero
 #include "io/w3dFilesystem.h"   // ListDir: la precarga de WAVs recorre sonidos/ y musica/
 #include <string>
 
@@ -507,6 +510,52 @@ static int LSetTextura(lua_State* L) {
     }
     return 0;
 }
+// ---- MEZCLA DE TEXTURAS de un MATERIAL (por nombre): la textura B y cuanto de ella (Material::texturaB / mezclaB;
+//      gfx::MezclaTexturas: UNA pasada por multitextura, la unidad 1 interpola B con la base ya iluminada).
+//      setTexturaB(material, ruta): "" = ninguna; la ruta se resuelve como la de setTextura (una entrada del contenedor
+//      o del proyecto); devuelve true si la textura quedo puesta. setMezclaTextura(material, k): 0..1 (0 = solo la base:
+//      la unidad 1 ni se prende). mezclaTextura(material) -> k. Cambiar k por cuadro cuesta un glTexEnv. ----
+static std::string RutaTexturaScript(lua_State* L, const char* s) {
+    const std::string deLib = W3dScriptRutaDeLibreria(L, s);
+    std::string res = deLib.empty() ? std::string(s) : deLib;
+    const bool absoluta = !deLib.empty() || (!res.empty() && (res[0] == '/' || (res.size() > 1 && res[1] == ':')));
+    if (!absoluta && !g_w3dDirProyecto.empty()) {
+        W3dAlmacen* alm = W3dAlmacenMontado();
+        if (!(alm && alm->Existe(res))) res = g_w3dDirProyecto + "/" + res;
+    }
+    return res;
+}
+static int LSetTexturaB(lua_State* L) {
+    Material* mt = BuscarMaterialPorNombre(luaL_checkstring(L, 1));
+    const char* s = lua_tostring(L, 2);
+    if (!mt) { lua_pushboolean(L, 0); return 1; }
+    if (!s || !*s) { TexturaPonerEn(mt->texturaB, NULL); g_redraw = true; lua_pushboolean(L, 1); return 1; }
+    Texture* t = TexturaBuscar(s);                  // (ya cargada con esa ruta tal cual: la del .w3d)
+    std::string res;
+    if (!t) { res = RutaTexturaScript(L, s); t = TexturaBuscar(res); }
+    bool tomada = false;
+    if (!t) { t = TexturaTomar(res); tomada = true; }
+    if (!t) { lua_pushboolean(L, 0); return 1; }
+    TexturaPonerEn(mt->texturaB, t);
+    if (tomada) TexturaSoltar(t);   // (la ranura ya tiene su referencia)
+    g_redraw = true;
+    lua_pushboolean(L, 1);
+    return 1;
+}
+static int LSetMezclaTextura(lua_State* L) {
+    Material* mt = BuscarMaterialPorNombre(luaL_checkstring(L, 1));
+    if (!mt) return 0;
+    float k = (float)luaL_checknumber(L, 2);
+    if (k < 0.0f) k = 0.0f;
+    if (k > 1.0f) k = 1.0f;
+    if (mt->mezclaB != k) { mt->mezclaB = k; g_redraw = true; }
+    return 0;
+}
+static int LMezclaTextura(lua_State* L) {
+    Material* mt = BuscarMaterialPorNombre(luaL_checkstring(L, 1));
+    lua_pushnumber(L, mt ? mt->mezclaB : 0.0);
+    return 1;
+}
 // setFlipbook(objeto, cuadros, fps [, cols [, filas [, desfase [, ancho, alto, u0, v0]]]]):
 // convierte una Imagen2D en un FLIPBOOK animado por el MOTOR sobre su textura-atlas. El motor
 // avanza la celda cada frame (UpdateFlipbooks); Lua llama esto UNA vez y no toca mas la textura.
@@ -676,10 +725,136 @@ static int LRelojAudio(lua_State* L) {
     lua_pushnumber(L, w3dEngine::W3dAudioReloj());
     return 1;
 }
-// relojMs(): el reloj de pared en milisegundos (con decimales): para MEDIR lo que cuesta una parte del script
+// relojMs(): un reloj en milisegundos (con decimales): para MEDIR lo que cuesta una parte del script. El reloj de
+// pared lo pone el editor (config/W3dProfile.cpp: W3dNowMs, alta resolucion; en el N95 el tick del nanokernel); un
+// juego compilado no enlaza el perfilador (BindsJuego se comparte): cae a clock(), el tiempo de CPU del proceso
+double (*g_w3dRelojMsHook)() = 0;
 static int LRelojMs(lua_State* L) {
-    lua_pushnumber(L, W3dNowMs());
+    lua_pushnumber(L, g_w3dRelojMsHook ? g_w3dRelojMsHook() : (double)clock() * 1000.0 / (double)CLOCKS_PER_SEC);
     return 1;
+}
+// perfilLua(cuadros [, etiqueta [, instrucciones [, lineas]]]): PERFIL POR MUESTREO del script que lo llama (diagnostico, tambien en
+// el N95). Se llama al EMPEZAR cada actualizar(): marca el borde del cuadro. Cada `instrucciones` instrucciones de la VM
+// (1000 por defecto) un hook carga el tiempo de pared transcurrido a la LINEA que corre (tiempo propio), a su FUNCION
+// (propio) y a cada funcion de la pila (inclusivo); las funciones van por la linea donde se definen. Lo que tarda una
+// funcion de C (colSuelo, setPosicion...) cae en la linea que la llamo o en la siguiente. Cada `cuadros` cuadros vuelca
+// al log lo mas caro en ms por cuadro y arranca de cero; si cambia la etiqueta (la fase del juego) arranca de cero sin
+// volcar la mezcla; `lineas` = cuantas lineas vuelca (30). Prende tambien el perfil de las rutinas (el render: ms por
+// tipo de paso y por rutina) y lo vuelca en los mismos cuadros. perfilLua(0) lo apaga. (Un solo perfil a la vez: el del ultimo script que lo pidio.)
+namespace {
+struct PerfilLua {
+    std::map<int, double> linea, propio, inclusivo;
+    std::string etiqueta;
+    double ultimo, total;
+    int cuadros, cada, top;
+    unsigned llamada;   // la llamada del motor de la ultima muestra (W3dScript.cpp: g_w3dScriptLlamadas)
+    PerfilLua() : ultimo(0.0), total(0.0), cuadros(0), cada(0), top(30), llamada(0) {}
+};
+PerfilLua gPerfilLua;
+}
+static double PerfilReloj() {
+    return g_w3dRelojMsHook ? g_w3dRelojMsHook() : (double)clock() * 1000.0 / (double)CLOCKS_PER_SEC;
+}
+extern unsigned g_w3dScriptLlamadas;
+static void PerfilHook(lua_State* L, lua_Debug* ar) {
+    // la primera muestra de una llamada nueva del motor trae lo de afuera de lua (el render): no se cuenta
+    if (gPerfilLua.llamada != g_w3dScriptLlamadas) {
+        gPerfilLua.llamada = g_w3dScriptLlamadas;
+        gPerfilLua.ultimo = PerfilReloj();
+        return;
+    }
+    const double dt = PerfilReloj() - gPerfilLua.ultimo;
+    if (lua_getinfo(L, "Sl", ar) && ar->currentline > 0) {
+        gPerfilLua.linea[ar->currentline] += dt;
+        gPerfilLua.propio[ar->linedefined] += dt;
+        // inclusivo: cada funcion de lua de la pila UNA vez (la recursion no suma doble)
+        int vistas[16], nv = 0;
+        lua_Debug a;
+        for (int lv = 0; nv < 16 && lua_getstack(L, lv, &a); lv++) {
+            if (!lua_getinfo(L, "S", &a) || a.what[0] == 'C') continue;
+            bool ya = false;
+            for (int i = 0; i < nv; i++) if (vistas[i] == a.linedefined) { ya = true; break; }
+            if (!ya) { vistas[nv++] = a.linedefined; gPerfilLua.inclusivo[a.linedefined] += dt; }
+        }
+    }
+    gPerfilLua.total += dt;
+    gPerfilLua.ultimo = PerfilReloj();   // lo que tarda el hook no se cuenta
+}
+// las n entradas mas caras de un mapa, en lineas cortas (el log del N95 corta cerca de los 256 caracteres)
+static void PerfilVolcar(const char* que, const std::map<int, double>& m, int n, int cuadros) {
+    std::vector<std::pair<double, int> > v;
+    for (std::map<int, double>::const_iterator it = m.begin(); it != m.end(); ++it)
+        v.push_back(std::make_pair(it->second, it->first));
+    std::sort(v.begin(), v.end());
+    char b[256];
+    int len = snprintf(b, sizeof b, "PERFIL %s:", que);
+    for (int i = 0; i < n && i < (int)v.size(); i++) {
+        const std::pair<double, int>& e = v[v.size() - 1 - i];
+        if (len > 190) { w3dLogf("%s", b); len = snprintf(b, sizeof b, "PERFIL %s:", que); }
+        len += snprintf(b + len, sizeof b - len, " %d=%.3f", e.second, e.first / cuadros);
+    }
+    w3dLogf("%s", b);
+}
+// el perfil de las RUTINAS (objects/Rutina.h: ms, veces y llamadas GL por tipo de paso, ms por rutina) va con el de lua:
+// mismos cuadros, mismo volcado
+static void PerfilRutinasCero() {
+    for (int t = 0; t < PasoN; t++) { g_rutinaPerfilVeces[t] = 0; g_rutinaPerfilGL[t] = 0; g_rutinaPerfilMs[t] = 0.0; }
+    g_rutinaPerfilMsDe.clear(); g_rutinaPerfilTrisDe.clear();
+}
+static void PerfilRutinasVolcar(int cuadros) {
+    std::vector<std::pair<double, int> > v;
+    double tot = 0.0;
+    for (int t = 0; t < PasoN; t++) if (g_rutinaPerfilVeces[t]) {
+        // (por veces: el tiempo es solo de los Dibujar)
+        v.push_back(std::make_pair((double)g_rutinaPerfilVeces[t], t)); tot += g_rutinaPerfilMs[t];
+    }
+    std::sort(v.begin(), v.end());
+    w3dLogf("PERFIL pasos: %.3f ms/cuadro en los Dibujar (tipo=ms/veces/gl por cuadro; ms solo de dibujar)", tot / cuadros);
+    char b[256];
+    int len = snprintf(b, sizeof b, "PERFIL pasos:");
+    for (size_t i = v.size(); i-- > 0; ) {
+        const int t = v[i].second;
+        if (len > 180) { w3dLogf("%s", b); len = snprintf(b, sizeof b, "PERFIL pasos:"); }
+        len += snprintf(b + len, sizeof b - len, " %s=%.3f/%.1f/%.1f", W3dPasoNombre(t), g_rutinaPerfilMs[t] / cuadros,
+                        (double)g_rutinaPerfilVeces[t] / cuadros, (double)g_rutinaPerfilGL[t] / cuadros);
+    }
+    w3dLogf("%s", b);
+    std::vector<std::pair<double, std::string> > r;
+    for (std::map<std::string, double>::const_iterator it = g_rutinaPerfilMsDe.begin(); it != g_rutinaPerfilMsDe.end(); ++it)
+        r.push_back(std::make_pair(it->second, it->first));
+    std::sort(r.begin(), r.end());
+    len = snprintf(b, sizeof b, "PERFIL rutinas (ms/triangulos por cuadro):");
+    for (size_t i = r.size(); i-- > 0; ) {
+        if (len > 180) { w3dLogf("%s", b); len = snprintf(b, sizeof b, "PERFIL rutinas (ms/triangulos por cuadro):"); }
+        len += snprintf(b + len, sizeof b - len, " %s=%.3f/%ld", r[i].second.c_str(), r[i].first / cuadros,
+                        g_rutinaPerfilTrisDe[r[i].second] / cuadros);
+    }
+    w3dLogf("%s", b);
+}
+static int LPerfilLua(lua_State* L) {
+    const int cada = (int)luaL_optinteger(L, 1, 300);
+    const char* et = luaL_optstring(L, 2, "");
+    const int instr = (int)luaL_optinteger(L, 3, 1000);
+    const int top = (int)luaL_optinteger(L, 4, 30);
+    PerfilLua& p = gPerfilLua;
+    if (cada <= 0) { lua_sethook(L, NULL, 0, 0); p = PerfilLua(); g_rutinaPerfil = false; return 0; }
+    if (p.cada == 0 || p.etiqueta != et) {
+        p = PerfilLua(); p.etiqueta = et; p.cada = cada; p.top = top;
+        lua_sethook(L, PerfilHook, LUA_MASKCOUNT, instr > 0 ? instr : 1000);
+        PerfilRutinasCero(); g_rutinaPerfil = true;
+    } else if (++p.cuadros >= cada) {
+        w3dLogf("PERFIL lua %s: %d cuadros, %.3f ms/cuadro muestreados (lineas de auto.lua=ms por cuadro)",
+                p.etiqueta.c_str(), p.cuadros, p.total / p.cuadros);
+        PerfilVolcar("lineas", p.linea, p.top, p.cuadros);
+        PerfilVolcar("propio", p.propio, 16, p.cuadros);
+        PerfilVolcar("inclusivo", p.inclusivo, 16, p.cuadros);
+        PerfilRutinasVolcar(p.cuadros); PerfilRutinasCero();
+        const std::string e = p.etiqueta;
+        p = PerfilLua(); p.etiqueta = e; p.cada = cada; p.top = top;
+    }
+    p.ultimo = PerfilReloj();
+    p.llamada = g_w3dScriptLlamadas;
+    return 0;
 }
 // sonidoPosicion(handle): SEGUNDOS del sonido ya reproducidos por esa voz, o nil si la voz
 // no existe (termino, se corto o el handle es nil/viejo). Es el RELOJ MAESTRO para una
@@ -1387,6 +1562,7 @@ void BindsJuegoRegistrar(void* Lv) {
     lua_pushcfunction(L, LPararSonido); lua_setglobal(L, "pararSonido");
     lua_pushcfunction(L, LRelojAudio);  lua_setglobal(L, "relojAudio");
     lua_pushcfunction(L, LRelojMs);     lua_setglobal(L, "relojMs");
+    lua_pushcfunction(L, LPerfilLua);   lua_setglobal(L, "perfilLua");
     lua_pushcfunction(L, LPararSonidos); lua_setglobal(L, "pararSonidos");
     lua_pushcfunction(L, LAjustarSonido); lua_setglobal(L, "ajustarSonido");
     lua_pushcfunction(L, LSonidoPosicion); lua_setglobal(L, "sonidoPosicion");
@@ -1400,6 +1576,9 @@ void BindsJuegoRegistrar(void* Lv) {
     lua_pushcfunction(L, LNiebla);      lua_setglobal(L, "niebla");
     lua_pushcfunction(L, LSetNiebla);   lua_setglobal(L, "setNiebla");
     lua_pushcfunction(L, LMostrar);     lua_setglobal(L, "mostrar");
+    lua_pushcfunction(L, LSetTexturaB);      lua_setglobal(L, "setTexturaB");       // mezcla de texturas (material)
+    lua_pushcfunction(L, LSetMezclaTextura); lua_setglobal(L, "setMezclaTextura");
+    lua_pushcfunction(L, LMezclaTextura);    lua_setglobal(L, "mezclaTextura");
     lua_pushcfunction(L, LSetOpacidad); lua_setglobal(L, "setOpacidad");
     lua_pushcfunction(L, LSetTinte);    lua_setglobal(L, "setTinte");
     lua_pushcfunction(L, LSetRot2D);    lua_setglobal(L, "setRot2D");

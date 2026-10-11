@@ -100,6 +100,24 @@
 //    animsetpurgar [N]
 //        los animsets como RECURSOS del proyecto (io/GuardarAnimSets.h, lo que usa el outliner
 //        por recursos): usuarios, renombrar, carpeta cosmetica, purgar los huerfanos.
+//  CLAVES COMPACTAS (W3dClaves, animation/Animation.h: una curva horneada de un .w3da en ~4 B por clave):
+//    clavessintetica [ruta.w3d] [invertido]
+//        escena NUEVA con 2 armatures "Horneado" (el rig de animsetsintetica) con los MISMOS clips
+//        "Largo" (22 curvas que se compactan: bezier HAuto/HAutoClamped/HVector/HFree en cero, lineal,
+//        escalon, paso 1/2/3/5, primer frame negativo, frames enormes, un -0.0, un tramo plano; y 3 que
+//        no: un key, frames irregulares, un handle guardado) y "Corto" (16, de 2 y 3 claves).
+//        'invertido' agrega "Invertido": los huesos en otro orden (al abrir, los clips por una VARIANTE).
+//    clavesinfo [marca] [compactas N] [nuevas N] [maxbpc X]
+//        las claves de TODAS las curvas: compactas vivas, bytes, cuantas se expandieron. 'marca' recuerda
+//        las expansiones de ahora; 'nuevas' = las expandidas desde la marca; 'maxbpc' = B por clave compacta.
+//    clavescomparar <armature> [paso X] [compactas N]
+//        cada curva de cada clip: la curva (compacta o no) y una COMUN con sus mismas claves contra la
+//        evaluacion de ANTES (copiada aca): EvalF en todos los frames enteros del rango +-3, fracciones de
+//        'paso' (0.125), una al azar por frame, +-1e30 y NaN; Eval(int) y HandleEfectivo de cada clave. Todo
+//        bit a bit, y mirar no puede expandir nada.
+//    claveseditar <armature> <clip> insertar|mover|borrar
+//        edita la primera curva compacta del clip como el editor (copy-on-write, undo de keyframes): se
+//        expande SOLO esa, la edicion se ve, Ctrl+Z devuelve las mismas claves (compactas) y Ctrl+Y la rehace.
 // ============================================================================
 #include "test/W3dPruebasAnims.h"
 #include "animation/W3dAnimSet.h"
@@ -1111,7 +1129,7 @@ unsigned HuellaClip(const SkeletalAnimation* c) {
             const AnimProperty& ap = tr.Propertys[p];
             Mezclar(h, (unsigned)ap.Property); Mezclar(h, (unsigned)ap.component); Mezclar(h, (unsigned)ap.keyframes.size());
             for (size_t k = 0; k < ap.keyframes.size(); k++) {
-                const keyFrame& kf = ap.keyframes[k];
+                const keyFrame kf = ap.keyframes.Clave(k);   // (por valor: verificar no expande una curva compacta)
                 Mezclar(h, (unsigned)kf.frame); Mezclar(h, BitsF(kf.value));
                 Mezclar(h, (unsigned)kf.Interpolation); Mezclar(h, (unsigned)kf.handleType);
                 Mezclar(h, BitsF(kf.inDF)); Mezclar(h, BitsF(kf.inDV)); Mezclar(h, BitsF(kf.outDF)); Mezclar(h, BitsF(kf.outDV));
@@ -1499,6 +1517,406 @@ bool CmdPurgar(std::istringstream& ss, std::string& err) {
     return true;
 }
 
+// ============================================================================
+//  CLAVES COMPACTAS (W3dClaves, animation/Animation.h): una curva HORNEADA leida de un .w3da
+//  queda en ~4 B por clave. clavessintetica / clavesinfo / clavescomparar / claveseditar
+//  (ver la lista de comandos arriba; la prueba es tools/pruebas/prueba_claves_compactas.w3s).
+// ============================================================================
+long gClavesMarca = 0;   // las expansiones al 'clavesinfo marca'
+
+// ---- la evaluacion de ANTES de W3dClaves (Animation.cpp), copiada TAL CUAL sobre un std::vector<keyFrame>:
+//      la referencia de "sin cambiar ningun resultado" para la curva comun y para la compacta ----
+void ViejoHandle(const std::vector<keyFrame>& kf, size_t i, bool salida, float& dF, float& dV) {
+    const size_t n = kf.size();
+    const keyFrame& k = kf[i];
+    dF = 0.0f; dV = 0.0f;
+    if (n < 2) return;
+    size_t vec = salida ? (i + 1 < n ? i + 1 : (i > 0 ? i - 1 : i))
+                        : (i > 0 ? i - 1 : (i + 1 < n ? i + 1 : i));
+    float largo = (float)(kf[vec].frame - k.frame) / 3.0f;
+    if (salida  && largo <= 0.0f) largo =  -largo;
+    if (!salida && largo >= 0.0f) largo =  -largo;
+    if (largo == 0.0f) largo = salida ? 1.0f : -1.0f;
+    if (k.handleType == HFree || k.handleType == HAligned){
+        dF = salida ? k.outDF : k.inDF;
+        dV = salida ? k.outDV : k.inDV;
+        return;
+    }
+    if (k.handleType == HVector){
+        int df = kf[vec].frame - k.frame;
+        if (df == 0){ dF = largo; dV = 0.0f; return; }
+        float t = largo / (float)df;
+        dF = largo;
+        dV = (kf[vec].value - k.value) * t;
+        return;
+    }
+    size_t a = (i == 0) ? 0 : i - 1;
+    size_t b = (i + 1 >= n) ? n - 1 : i + 1;
+    int spanAB = kf[b].frame - kf[a].frame;
+    float m = (spanAB != 0) ? (kf[b].value - kf[a].value) / (float)spanAB : 0.0f;
+    if (k.handleType == HAutoClamped && i > 0 && i + 1 < n){
+        float dPrev = kf[i-1].value - k.value;
+        float dNext = kf[i+1].value - k.value;
+        if ((dPrev > 0.0f && dNext > 0.0f) || (dPrev < 0.0f && dNext < 0.0f)) m = 0.0f;
+    }
+    dF = largo;
+    dV = m * largo;
+    if (k.handleType == HAutoClamped){
+        float vv = kf[vec].value;
+        float lo = (k.value < vv) ? k.value : vv;
+        float hi = (k.value > vv) ? k.value : vv;
+        float cp = k.value + dV;
+        if (cp < lo) dV = lo - k.value;
+        else if (cp > hi) dV = hi - k.value;
+    }
+}
+float ViejoBezier(const std::vector<keyFrame>& kf, size_t i, float frame) {
+    const keyFrame& a = kf[i-1];
+    const keyFrame& b = kf[i];
+    const float x0 = (float)a.frame, x3 = (float)b.frame;
+    const float span = x3 - x0;
+    if (span <= 0.0f) return b.value;
+    float aDF, aDV, bDF, bDV;
+    ViejoHandle(kf, i-1, true,  aDF, aDV);
+    ViejoHandle(kf, i,   false, bDF, bDV);
+    float x1 = x0 + aDF, x2 = x3 + bDF;
+    if (x1 < x0) x1 = x0; if (x1 > x3) x1 = x3;
+    if (x2 < x0) x2 = x0; if (x2 > x3) x2 = x3;
+    const float y0 = a.value, y1 = a.value + aDV, y2 = b.value + bDV, y3 = b.value;
+    float lo = 0.0f, hi = 1.0f, t = 0.5f;
+    for (int it = 0; it < 24; it++){
+        t = (lo + hi) * 0.5f;
+        float u = 1.0f - t;
+        float x = u*u*u*x0 + 3.0f*u*u*t*x1 + 3.0f*u*t*t*x2 + t*t*t*x3;
+        if (x < frame) lo = t; else hi = t;
+    }
+    float u = 1.0f - t;
+    return u*u*u*y0 + 3.0f*u*u*t*y1 + 3.0f*u*t*t*y2 + t*t*t*y3;
+}
+float ViejoEvalF(const std::vector<keyFrame>& kf, float frame, float def) {
+    const size_t n = kf.size();
+    if (n == 0) return def;
+    if (frame <= (float)kf[0].frame)     return kf[0].value;
+    if (frame >= (float)kf[n-1].frame)   return kf[n-1].value;
+    for (size_t i = 1; i < n; i++) {
+        if ((float)kf[i].frame < frame) continue;
+        const keyFrame& a = kf[i-1];
+        const keyFrame& b = kf[i];
+        if (a.Interpolation == KfConstant) return (frame >= (float)b.frame) ? b.value : a.value;
+        int span = b.frame - a.frame;
+        if (span <= 0) return b.value;
+        float t = (frame - (float)a.frame) / (float)span;
+        if (a.Interpolation != KfBezier)
+            return a.value + (b.value - a.value) * t;
+        return ViejoBezier(kf, i, frame);
+    }
+    return kf[n-1].value;
+}
+
+// una curva HORNEADA: n claves desde 'primero' cada 'paso', todas con la misma interpolacion y tipo de handle,
+// handles en cero (lo que trae un glTF importado). Valores deterministas.
+AnimProperty CurvaHorneada(int prop, int comp, int primero, int paso, int n, int interp, int tipoH,
+                           float base, float amp, float fase) {
+    AnimProperty ap; ap.Property = prop; ap.component = comp;
+    for (int i = 0; i < n; i++) {
+        keyFrame k; k.frame = primero + paso * i; k.Interpolation = interp; k.handleType = tipoH;
+        k.value = base + (float)(amp * sin(0.23 * i + fase));
+        ap.keyframes.push_back(k);
+    }
+    return ap;
+}
+// un clip con curvas que se COMPACTAN al leerlas (todas las interpolaciones y tipos de handle, paso 1 / 2 / 3 / 5,
+// un primer frame negativo, frames enormes -fuera de lo exacto en float-, un -0.0 y un tramo plano) y otras que
+// NO (un solo key, frames irregulares, un handle guardado en -0.0): 22 compactas + 3 comunes
+SkeletalAnimation* ClipHorneado(const Armature* a, const std::string& nombre) {
+    SkeletalAnimation* c = new SkeletalAnimation(nombre);
+    c->FrameRate = 30; c->startFrame = 1; c->endFrame = 60;
+    for (int h = 0; h < 5; h++) {
+        BoneTrack tr;
+        tr.bone = HuesoDe(a, kHuesos[h]);
+        tr.Propertys.push_back(CurvaHorneada(AnimRotation, AnimX, 1, 1, 60, KfBezier, HAuto, 0.0f, 25.0f, 0.5f * h));
+        tr.Propertys.push_back(CurvaHorneada(AnimRotation, AnimY, 1, 1, 60, KfBezier, HAutoClamped, 0.0f, 18.0f, 0.9f * h));
+        tr.Propertys.push_back(CurvaHorneada(AnimRotation, AnimZ, 1, 1, 60, KfBezier, HVector, 0.0f, 12.0f, 1.3f * h));
+        if (h == 0) {
+            tr.Propertys.push_back(CurvaHorneada(AnimPosition, AnimX, 1, 1, 60, KfLinear, HAuto, 0.0f, 0.8f, 0.1f));
+            tr.Propertys.push_back(CurvaHorneada(AnimPosition, AnimY, 1, 3, 20, KfConstant, HAuto, 0.5f, 0.3f, 0.2f));
+            tr.Propertys.push_back(CurvaHorneada(AnimPosition, AnimZ, 1, 1, 60, KfBezier, HFree, 0.0f, 0.6f, 0.3f));
+        }
+        if (h == 1) {
+            tr.Propertys.push_back(CurvaHorneada(AnimScale, AnimX, -7, 2, 40, KfBezier, HAuto, 1.0f, 0.2f, 0.4f));
+            AnimProperty uno; uno.Property = AnimScale; uno.component = AnimY;   // UN key: comun
+            keyFrame k; k.frame = 9; k.value = 1.25f; uno.keyframes.push_back(k);
+            tr.Propertys.push_back(uno);
+            AnimProperty irr = CurvaHorneada(AnimScale, AnimZ, 1, 1, 6, KfBezier, HAuto, 1.0f, 0.1f, 0.0f);
+            irr.keyframes[3].frame = 5; irr.keyframes[4].frame = 9; irr.keyframes[5].frame = 30;   // irregulares: comun
+            tr.Propertys.push_back(irr);
+        }
+        if (h == 2) {
+            tr.Propertys.push_back(CurvaHorneada(AnimPosition, AnimX, 16777200, 3, 24, KfLinear, HAuto, 0.0f, 0.5f, 0.6f));
+            tr.Propertys.push_back(CurvaHorneada(AnimPosition, AnimY, 1, 5, 13, KfBezier, HAutoClamped, 0.2f, 0.4f, 0.7f));
+            AnimProperty han = CurvaHorneada(AnimPosition, AnimZ, 1, 1, 60, KfBezier, HAuto, 0.0f, 0.3f, 0.8f);
+            han.keyframes[7].inDV = -0.0f;   // un handle guardado (bits no cero): comun, como en el archivo
+            tr.Propertys.push_back(han);
+        }
+        if (h == 3) {
+            AnimProperty raro = CurvaHorneada(AnimPosition, AnimX, 1, 1, 60, KfBezier, HAutoClamped, 0.0f, 0.5f, 0.0f);
+            raro.keyframes[0].value = -0.0f;
+            for (int q = 20; q < 30; q++) raro.keyframes[q].value = 0.75f;   // un tramo plano (los picos del clamped)
+            tr.Propertys.push_back(raro);
+        }
+        c->tracks.push_back(tr);
+    }
+    return c;
+}
+// un clip CORTO: curvas de 2 claves (las de un keyframe al principio y otro al final) y un escalon de 3
+SkeletalAnimation* ClipCortoHorneado(const Armature* a, const std::string& nombre) {
+    SkeletalAnimation* c = new SkeletalAnimation(nombre);
+    c->FrameRate = 24; c->startFrame = 1; c->endFrame = 11;
+    for (int h = 0; h < 5; h++) {
+        BoneTrack tr;
+        tr.bone = HuesoDe(a, kHuesos[h]);
+        tr.Propertys.push_back(CurvaHorneada(AnimRotation, AnimX, 1, 10, 2, KfBezier, HAuto, 0.0f, 40.0f, 0.3f * h));
+        tr.Propertys.push_back(CurvaHorneada(AnimRotation, AnimY, 1, 10, 2, KfLinear, HAuto, 0.0f, 30.0f, 0.5f * h));
+        tr.Propertys.push_back(CurvaHorneada(AnimRotation, AnimZ, 1, 10, 2, KfBezier, HVector, 0.0f, 20.0f, 0.7f * h));
+        if (h == 0) tr.Propertys.push_back(CurvaHorneada(AnimPosition, AnimY, 1, 5, 3, KfConstant, HAuto, 0.0f, 1.0f, 0.0f));
+        c->tracks.push_back(tr);
+    }
+    return c;
+}
+
+// ---- clavessintetica [ruta.w3d] ----
+bool CmdClavesSintetica(std::istringstream& ss, std::string& err) {
+    std::string ruta = LeerPalabra(ss), extra;
+    bool invertido = false;
+    if (ruta == "invertido") { invertido = true; ruta.clear(); }
+    while (ss >> extra) if (extra == "invertido") invertido = true;
+    ReiniciarEscena();
+    Collection* col = new Collection(SceneCollection);
+    col->SetNameObj("Personajes");
+    CollectionActive = col;
+    // dos armatures con los MISMOS clips (el guardado los deja en UN animset) y, con 'invertido', uno con los
+    // huesos en OTRO orden: al abrir usa los mismos clips por una VARIANTE (una copia reindexada)
+    const int total = invertido ? 3 : 2;
+    for (int i = 0; i < total; i++) {
+        Armature* a = CrearRig(col, i < 2 ? "Horneado" : "Invertido", i >= 2, 2.0f * (float)i);
+        a->animations.push_back(ClipHorneado(a, "Largo"));
+        a->animations.push_back(ClipCortoHorneado(a, "Corto"));
+        a->animActiva = 0;
+    }
+    DeseleccionarTodo();
+    ObjActivo = NULL;
+    printf("      [clavessintetica] %d armatures con los clips horneados 'Largo' y 'Corto'\n", total);
+    if (!ruta.empty()) {
+        const bool ok = GuardarW3D(ruta);
+        printf("      [clavessintetica] guardada en %s -> %s\n", ruta.c_str(), ok ? "OK" : "FALLO");
+        if (!ok) { err = "clavessintetica: no pude guardar " + ruta; return false; }
+    }
+    return true;
+}
+
+// ---- clavesinfo [marca] [compactas N] [nuevas N] [maxbpc X] ----
+bool CmdClavesInfo(std::istringstream& ss, std::string& err) {
+    W3dClavesStats st;
+    W3dClavesEstadisticas(st);
+    const double bpc = st.clavesCompactas ? (double)st.bytesCompactas / (double)st.clavesCompactas : 0.0;
+    printf("      [clavesinfo] compactas=%ld curvas (%ld claves, %ld B = %.2f B/clave) bytes vivos=%ld expandidas=%ld (%ld desde la marca)\n",
+           st.compactas, st.clavesCompactas, st.bytesCompactas, bpc, st.bytes, st.expansiones, st.expansiones - gClavesMarca);
+    std::string k;
+    while (ss >> k) {
+        if (k == "marca") { gClavesMarca = st.expansiones; continue; }
+        if (k == "maxbpc") {
+            double v = 0.0; ss >> v;
+            if (bpc > v) { char b[128]; sprintf(b, "clavesinfo: %.2f B por clave compacta, se esperaban <= %.2f", bpc, v); err = b; return false; }
+            continue;
+        }
+        long v = -1; ss >> v;
+        long tiene = 0;
+        if      (k == "compactas") tiene = st.compactas;
+        else if (k == "nuevas")    tiene = st.expansiones - gClavesMarca;
+        else { err = "clavesinfo: assert desconocido '" + k + "'"; return false; }
+        if (tiene != v) { char b[160]; sprintf(b, "clavesinfo %s: hay %ld, se esperaban %ld", k.c_str(), tiene, v); err = b; return false; }
+    }
+    return true;
+}
+
+// los bits de un float (NaN incluido: la misma cuenta da el mismo NaN)
+bool MismosBitsF(float a, float b) { return memcmp(&a, &b, sizeof(float)) == 0; }
+
+// ---- clavescomparar <armature> [paso X] [compactas N] ----
+bool CmdClavesComparar(std::istringstream& ss, std::string& err) {
+    const std::string n = LeerPalabra(ss);
+    float paso = 0.125f; long quiere = -1;
+    std::string k;
+    while (ss >> k) {
+        if (k == "paso") ss >> paso;
+        else if (k == "compactas") ss >> quiere;
+        else { err = "clavescomparar: opcion desconocida '" + k + "'"; return false; }
+    }
+    // las listas de curvas: las pistas de los clips de un ARMATURE o las de los clips de jerarquia de la
+    // biblioteca de una RAIZ (bloques JCLP)
+    std::vector<const std::vector<AnimProperty>*> listas;
+    Object* o = SceneCollection ? FindObjectByName(SceneCollection, n) : 0;
+    if (o && o->getType() == ObjectType::armature) {
+        const Armature* a = (const Armature*)o;
+        for (size_t ci = 0; ci < a->animations.size(); ci++)
+            for (size_t t = 0; a->animations[ci] && t < a->animations[ci]->tracks.size(); t++)
+                listas.push_back(&a->animations[ci]->tracks[t].Propertys);
+    } else if (o && W3dJerAnimSet(o)) {
+        const W3dAnimSet* s = W3dJerAnimSet(o);
+        for (size_t j = 0; j < s->datos.jerarquias.size(); j++)
+            for (size_t t = 0; s->datos.jerarquias[j] && t < s->datos.jerarquias[j]->pistas.size(); t++)
+                listas.push_back(&s->datos.jerarquias[j]->pistas[t].props);
+    }
+    if (!o || listas.empty() || !(paso > 0.0f && paso < 1.0f)) {
+        err = "clavescomparar: uso: clavescomparar <armature|raiz de clips de jerarquia> [paso X] [compactas N]"; return false;
+    }
+    W3dClavesStats st0;
+    W3dClavesEstadisticas(st0);
+    long curvas = 0, compactas = 0, evals = 0, handles = 0, malas = 0;
+    std::string primera;
+    unsigned semilla = 12345u;
+    for (size_t l = 0; l < listas.size(); l++) {
+            for (size_t p = 0; p < listas[l]->size(); p++) {
+                const AnimProperty& ap = (*listas[l])[p];
+                curvas++;
+                if (ap.keyframes.Compacta()) compactas++;
+                // las MISMAS claves en un vector (por valor: la curva no se toca) y una curva COMUN con ellas
+                std::vector<keyFrame> v;
+                for (size_t i = 0; i < ap.keyframes.size(); i++) v.push_back(ap.keyframes.Clave(i));
+                AnimProperty comun; comun.Property = ap.Property; comun.component = ap.component;
+                comun.keyframes = v;
+                char donde[96]; sprintf(donde, "pista %d curva %d", (int)l, (int)p);
+                if (!ap.keyframes.MismosBits(comun.keyframes) || !comun.keyframes.MismosBits(ap.keyframes)) {
+                    if (!malas++) primera = std::string(donde) + ": las claves no son las mismas";
+                }
+                if (v.empty()) continue;
+                // los frames: todos los enteros del rango (+-3), fracciones de 'paso', algunas al azar y los raros
+                std::vector<float> fs;
+                const int f0 = ap.keyframes.PrimerFrame() - 3, f1 = ap.keyframes.UltimoFrame() + 3;
+                for (int f = f0; f <= f1; f++) {
+                    fs.push_back((float)f);
+                    for (float d = paso; d < 1.0f; d += paso) fs.push_back((float)f + d);
+                    semilla = semilla * 1103515245u + 12345u;
+                    fs.push_back((float)f + (float)((semilla >> 8) & 0xFFFF) / 65536.0f);
+                }
+                const float raros[4] = { 0.0f, -1.0e30f, 1.0e30f, (float)(f0 + f1) * 0.5f };
+                for (int q = 0; q < 4; q++) fs.push_back(raros[q]);
+                float nan; unsigned un = 0x7FC00000u; memcpy(&nan, &un, 4); fs.push_back(nan);
+                for (size_t q = 0; q < fs.size(); q++) {
+                    const float r = ViejoEvalF(v, fs[q], 7.0f);
+                    const float x = ap.EvalF(fs[q], 7.0f), y = comun.EvalF(fs[q], 7.0f);
+                    evals++;
+                    if (!MismosBitsF(r, x) || !MismosBitsF(r, y)) {
+                        if (!malas++) {
+                            char b[200]; sprintf(b, ": EvalF(%.6f) antes=%.9g compacta=%.9g comun=%.9g", fs[q], r, x, y);
+                            primera = std::string(donde) + b;
+                        }
+                    }
+                }
+                for (int f = f0; f <= f1; f++) {   // Eval(int): el editor y el reposo
+                    const float r = ViejoEvalF(v, (float)f, -3.0f);
+                    if (!MismosBitsF(r, ap.Eval(f, -3.0f)) || !MismosBitsF(r, comun.Eval(f, -3.0f)))
+                        if (!malas++) primera = std::string(donde) + ": Eval(int) distinto";
+                }
+                // los handles efectivos de cada clave, de los dos lados (el editor de curvas los dibuja)
+                for (size_t i = 0; i < v.size(); i++)
+                    for (int s = 0; s < 2; s++) {
+                        float rf, rv, xf, xv, yf, yv;
+                        ViejoHandle(v, i, s != 0, rf, rv);
+                        ap.HandleEfectivo(i, s != 0, xf, xv);
+                        comun.HandleEfectivo(i, s != 0, yf, yv);
+                        handles++;
+                        if (!MismosBitsF(rf, xf) || !MismosBitsF(rv, xv) || !MismosBitsF(rf, yf) || !MismosBitsF(rv, yv))
+                            if (!malas++) primera = std::string(donde) + ": HandleEfectivo distinto";
+                    }
+            }
+    }
+    W3dClavesStats st1;
+    W3dClavesEstadisticas(st1);
+    printf("      [clavescomparar] '%s': %ld curvas (%ld compactas), %ld evaluaciones y %ld handles contra la evaluacion de "
+           "antes: %ld distintas; expandidas al comparar=%ld\n", n.c_str(), curvas, compactas, evals, handles, malas,
+           st1.expansiones - st0.expansiones);
+    if (malas) { err = "clavescomparar: " + primera; return false; }
+    if (st1.expansiones != st0.expansiones) { err = "clavescomparar: mirar las curvas EXPANDIO alguna compacta"; return false; }
+    if (quiere >= 0 && quiere != compactas) {
+        char b[128]; sprintf(b, "clavescomparar: %ld curvas compactas, se esperaban %ld", compactas, quiere); err = b; return false;
+    }
+    return true;
+}
+
+// cuantas curvas del clip son compactas
+long CompactasDe(const SkeletalAnimation* c) {
+    long k = 0;
+    for (size_t t = 0; c && t < c->tracks.size(); t++)
+        for (size_t p = 0; p < c->tracks[t].Propertys.size(); p++) if (c->tracks[t].Propertys[p].keyframes.Compacta()) k++;
+    return k;
+}
+
+// ---- claveseditar <armature> <clip> insertar|mover|borrar ----
+bool CmdClavesEditar(std::istringstream& ss, std::string& err) {
+    const std::string n = LeerPalabra(ss);
+    int clip = -1; ss >> clip;
+    std::string op; ss >> op;
+    Armature* a = ArmPorNombre(n);
+    if (!a || clip < 0 || clip >= (int)a->animations.size() || (op != "insertar" && op != "mover" && op != "borrar")) {
+        err = "claveseditar: uso: claveseditar <armature> <clip> insertar|mover|borrar"; return false;
+    }
+    PrepararTimeline(a, clip);      // el clip en el timeline: el undo de keyframes captura ESTE
+    W3dArmatureAnimsPropias(a);     // copy-on-write, como el editor antes de escribir (copia las compactas compactas)
+    SkeletalAnimation* c = a->animations[clip];
+    // la primera curva compacta del clip con 4 claves o mas
+    size_t t = 0, p = 0; bool hay = false;
+    for (size_t tt = 0; c && tt < c->tracks.size() && !hay; tt++)
+        for (size_t pp = 0; pp < c->tracks[tt].Propertys.size() && !hay; pp++) {
+            const W3dClaves& k = c->tracks[tt].Propertys[pp].keyframes;
+            if (k.Compacta() && k.size() >= 4) { t = tt; p = pp; hay = true; }
+        }
+    if (!hay) { SoltarTimeline(); err = "claveseditar: el clip no tiene una curva compacta de 4 claves o mas"; return false; }
+    const AnimProperty antes = c->tracks[t].Propertys[p];   // (copia COMPACTA)
+    const long otras = CompactasDe(c) - 1;
+    const size_t n0 = antes.keyframes.size();
+    W3dClavesStats s0;
+    W3dClavesEstadisticas(s0);
+    UndoKeyframesIniciar();
+    {
+        AnimProperty& ap = c->tracks[t].Propertys[p];
+        if (op == "mover")         ap.keyframes[3].value += 1.5f;                        // el editor de curvas
+        else if (op == "insertar") SetKeyCurva(ap, ap.keyframes.UltimoFrame() + 5, 2.5f); // la I
+        else                       BorrarKeyframeManteniendoForma(ap, ap.keyframes.Frame(2)); // la X del dope sheet
+    }
+    UndoKeyframesConfirmar();
+    W3dClavesStats s1;
+    W3dClavesEstadisticas(s1);
+    const AnimProperty& ap = c->tracks[t].Propertys[p];
+    const long nuevas = s1.expansiones - s0.expansiones, otrasDespues = CompactasDe(c);
+    // la edicion se ve: el valor movido / la clave nueva / la que falta
+    bool seVe = false;
+    if (op == "mover")         seVe = ap.keyframes.size() == n0 && MismosBitsF(ap.keyframes.Valor(3), antes.keyframes.Valor(3) + 1.5f);
+    else if (op == "insertar") seVe = ap.keyframes.size() == n0 + 1 && ap.Eval(antes.keyframes.UltimoFrame() + 5, 0.0f) == 2.5f;
+    else                       seVe = ap.keyframes.size() == n0 - 1 && ap.keyframes.Frame(2) == antes.keyframes.Frame(3);
+    const bool comun = !ap.keyframes.Compacta();
+    // Ctrl+Z: las MISMAS claves de antes, bit a bit, y compacta otra vez (el paso de undo guardo la compacta)
+    UndoDeshacer();
+    const AnimProperty& ap2 = c->tracks[t].Propertys[p];
+    const bool deshecho = ap2.keyframes.MismosBits(antes.keyframes) && ap2.keyframes.Compacta();
+    // Ctrl+Y: la edicion vuelve
+    UndoRehacer();
+    const AnimProperty& ap3 = c->tracks[t].Propertys[p];
+    const bool rehecho = !ap3.keyframes.Compacta() && !ap3.keyframes.MismosBits(antes.keyframes) &&
+                         ap3.keyframes.size() == (op == "insertar" ? n0 + 1 : op == "borrar" ? n0 - 1 : n0);
+    SoltarTimeline();
+    printf("      [claveseditar] '%s' clip %d %s (pista %d curva %d, %d claves): expandidas=%ld, la curva %s, las otras %ld de %ld "
+           "compactas, se ve %s, Ctrl+Z %s, Ctrl+Y %s\n", a->name.c_str(), clip, op.c_str(), (int)t, (int)p, (int)n0, nuevas,
+           comun ? "COMUN" : "compacta", otrasDespues, otras, seVe ? "SI" : "NO", deshecho ? "OK (compacta)" : "MAL",
+           rehecho ? "OK" : "MAL");
+    if (nuevas != 1) { char b[96]; sprintf(b, "claveseditar: se expandieron %ld curvas (tiene que ser SOLO la editada)", nuevas); err = b; return false; }
+    if (!comun || otrasDespues != otras) { err = "claveseditar: la curva editada no quedo comun o se expandio otra del clip"; return false; }
+    if (!seVe) { err = "claveseditar: la edicion no se ve en la curva"; return false; }
+    if (!deshecho) { err = "claveseditar: Ctrl+Z no devolvio las mismas claves (compactas)"; return false; }
+    if (!rehecho) { err = "claveseditar: Ctrl+Y no rehizo la edicion"; return false; }
+    return true;
+}
+
 } // namespace
 
 // la linea de los animsets de 'meminfo' (W3dScript.cpp la llama; el resto del informe es de alla)
@@ -1517,6 +1935,12 @@ void W3dPruebasAnimsMeminfo() {
     printf("      [meminfo] animsets: vivos=%d refs=%d clips=%d (+%d de variantes) keys=%ld compartido=%ld B (%.1f KB) AHORRO=%ld B (%.1f KB) copias COW=%d\n",
            st.vivos, st.refs, st.clips, st.clipsVariante, st.keys, st.bytes, st.bytes / 1024.0, ahorro, ahorro / 1024.0,
            W3dAnimSetsCopias());
+    // las claves de TODAS las curvas vivas (W3dClaves, Animation.h): las compactas y las expandidas desde el arranque
+    W3dClavesStats cs;
+    W3dClavesEstadisticas(cs);
+    printf("      [meminfo] claves: bytes vivos=%ld B (%.1f KB) compactas=%ld curvas (%ld claves, %ld B = %.2f B/clave) expandidas=%ld (desde el arranque)\n",
+           cs.bytes, cs.bytes / 1024.0, cs.compactas, cs.clavesCompactas, cs.bytesCompactas,
+           cs.clavesCompactas ? (double)cs.bytesCompactas / (double)cs.clavesCompactas : 0.0, cs.expansiones);
 }
 
 bool W3dPruebasAnimsCmd(const std::string& cmd, std::istringstream& ss, std::string& err, bool& manejado) {
@@ -1567,6 +1991,10 @@ bool W3dPruebasAnimsCmd(const std::string& cmd, std::istringstream& ss, std::str
     if (cmd == "animsetrenombrarset") return CmdRenombrarSet(ss, err);
     if (cmd == "animsetcarpeta")   return CmdCarpeta(ss, err);
     if (cmd == "animsetpurgar")    return CmdPurgar(ss, err);
+    if (cmd == "clavessintetica")  return CmdClavesSintetica(ss, err);
+    if (cmd == "clavesinfo")       return CmdClavesInfo(ss, err);
+    if (cmd == "clavescomparar")   return CmdClavesComparar(ss, err);
+    if (cmd == "claveseditar")     return CmdClavesEditar(ss, err);
     manejado = false;
     return false;
 }

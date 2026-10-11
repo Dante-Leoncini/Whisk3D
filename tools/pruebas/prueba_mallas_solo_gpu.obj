@@ -1,0 +1,33 @@
+# prueba_mallas_solo_gpu.obj (tools/pruebas/prueba_mallas_solo_gpu.w3s): UNA malla con DOS partes (dos
+# materiales), cuatro quads con color por vertice. Parte A a la izquierda (x -2..-0.2), parte B a la derecha
+# (x 0.2..2): la rutina de la prueba las dibuja por rangos de triangulos (A = 0..3, B = 4..7).
+mtllib prueba_mallas_solo_gpu.mtl
+
+o Piezas
+v -2.0 -0.9 0.0  1.0 0.0 0.0
+v -0.2 -0.9 0.0  1.0 0.5 0.0
+v -0.2 -0.1 0.0  1.0 1.0 0.0
+v -2.0 -0.1 0.0  0.5 0.0 0.0
+v -2.0  0.1 0.0  1.0 0.0 1.0
+v -0.2  0.1 0.0  1.0 1.0 1.0
+v -0.2  0.9 0.0  0.5 0.0 0.5
+v -2.0  0.9 0.0  1.0 0.3 0.3
+v  0.2 -0.9 0.0  0.0 0.0 1.0
+v  2.0 -0.9 0.0  0.0 1.0 1.0
+v  2.0 -0.1 0.0  0.0 1.0 0.0
+v  0.2 -0.1 0.0  0.0 0.0 0.5
+v  0.2  0.1 0.0  0.3 0.3 1.0
+v  2.0  0.1 0.0  0.0 0.5 0.0
+v  2.0  0.9 0.0  0.7 1.0 0.7
+v  0.2  0.9 0.0  0.0 0.0 0.0
+vn 0.0 0.0 1.0
+usemtl PiezaA
+f 1//1 2//1 3//1
+f 1//1 3//1 4//1
+f 5//1 6//1 7//1
+f 5//1 7//1 8//1
+usemtl PiezaB
+f 9//1 10//1 11//1
+f 9//1 11//1 12//1
+f 13//1 14//1 15//1
+f 13//1 15//1 16//1

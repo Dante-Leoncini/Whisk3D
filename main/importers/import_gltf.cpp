@@ -345,6 +345,7 @@ static bool MismoMaterialImportado(const Material* viejo, const Material& nuevo,
     if (viejo->normalMap   != nuevo.normalMap)   return false;
     if (viejo->reflectMode != nuevo.reflectMode) return false;
     if (!MatCasiIgual(viejo->alphaTest, nuevo.alphaTest)) return false;   // recorte por alfa (glTF MASK)
+    if (viejo->texturaB != nuevo.texturaB || !MatCasiIgual(viejo->mezclaB, nuevo.mezclaB)) return false;   // mezcla de texturas
     if (MatRutaTextura(viejo) != texPath)        return false;
     // las capas de textura extra (w3d_capas): misma cantidad, misma textura, mezcla y UV
     if (viejo->capas.size() != nuevo.capas.size()) return false;
@@ -370,6 +371,8 @@ static void CopiarCamposMaterial(const Material& src, Material* dst) {
     dst->normalMap   = src.normalMap;
     dst->reflectMode = src.reflectMode;
     dst->alphaTest   = src.alphaTest;   // recorte por alfa (glTF MASK / w3d_alfaCorte)
+    dst->texturaB    = src.texturaB;    // mezcla de texturas (w3d_texturaB / w3d_mezclaB), como las capas
+    dst->mezclaB     = src.mezclaB;
     dst->capas       = src.capas;
 }
 
@@ -645,6 +648,15 @@ bool ImportGLTF(const std::string& filepath) {
             tmp.normalMap   = ex->getB("w3d_normalMap",   tmp.normalMap);
             tmp.reflectMode = ex->getI("w3d_reflectMode", tmp.reflectMode);
             tmp.shininess   = (float)ex->getN("w3d_shininess", tmp.shininess);
+            // MEZCLA DE TEXTURAS (w3d_texturaB: uri, w3d_mezclaB: 0..1): la textura B se carga sincronica por ruta
+            tmp.mezclaB     = (float)ex->getN("w3d_mezclaB", tmp.mezclaB);
+            {
+                std::string tb = ex->getS("w3d_texturaB", "");
+                if (!tb.empty() && tb.compare(0, 5, "data:") != 0) {
+                    tmp.texturaB = TexturaTomar(doc.dir + UrlDecode(tb));
+                    if (!tmp.texturaB) w3dLogfW("ImportGLTF: no pude cargar la textura B '%s'", tb.c_str());
+                }
+            }
             // CAPAS DE TEXTURA extra (w3d_capas): [{"textura": uri, "mezcla": n, "uv": k, "on": bool}]. Se cargan
             // sincronicas por el cache por ruta (TexturaTomar), como el normal map y las capas de un .mtl.
             const JVal* jc = ex->find("w3d_capas");
@@ -753,7 +765,11 @@ bool ImportGLTF(const std::string& filepath) {
             }
 
             // caras (triangulos) -> Face con corners (cp + normal + uv por corner; en glTF son por-vertice)
+            // Las esquinas de un MISMO vertice del glTF comparten su normal y sus UV (una entrada por vertice, no por
+            // esquina): ConvertToES1 las junta en UN vertice de render, que es lo que dice el indice del glTF. Con una
+            // entrada por esquina salian 3 vertices por triangulo (3 a 5 veces mas memoria, VBO y skinning)
             int matGroupStart = (int)Wobj.faces.size();
+            std::vector<int> nrmDe((size_t)pc, -1), uvDe((size_t)pc, -1), uv2De((size_t)pc, -1);
             for (size_t f = 0; f + 2 < IDX.size(); f += 3) {
                 Face cara;
                 for (int t = 0; t < 3; t++) { int vi = (int)IDX[f + t];
@@ -761,13 +777,25 @@ bool ImportGLTF(const std::string& filepath) {
                     // entera (sino apuntaba en silencio a los control-points de la siguiente)
                     if (vi < 0 || vi >= pc) { cara.corners.clear(); break; }
                     FaceCorner fc; fc.vertex = cpBase + vi; fc.color = -1; fc.normal = -1; fc.uv = -1;
-                    if (nnc >= 3 && vi < nc) { Wobj.normals.push_back((GLbyte)(int)(NRM[(size_t)vi*nnc] * 127.0f));
-                        Wobj.normals.push_back((GLbyte)(NRM[(size_t)vi*nnc+1] * 127.0f)); Wobj.normals.push_back((GLbyte)(NRM[(size_t)vi*nnc+2] * 127.0f));
-                        fc.normal = (int)(Wobj.normals.size() / 3) - 1; }
-                    if (unc >= 2 && vi < uc) { Wobj.uv.push_back(UV[(size_t)vi*unc]); Wobj.uv.push_back(UV[(size_t)vi*unc+1]);
-                        fc.uv = (int)(Wobj.uv.size() / 2) - 1; }
-                    if (u2nc >= 2 && vi < u2c) { Wobj.uv2.push_back(UV2[(size_t)vi*u2nc]); Wobj.uv2.push_back(UV2[(size_t)vi*u2nc+1]);
-                        fc.uv2 = (int)(Wobj.uv2.size() / 2) - 1; }
+                    if (nnc >= 3 && vi < nc) {
+                        if (nrmDe[(size_t)vi] < 0) {
+                            Wobj.normals.push_back((GLbyte)(int)(NRM[(size_t)vi*nnc] * 127.0f));
+                            Wobj.normals.push_back((GLbyte)(NRM[(size_t)vi*nnc+1] * 127.0f)); Wobj.normals.push_back((GLbyte)(NRM[(size_t)vi*nnc+2] * 127.0f));
+                            nrmDe[(size_t)vi] = (int)(Wobj.normals.size() / 3) - 1;
+                        }
+                        fc.normal = nrmDe[(size_t)vi]; }
+                    if (unc >= 2 && vi < uc) {
+                        if (uvDe[(size_t)vi] < 0) {
+                            Wobj.uv.push_back(UV[(size_t)vi*unc]); Wobj.uv.push_back(UV[(size_t)vi*unc+1]);
+                            uvDe[(size_t)vi] = (int)(Wobj.uv.size() / 2) - 1;
+                        }
+                        fc.uv = uvDe[(size_t)vi]; }
+                    if (u2nc >= 2 && vi < u2c) {
+                        if (uv2De[(size_t)vi] < 0) {
+                            Wobj.uv2.push_back(UV2[(size_t)vi*u2nc]); Wobj.uv2.push_back(UV2[(size_t)vi*u2nc+1]);
+                            uv2De[(size_t)vi] = (int)(Wobj.uv2.size() / 2) - 1;
+                        }
+                        fc.uv2 = uv2De[(size_t)vi]; }
                     cara.corners.push_back(fc);
                 }
                 if (cara.corners.size() == 3) Wobj.faces.push_back(cara);

@@ -1446,6 +1446,9 @@ static const char* kFuentesBase[] = {
     "${UILIB}/draw/glesdraw.cpp", "${UILIB}/draw/W3dAtlasPacker.cpp",
     "${UILIB}/core/UI.cpp", "${UILIB}/theme/colores.cpp",
     "${W3DROOT}/main/render/UIOverlay.cpp", "${W3DROOT}/main/script/BindsJuego.cpp",
+    // Rutina va SIEMPRE: BindsJuego la usa sin ifdef (memorias, paso/setPaso). Los planos del paso "Test de
+    // visibilidad" le llegan por hook desde Culling.cpp (solo 3D)
+    "${W3DROOT}/main/objects/Rutina.cpp",         // Rutina: lista de pasos del render (sin la validacion del editor)
     "${W3DROOT}/main/W3dEscena.cpp",
     "${W3DROOT}/main/io/UI2DFormato.cpp", "${W3DROOT}/main/io/Fuente2D.cpp",
     "${W3DROOT}/main/io/Textura2D.cpp",
@@ -1463,6 +1466,7 @@ static const char* kIncludesBase[] = {
 static const char* kFuentes3D[] = {
     "${CORE}/objects/VisSet.cpp",              // sets de visibilidad por celda (PVS)
     "${CORE}/objects/VisBsp.cpp",              // arbol BSP + PVS por cluster (Culling metodo Bsp)
+    "${CORE}/objects/MundoBsp.cpp",            // el MUNDO del .w3dbsp v2 (geometria por hoja y material, un draw por material)
     "${CORE}/io/W3dZip.cpp",                   // el .w3d es un zip (rutas/entradas del proyecto)
     "${CORE}/io/W3dAlmacen.cpp",
     "${W3DROOT}/main/render/OpcionesRender.cpp",  // g_renderBg + los flags de dibujo del Core
@@ -1477,7 +1481,6 @@ static const char* kFuentes3D[] = {
     "${W3DROOT}/main/objects/Camera.cpp",         // camara + riel (el encuadre del juego sale de aca)
     "${W3DROOT}/main/objects/Curve.cpp",
     "${W3DROOT}/main/objects/Culling.cpp",
-    "${W3DROOT}/main/objects/Rutina.cpp",         // Rutina: lista de pasos del render (sin la validacion del editor)
     "${W3DROOT}/main/objects/LOD.cpp",
     "${W3DROOT}/main/objects/Niebla.cpp",         // la niebla puesta en el arbol (solo en Render)
     "${W3DROOT}/main/objects/Recorte.cpp",        // LimpiarZ / Recorte (composicion de la pantalla)
@@ -2684,7 +2687,12 @@ bool CompilarJuego(UI* u, int plataforma, int modoVentana, int orientacion,
         // PC (Linux): cmake (configurar) + cmake --build; luego cpack -G DEB (plataforma 0).
         // Van como comandos SEPARADOS: el worker parsea el "[ NN%]" del --build para la barra.
         char cfg[1200], bld[900];
-        snprintf(cfg, sizeof(cfg), "cd \"%s\" && cmake -S . -B out -DW3DROOT=\"%s\"",
+        // un configure cortado a la mitad deja el cache con la lista de includes implicitos de C++ VACIA: cmake
+        // ya no filtra /usr/include, lo pasa como -isystem y el #include_next <stdlib.h> de <cstdlib> no
+        // encuentra nada (todas las compilaciones fallan para siempre). Ese cache se tira y se configura de nuevo
+        snprintf(cfg, sizeof(cfg), "cd \"%s\" && { grep -qs 'CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES \"\"' "
+                 "out/CMakeFiles/*/CMakeCXXCompiler.cmake && rm -rf out/CMakeCache.txt out/CMakeFiles; true; } && "
+                 "cmake -S . -B out -DW3DROOT=\"%s\"",
                  out.c_str(), repo.c_str());
         // -j ACOTADO (nunca pelado): ver W3dCompilarJobs en CompilarJuego.h
         snprintf(bld, sizeof(bld), "cd \"%s\" && cmake --build out %s",

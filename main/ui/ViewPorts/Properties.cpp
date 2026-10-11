@@ -908,6 +908,7 @@ static std::string NombreDeTextura(Texture* t){
 // el desplegable del selector de texturas del mesh part
 static PopupMenu* MenuTexturas = NULL;
 static PopupMenu* MenuTexturasNormal = NULL; // selector de la textura de NORMAL MAP (mat->normalTexture)
+static PopupMenu* MenuTexturasB = NULL;      // selector de la TEXTURA B (mat->texturaB: mezcla de texturas en una pasada)
 
 // "Load Texture": cada plataforma lo cablea (PC: abre el browser compartido en
 // main.cpp). Carga la imagen y la asigna a 'mat' (async).
@@ -916,6 +917,7 @@ void (*DialogoCargarTextura)(Material* mat) = NULL;
 // con este flag prendido -> el callback de carga de cada plataforma asigna a mat->normalTexture en vez de
 // mat->texture. (Antes habia un DialogoCargarNormalMap aparte SOLO cableado en PC -> en Symbian no abria nada.)
 bool gCargarTexturaComoNormal = false;
+bool gCargarTexturaComoB = false;   // idem para la TEXTURA B (mezcla de texturas): main.cpp / w3dlayout.cpp la dejan en mat->texturaB
 
 // 0 = No Texture; 1 = Load Texture (dialogo); 2+ = Textures[5 + id - 2]
 // (las primeras 5 son de la UI: font/origen/cursor/linea/lampara)
@@ -1082,6 +1084,33 @@ static void AccionMenuTexturasNormal(){
         MenuTexturasNormal->Agregar(NombreDeTextura(Textures[i]), 2 + (int)(i - 5), IconType::textura);
     }
     AbrirMenuBajoBoton(MenuTexturasNormal, PropsActivo->propBtnNormalTex->button);
+}
+
+// === TEXTURA B (mezcla de texturas en una pasada, Material::texturaB): mirror del selector del normal map ===
+static void AccionTexBElegida(int id){
+    if (!PropsActivo) return;
+    Material* mat = MaterialActivoUI();
+    if (!mat) return;
+    if (id == 0) { TexturaPonerEn(mat->texturaB, NULL); }                   // sin textura B (la ranura suelta la suya)
+    else if (id == 1) { if (DialogoCargarTextura) { gCargarTexturaComoB = true; DialogoCargarTextura(mat); return; } } // cargar archivo (MISMO browser, flag -> texturaB)
+    else if (5 + id - 2 < (int)Textures.size()) { TexturaPonerEn(mat->texturaB, Textures[5 + id - 2]); } // una ya cargada
+    RebindMaterialMeshPart();
+}
+
+static void AccionMenuTexturasB(){
+    if (!PropsActivo) return;
+    if (!MaterialActivoUI()) return;
+    if (!MenuTexturasB) {
+        MenuTexturasB = new PopupMenu();
+        MenuTexturasB->action = AccionTexBElegida;
+    }
+    MenuTexturasB->Limpiar();
+    MenuTexturasB->Agregar(T("No Texture B"), 0, IconType::notifError);
+    MenuTexturasB->Agregar(T("Load Texture"), 1, IconType::archive);
+    for (size_t i = 5; i < Textures.size(); i++) {
+        MenuTexturasB->Agregar(NombreDeTextura(Textures[i]), 2 + (int)(i - 5), IconType::textura);
+    }
+    AbrirMenuBajoBoton(MenuTexturasB, PropsActivo->propBtnTexB->button);
 }
 
 // ===========================================================================
@@ -1475,6 +1504,13 @@ static bool g_renderTex16 = false;
 static void AccionTex16Proyecto(){
     w3dEngine::SetTexturas16Siempre(g_renderTex16);
     Notificar(T("Reload the project to upload the textures again"), false);
+    g_redraw = true;
+}
+// MALLAS SOLO EN GPU del proyecto (tarjeta Render): se guarda en el .w3d ("mallasSoloGPU") y vale en el acto (las que
+// solo dibujan rutinas sueltan su RAM en la proxima corrida; apagarla las devuelve a RAM). Ver objects/MallaRecurso.h
+static bool g_renderMallasSoloGPU = false;
+static void AccionMallasSoloGPU(){
+    W3dMallasSoloGPUActivar(g_renderMallasSoloGPU);
     g_redraw = true;
 }
 static void AccionMipmapsProyecto(){
@@ -7070,6 +7106,15 @@ void Properties::ConstruirGrupos(){
     propMatAlfa->SetRango(0.0f, 1.0f);
     propMatAlfa->stepFino = 0.05f; propMatAlfa->stepGrueso = 0.1f; propMatAlfa->dragStep = 0.005f;
     propMatAlfa->onChange = OnMatAlfaChange;
+    // --- MEZCLA DE TEXTURAS (una pasada, multitextura): la textura B y cuanto de ella (0 = solo la base), ver
+    //     Material::texturaB / mezclaB. La fila del numero apunta DIRECTO al campo, como Alpha Test (mismo undo) ---
+    propBtnTexB = new PropButton(T("No Texture B"), IconType::textura);
+    propBtnTexB->button->desplegable = true;
+    propBtnTexB->action = AccionMenuTexturasB;
+    propMatMezclaB = new PropFloat(T("Texture mix"));
+    propMatMezclaB->SetRango(0.0f, 1.0f);
+    propMatMezclaB->stepFino = 0.05f; propMatMezclaB->stepGrueso = 0.1f; propMatMezclaB->dragStep = 0.005f;
+    propMatMezclaB->onChange = OnMatAlfaChange;   // (redibujar: el valor ya esta en el material)
     // --- ORDEN VISUAL ---
     propMaterial->properties.push_back(propMatChk[3]);  // Lighting  (ARRIBA DE TODO)
     propMaterial->properties.push_back(propMatChk[2]);  // Vertex Color (sobre Base Color)
@@ -7097,6 +7142,8 @@ void Properties::ConstruirGrupos(){
     propMaterial->properties.push_back(propBtnReflectMode);
     propMaterial->properties.push_back(propBtnMezcla);  // modo de mezcla (visible si Transparent ON)
     propMaterial->properties.push_back(propMatAlfa);    // Alpha Test (recorte por alfa; 0 = apagado)
+    propMaterial->properties.push_back(propBtnTexB);    // Texture B (mezcla de texturas en una pasada)
+    propMaterial->properties.push_back(propMatMezclaB); // Texture mix (cuanto de B; visible con una textura B)
     // --- CAPAS DE TEXTURA: titulo + hasta 4 filas [textura | UV | mezcla | on] (ver el bloque de arriba) ---
     propCapasTitulo = new PropLabel(T("Texture Layers"));
     propMaterial->properties.push_back(propCapasTitulo);
@@ -7698,6 +7745,12 @@ void Properties::ConstruirGrupos(){
       pt->value = &g_renderTex16;
       pt->onChange = AccionTex16Proyecto;
       propRender->properties.push_back(pt); }
+    // MALLAS SOLO EN GPU: las mallas que solo dibujan rutinas no guardan otra copia en RAM (la mitad en el N95)
+    { PropBool* pg = new PropBool(T("GPU-only meshes"));
+      g_renderMallasSoloGPU = W3dMallasSoloGPUActiva();
+      pg->value = &g_renderMallasSoloGPU;
+      pg->onChange = AccionMallasSoloGPU;
+      propRender->properties.push_back(pg); }
     // boton con action real (antes era no-op)
     PropButton* pbRenderImg = new PropButton(T("Render Image"), IconType::foto); // foto: renderiza una imagen
     pbRenderImg->action = AccionRenderImage;
@@ -9143,6 +9196,12 @@ void Properties::Rebind(){
     }
     // --- ALPHA TEST: directo al campo del material (el material por defecto no se edita) ---
     if (propMatAlfa) propMatAlfa->value = esDefault ? NULL : &material->alphaTest;
+    // --- MEZCLA DE TEXTURAS: el desplegable de la textura B siempre (con el nombre de la suya) y el numero solo con B ---
+    if (propBtnTexB) {
+        propBtnTexB->oculto = esDefault;
+        propBtnTexB->button->text = (material && material->texturaB) ? NombreDeTextura(material->texturaB) : std::string(T("No Texture B"));
+    }
+    if (propMatMezclaB) propMatMezclaB->value = (esDefault || !material || !material->texturaB) ? NULL : &material->mezclaB;
     // el desplegable de MEZCLA solo tiene sentido con Transparent ON (sin blend, el modo no
     // se aplica); el de PROFUNDIDAD siempre, que es la mitad que el checkbox no mostraba.
     if (propBtnMezcla) {
@@ -10248,6 +10307,7 @@ Properties::Properties() : ViewportBase() {
     propBtnNewMaterial = NULL;
     propBtnTextura = NULL;
     propBtnNormalTex = NULL; // (faltaba: normal map UI)
+    propBtnTexB = NULL; propMatMezclaB = NULL;   // (mezcla de texturas)
     propBtnReflectMode = NULL; // dropdown del modo de Reflection
     // luz: punteros nuevos a NULL (si no se inicializan quedan BASURA y el rebind crashea antes de ConstruirGrupos)
     propLightDir = NULL; propLightIgnOrden = NULL; propLightGL = NULL; propLightDiffuse = NULL; propLightAmbient = NULL; propLightSpecular = NULL;
@@ -10368,6 +10428,7 @@ void Properties::ActualizarPestanias(){
     // cambiar el global (cabecera `mipmaps:` del .w3d)
     g_renderMipmaps = w3dEngine::MipmapsGlobal();
     g_renderTex16 = w3dEngine::Texturas16Siempre();
+    g_renderMallasSoloGPU = W3dMallasSoloGPUActiva();
     // idem el tilde del formato de las mallas (tarjeta Archivo): lo fija el proyecto abierto
     MallasTextoRefrescar();
     // la 1ra pestania ("Objeto") siempre esta (transforms). La 2da depende del

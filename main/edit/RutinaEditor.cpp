@@ -114,15 +114,22 @@ struct Punteros {
             m[k] = 0; conocido[k] = sabido;
             on[k] = (sabido && r->arraysVistos) ? r->arraysInicio[k] : (signed char)-1;
         }
-        uvNormales = false;
+        uvNormales = false; uvCapa = 0;
     }
     bool uvNormales;            // el puntero de UV son las NORMALES de su malla ("Matcap")
-    void Olvidar() { for (int k = 0; k < 4; k++) { m[k] = 0; on[k] = -1; conocido[k] = false; } uvNormales = false; }
+    int uvCapa;                 // la capa de UV a la que apunta el de UV (0 = la de render; k = uvExtra[k])
+    void Olvidar() { for (int k = 0; k < 4; k++) { m[k] = 0; on[k] = -1; conocido[k] = false; } uvNormales = false; uvCapa = 0; }
 };
 static const char* const kArrayNombre[4] = { "vertex", "normal", "UV", "color" };
 static const char* const kArrayPaso[4] = { "Vertex pointer", "Normal pointer", "UV pointer", "Color pointer" };
+// (en RAM o, si la malla solto su RAM -soloGPU, MallaRecurso.h-, en su VBO)
 static bool TieneArray(const MallaRecurso* r, int k) {
-    return k == 0 ? r->vertex != 0 : k == 1 ? r->normals != 0 : k == 2 ? r->uv != 0 : r->vertexColor != 0;
+    static const unsigned kMascara[4] = { W3DMD_POS, W3DMD_NOR, W3DMD_UV, W3DMD_COL };
+    return W3dMallaRecursoTieneArray(r, kMascara[k]);
+}
+// la capa de UV k (> 0) de la malla: presente y con una UV por vertice
+static bool TieneCapaUV(const MallaRecurso* r, int capa) {
+    return W3dMallaRecursoTieneCapaUV(r, capa);
 }
 
 // mientras se valida: lo que se LEE de las memorias (los rangos), para el cache de cuando se juega (ValidarRutina)
@@ -133,7 +140,7 @@ static void Leido(const float* p, int n) { if (gLecturas && p && n > 0) gLectura
 static bool DibujarOk(const W3dPaso& p, int num, const Punteros& pu, std::string& motivo) {
     char buf[300];
     MallaRecurso* m = (MallaRecurso*)p.ptr;
-    if (!m->faces || m->facesSize < 1) {
+    if (!W3dMallaRecursoTieneArray(m, W3DMD_FACES) || m->facesSize < 1) {
         snprintf(buf, sizeof buf, "step %d: mesh '%s' has no geometry loaded", num, p.ref.c_str()); motivo = buf; return false;
     }
     const int nPartes = (int)m->partes.size();
@@ -175,7 +182,7 @@ static bool DibujarOk(const W3dPaso& p, int num, const Punteros& pu, std::string
                              "before): turn it on or off with Array on/off before drawing", num, kArrayNombre[k]);
                 motivo = buf; return false;
             }
-            if (!(k == 2 && pu.uvNormales ? q->normals != 0 : TieneArray(q, k))) {
+            if (!(k == 2 && pu.uvNormales ? TieneArray(q, 1) : (k == 2 && pu.uvCapa > 0) ? TieneCapaUV(q, pu.uvCapa) : TieneArray(q, k))) {
                 snprintf(buf, sizeof buf, "step %d (Draw elements): the %s array is on but its pointer's mesh ('%s') has no %s array "
                          "(turn the array off with Array on/off)", num, kArrayNombre[k], q->nombre.c_str(), kArrayNombre[k]);
                 motivo = buf; return false;
@@ -314,11 +321,19 @@ static int Profundidad(Rutina* r, std::vector<W3dPaso>& L, std::string& motivo, 
             // (que la malla tenga ese array se pide al dibujar con el array prendido: apuntar no lee nada)
             const int k = p.tipo - PasoPunteroVertices;
             pu.m[k] = (const MallaRecurso*)p.ptr; pu.conocido[k] = true;
-            if (k == 2) pu.uvNormales = false;
+            if (k == 2) {
+                pu.uvNormales = false;
+                pu.uvCapa = p.entero;
+                if (p.entero < 0 || (p.entero > 0 && !TieneCapaUV((const MallaRecurso*)p.ptr, p.entero))) {
+                    snprintf(buf, sizeof buf, "step %d (UV pointer): mesh '%s' has no UV layer %d (0 = its render UV)", num,
+                             p.ref.c_str(), p.entero);
+                    motivo = buf; return -1;
+                }
+            }
             break;
         }
         case PasoMatcap:
-            if (p.on && p.ptr) { pu.m[2] = (const MallaRecurso*)p.ptr; pu.conocido[2] = true; pu.uvNormales = true; }
+            if (p.on && p.ptr) { pu.m[2] = (const MallaRecurso*)p.ptr; pu.conocido[2] = true; pu.uvNormales = true; pu.uvCapa = 0; }
             break;
         case PasoDibujar:
             if (!DibujarOk(p, num, pu, motivo)) return -1;
@@ -326,7 +341,7 @@ static int Profundidad(Rutina* r, std::vector<W3dPaso>& L, std::string& motivo, 
         case PasoHijos:
             // los hijos ponen SUS punteros y prenden o apagan arrays: despues hay que volver a apuntar (y fijar los arrays)
             for (int k = 0; k < 4; k++) { pu.m[k] = 0; pu.conocido[k] = true; pu.on[k] = -1; }
-            pu.uvNormales = false;
+            pu.uvNormales = false; pu.uvCapa = 0;
             break;
         case PasoLua:
             pu.Olvidar();   // (lua puede poner cualquier cosa)
@@ -348,7 +363,7 @@ static int Profundidad(Rutina* r, std::vector<W3dPaso>& L, std::string& motivo, 
             if (d + sub > maxd) maxd = d + sub;
             break;
         }
-        case PasoSaltarSi: case PasoSaltarOculto:
+        case PasoSaltarSi: case PasoSaltarOculto: case PasoSaltarSiNinguna:
             if (p.entero < 0 || i + (size_t)p.entero >= L.size()) {
                 snprintf(buf, sizeof buf, "step %d: skips %d steps but only %d follow", num, p.entero, (int)(L.size() - i - 1));
                 motivo = buf; return -1;

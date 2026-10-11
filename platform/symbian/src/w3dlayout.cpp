@@ -224,6 +224,7 @@ static void W3dImportGlbMenu() {
 }
 
 extern bool gCargarTexturaComoNormal; // Properties.cpp: el "Load Texture" del normal map lo prende (compartido 4 OS)
+extern bool gCargarTexturaComoB;      // Properties.cpp: idem el de la TEXTURA B (mezcla de texturas)
 static Material* gSymTexMat = NULL;
 static void W3dTexturaElegida(const std::string& aPath) {
     if (!gSymTexMat) return;
@@ -233,6 +234,7 @@ static void W3dTexturaElegida(const std::string& aPath) {
         t->iID = id;
         Textures.push_back(t);
         if (gCargarTexturaComoNormal) { gSymTexMat->normalTexture = t; } // MISMO browser, destino segun el flag
+        else if (gCargarTexturaComoB) { gSymTexMat->texturaB = t; }        // (la textura B de la mezcla de texturas)
         else { gSymTexMat->texture = t; gSymTexMat->textureOn = true; }
         RebindMaterialMeshPart();
     } else {
@@ -240,7 +242,7 @@ static void W3dTexturaElegida(const std::string& aPath) {
         extern void Notificar(const std::string&, bool);
         Notificar("No se pudo cargar la textura", true);
     }
-    gSymTexMat = NULL; gCargarTexturaComoNormal = false;
+    gSymTexMat = NULL; gCargarTexturaComoNormal = false; gCargarTexturaComoB = false;
 }
 // "Load Texture" (base Y normal map): el MISMO browser en los 4 OS. Quien lo llama ya dejo el flag en el valor
 // correcto (false=textura, true=normal); el callback de arriba decide el destino.

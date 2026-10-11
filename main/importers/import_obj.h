@@ -129,6 +129,7 @@ struct TexDormida {
     Material* mat;
     std::string base;                    // "" = sin textura base
     std::string normal;                  // "" = sin normal map
+    std::string texB;                    // "" = sin textura B (la mezcla de texturas, Material::texturaB)
     std::vector<TexCapaDormida> capas;   // las capas extra, en su orden
     TexDormida() : mat(0) {}
 };
