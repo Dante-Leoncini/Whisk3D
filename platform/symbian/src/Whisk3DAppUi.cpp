@@ -21,7 +21,9 @@ namespace w3dEngine { bool W3dAudioInit(int); void W3dAudioShutdown(); }
 #include <aknconsts.h>
 #include <apacmdln.h>   // CApaCommandLine: recibir el .w3d al lanzar la app desde un file manager
 #include <eikenv.h>     // CEikonEnv::Static(): el AppUi desde el gancho de salir del cartel de cambios
+#include <e32std.h>     // RThread / RProcess / User::SetCritical: el vigia del cierre
 #include <string>
+#include "w3dlog.h"     // el vigia escribe en el log
 
 // LO SIN GUARDAR (main/io/CambiosProyecto.h, compartido): al salir con cambios pendientes primero va el
 // cartel "Se perderan los cambios en:"; su "Salir sin guardar" / "Guardar y salir" vuelve por el gancho
@@ -30,6 +32,51 @@ extern void (*W3dCambiosSalirHook)();
 static void SalirConfirmado(){
     CWhisk3DAppUi* ui = static_cast<CWhisk3DAppUi*>(CEikonEnv::Static()->EikAppUi());
     if (ui) ui->Exit();
+}
+
+// ---- VIGIA DEL CIERRE ---------------------------------------------------------------------------------------
+// Un hilo chico espera a que termine el hilo principal y deja en el log COMO termino: un panic con su categoria y
+// numero (KERN-EXEC 3 = acceso a memoria invalida o pila desbordada, USER 47 = heap roto, ...) o la salida normal.
+// Sin esto un cierre en el telefono no deja rastro. El principal deja de ser "permanente" del proceso (si lo es, su
+// panic mata el proceso entero antes de que el vigia escriba) y el vigia, despues de escribir, termina el proceso
+// con el mismo motivo. El log no usa el heap (RFile + buffers en la pila): sirve aunque el heap este roto.
+static TThreadId sHiloPrincipal;
+
+static TInt VigiaCierre(TAny* /*aNada*/){
+    RThread principal;
+    if (principal.Open(sHiloPrincipal) != KErrNone) return KErrNone;
+    TRequestStatus estado;
+    principal.Logon(estado);
+    User::WaitForRequest(estado);
+    const TExitType tipo = principal.ExitType();
+    const TInt razon = principal.ExitReason();
+    const TExitCategoryName categoria = principal.ExitCategory();
+    principal.Close();
+    char cat[KMaxExitCategoryName + 1];
+    TInt n = categoria.Length();
+    if (n > KMaxExitCategoryName) n = KMaxExitCategoryName;
+    for (TInt i = 0; i < n; i++) cat[i] = (char)categoria[i];
+    cat[n] = 0;
+    if (tipo == EExitPanic) {
+        w3dLogfE("[cierre] el hilo principal termino con un PANIC: %s %d", cat, (int)razon);
+        w3dLogMemoria("al cerrar");
+        RProcess().Panic(categoria, razon);   // el proceso termina igual que antes (el audio sin el principal no sirve)
+    } else {
+        w3dLogf("[cierre] el hilo principal termino (tipo %d, %s %d)", (int)tipo, cat, (int)razon);
+        RProcess().Kill(razon);
+    }
+    return KErrNone;
+}
+
+static void IniciarVigiaCierre(){
+    sHiloPrincipal = RThread().Id();
+    User::SetCritical(User::ENotCritical);
+    RThread vigia;
+    // (pila de 16 KB: el vsnprintf del log; el heap es el del principal: el vigia casi no reserva nada)
+    if (vigia.Create(_L("W3dVigiaCierre"), VigiaCierre, 0x4000, static_cast<RAllocator*>(NULL), NULL) == KErrNone) {
+        vigia.Resume();
+        vigia.Close();
+    }
 }
 
 // ================= MEMBER FUNCTIONS =======================
@@ -41,6 +88,7 @@ static void SalirConfirmado(){
 //
 void CWhisk3DAppUi::ConstructL(){
     BaseConstructL();
+    IniciarVigiaCierre();   // el log dice como termino la app (un panic deja su categoria y numero)
     // cout/cerr -> el log PROPIO (no la terminal/consola). Va ANTES de cargar el proyecto para atrapar cualquier
     // cout de los importadores. En Symbian el std::cout iba a una terminal en pantalla; ahora cae en whisk3d.log.
     { extern void w3dRedirigirCoutAlLog(); w3dRedirigirCoutAlLog(); }

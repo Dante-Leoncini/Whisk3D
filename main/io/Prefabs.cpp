@@ -333,6 +333,7 @@ bool W3dPrefabGenerar(InstanciaPrefab* ip) {
             w3dLogfW("[prefabs] '%s': '%s' no se pudo leer de su libreria (queda vacio)", ip->name.c_str(), ip->prefab.c_str());
         return false;
     }
+    { const std::string hito = "generando el prefab '" + ip->prefab + "'"; w3dLogMemoria(hito.c_str()); }
     GuardaSeleccion guarda;
     std::vector<std::pair<Object*, unsigned> > origenes;
     W3dPrefabPilaEntrar(ip->prefab);

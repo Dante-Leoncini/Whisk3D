@@ -645,9 +645,9 @@ bool Culling::BspCargar() {
                 w3dLogfW("[Culling] '%s': no pude cargar el bsp %s (%s) -> frustum",
                          name.c_str(), bspArchivo.c_str(), err.c_str());
             else {
-                w3dLogf("[Culling] '%s': bsp %s: %d nodos, %d hojas, %d clusters, %d hijos", name.c_str(),
-                        bspArchivo.c_str(), (int)bsp.nodos.size(), (int)bsp.hojaCluster.size(), bsp.nClusters,
-                        (int)bsp.hijos.size());
+                w3dLogf("[Culling] '%s': bsp %s (v%u): %d nodos, %d hojas, %d clusters, %d hijos (motor %s)", name.c_str(),
+                        bspArchivo.c_str(), bsp.version, (int)bsp.nodos.size(), (int)bsp.hojaCluster.size(), bsp.nClusters,
+                        (int)bsp.hijos.size(), __DATE__ " " __TIME__);
                 // version 2: EL MUNDO. Sus texturas se toman del cache por ruta (una vez; el destructor las suelta)
                 MundoSoltar();
                 if (bsp.geomOff) {

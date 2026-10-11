@@ -418,6 +418,7 @@ bool W3dLibsAsegurar(const std::string& nombre, std::string* motivo) {
     L.registrada = true;
     w3dLogf("[librerias] '%s' lista: %d prefab(s), %d escena(s)", nombre.c_str(), (int)L.prefabs.size(),
             (int)L.escenas.size());
+    w3dLogMemoria("libreria lista");
     return true;
 }
 

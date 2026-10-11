@@ -21,3 +21,13 @@ El proyecto de Symbian está en esta carpeta:
 - `data/`, `sis/` — recursos e instaladores.
 
 Se compila con el SDK de S60 3rd Edition + **Carbide.c++** (o `bldmake` + `abld` a mano). La toolchain es vieja (**C++03**: sin `nullptr`, `auto`, range-for, `vector::data`...) y no todo el subsistema nuevo (FBX, skinning) está portado — mirá los `#ifndef W3D_SYMBIAN` del código.
+
+## Diagnosticar un cierre en el teléfono
+
+La app escribe `E:\whisk3d.log` línea por línea, con flush a disco. Si se cierra, el log llega hasta el último paso que hizo. Tres tipos de líneas sirven para saber por qué se cerró:
+
+- `[cierre] el hilo principal termino con un PANIC: <categoria> <numero>`: lo escribe un hilo vigía (`Whisk3DAppUi.cpp`) cuando muere el hilo principal. Por ejemplo, `KERN-EXEC 3` es un acceso a memoria inválida o la pila desbordada, y `USER 47` es el heap roto. Si sale con `[cierre] ... tipo 0` es una salida normal.
+- `[mem] SIN MEMORIA: fallo un pedido de N bytes ...`: el `operator new` (`newdel_compat.cpp`) devuelve NULL cuando no hay memoria. Antes, el código que seguía escribía en NULL y no quedaba rastro.
+- `[mem] <hito>: heap X KB en uso (Y KB tomados), RAM libre Z KB`: los hitos de una carga grande (contenedor montado, JSON leído, cada animset y cada prefab, proyecto abierto, texturas del Play). "Tomados" es lo que el chunk del heap ya le sacó al teléfono: los huecos que deja lo liberado no vuelven.
+
+Pila del hilo principal: 80 KB (`EPOCSTACKSIZE 0x14000`, el máximo de EKA2).

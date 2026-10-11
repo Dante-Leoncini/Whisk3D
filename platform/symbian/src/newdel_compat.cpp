@@ -12,22 +12,55 @@
  *  euser viejo: Alloc/Free, NULL si no hay memoria, sin excepciones), el
  *  linker usa estos en vez de los stubs de scppnwdl.lib y el import
  *  desaparece. El new (ELeave) de las clases CBase no pasa por aca (ese vive
- *  en euser y no cambio). 
+ *  en euser y no cambio).
+ *
+ *  SIN MEMORIA: devolver NULL no avisa a nadie. Casi todo el codigo C++ (un
+ *  std::vector que crece, el new de un objeto) sigue de largo y escribe en
+ *  NULL: la app se cierra sin dejar rastro. Por eso el pedido que falla queda
+ *  en el log, con el estado de la memoria (w3dMemoriaKB no reserva nada).
  * ==============================================================================
  */
 
 #ifndef __WINS__
 
 #include <e32std.h>
+#include "w3dlog.h"
+
+// (si el log mismo pidiera memoria y fallara, no se vuelve a entrar)
+static TBool sAvisandoSinMemoria = EFalse;
+
+static void AvisarSinMemoria(unsigned int aSize)
+    {
+    if (sAvisandoSinMemoria)
+        {
+        return;
+        }
+    sAvisandoSinMemoria = ETrue;
+    long usado = -1, tomado = -1, libre = -1;
+    w3dMemoriaKB(usado, tomado, libre);
+    w3dLogfE("[mem] SIN MEMORIA: fallo un pedido de %u bytes (heap %ld KB en uso, %ld KB tomados; RAM libre %ld KB)",
+             aSize, usado, tomado, libre);
+    sAvisandoSinMemoria = EFalse;
+    }
+
+static void* Pedir(unsigned int aSize)
+    {
+    void* p = User::Alloc(aSize);
+    if (!p)
+        {
+        AvisarSinMemoria(aSize);
+        }
+    return p;
+    }
 
 void* operator new(unsigned int aSize)
     {
-    return User::Alloc(aSize);
+    return Pedir(aSize);
     }
 
 void* operator new[](unsigned int aSize)
     {
-    return User::Alloc(aSize);
+    return Pedir(aSize);
     }
 
 void operator delete(void* aPtr)

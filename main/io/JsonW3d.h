@@ -89,16 +89,32 @@ struct JParser {
         if (fin - p >= 4 && !strncmp(p, "true", 4))  { p += 4; JVal* v = new JVal(); v->tipo = 3; v->b = true;  return v; }
         if (fin - p >= 5 && !strncmp(p, "false", 5)) { p += 5; JVal* v = new JVal(); v->tipo = 3; v->b = false; return v; }
         if (fin - p >= 4 && !strncmp(p, "null", 4))  { p += 4; return new JVal(); }
-        // numero: copia acotada con NUL (un numero JSON nunca llega a 47 chars)
+        double n = 0.0;
+        if (!Numero(n)) { error = true; return new JVal(); }
+        JVal* v = new JVal(); v->tipo = 1; v->num = n;
+        return v;
+    }
+    // un NUMERO en 'p' (ya sin blancos) -> 'out', y 'p' queda despues. false = no es un numero ('p' no se mueve).
+    // Copia acotada con NUL (un numero JSON nunca llega a 47 chars)
+    bool Numero(double& out) {
         char nbuf[48];
         size_t nn = (size_t)(fin - p); if (nn > sizeof(nbuf) - 1) nn = sizeof(nbuf) - 1;
         memcpy(nbuf, p, nn); nbuf[nn] = 0;
         char* despues = NULL;
-        double n = strtod(nbuf, &despues);
-        if (despues == nbuf) { error = true; return new JVal(); }
+        const double n = strtod(nbuf, &despues);
+        if (despues == nbuf) return false;
         p += (despues - nbuf);
-        JVal* v = new JVal(); v->tipo = 1; v->num = n;
-        return v;
+        out = n;
+        return true;
+    }
+    // lo que Valor() leeria como NUMERO (lo que no es objeto, lista, string ni true/false/null)?
+    bool PareceNumero() const {
+        if (p >= fin) return false;
+        const char c = *p;
+        if (c == '{' || c == '[' || c == '"') return false;
+        if (fin - p >= 4 && (!strncmp(p, "true", 4) || !strncmp(p, "null", 4))) return false;
+        if (fin - p >= 5 && !strncmp(p, "false", 5)) return false;
+        return true;
     }
     std::string Cadena() {
         std::string s;
@@ -128,32 +144,66 @@ struct JParser {
         }
         return v;
     }
-    // una sub-lista de SOLO numeros se COMPACTA a 'nums' (ver JVal): el hijo recien
-    // parseado se convierte en el momento, asi los JVal por-numero viven un instante
-    // y el pico de memoria no crece con el archivo (clave en el N95).
-    static void CompactarSiEsFila(JVal* h) {
-        if (!h || h->tipo != 5 || h->lista.empty()) return;
-        for (size_t i = 0; i < h->lista.size(); i++)
-            if (!h->lista[i] || h->lista[i]->tipo != 1) return;
-        h->nums.reserve(h->lista.size());
-        for (size_t i = 0; i < h->lista.size(); i++) {
-            h->nums.push_back((float)h->lista[i]->num);
-            delete h->lista[i];
-        }
-        std::vector<JVal*>().swap(h->lista);   // clear() no suelta el buffer
+    // un elemento de una lista: si es una sub-lista va por Fila (puede quedar COMPACTA)
+    JVal* Elemento() {
+        Blancos();
+        return (p < fin && *p == '[') ? Fila() : Valor();
     }
     JVal* Lista() {
         JVal* v = new JVal(); v->tipo = 5;
         Comer('[');
         if (Es(']')) { p++; return v; }
         for (;;) {
-            JVal* h = Valor();
-            CompactarSiEsFila(h);
-            v->lista.push_back(h);
+            v->lista.push_back(Elemento());
             if (error) break;
             if (Es(',')) { p++; continue; }
             Comer(']');
             break;
+        }
+        return v;
+    }
+    // una sub-lista (elemento de OTRA lista): si es de SOLO numeros queda COMPACTA en 'nums' (ver JVal). Los
+    // numeros se leen DIRECTO a 'nums', sin un JVal por numero: antes cada uno se creaba y se borraba al compactar
+    // la fila (8 por keyframe: cientos de miles de reservas chicas que en el N95 hacian lenta la carga y
+    // fragmentaban el heap). El arbol que queda es el MISMO: si aparece algo que no es un numero, lo leido pasa a
+    // JVal con su double exacto (los primeros DOBLES_PILA en la pila; los de una fila mas larga, a un vector) y la
+    // fila sigue como una lista comun.
+    enum { DOBLES_PILA = 32 };
+    JVal* Fila() {
+        JVal* v = new JVal(); v->tipo = 5;
+        Comer('[');
+        if (Es(']')) { p++; return v; }
+        double pila[DOBLES_PILA];
+        std::vector<double> resto;    // (solo una fila de mas de DOBLES_PILA numeros)
+        size_t cant = 0;              // numeros leidos mientras es una fila
+        bool soloNumeros = true;
+        for (;;) {
+            Blancos();
+            double n = 0.0;
+            if (soloNumeros && PareceNumero() && Numero(n)) {
+                if (cant < DOBLES_PILA) pila[cant] = n; else resto.push_back(n);
+                cant++;
+            } else {
+                if (soloNumeros) {
+                    // deja de ser una fila: los numeros leidos pasan a JVal (con su double, como antes)
+                    soloNumeros = false;
+                    for (size_t k = 0; k < cant; k++) {
+                        JVal* x = new JVal(); x->tipo = 1;
+                        x->num = (k < DOBLES_PILA) ? pila[k] : resto[k - DOBLES_PILA];
+                        v->lista.push_back(x);
+                    }
+                    std::vector<double>().swap(resto);
+                }
+                v->lista.push_back(Elemento());
+            }
+            if (error) break;
+            if (Es(',')) { p++; continue; }
+            Comer(']');
+            break;
+        }
+        if (soloNumeros && cant) {   // UNA reserva con la capacidad justa
+            v->nums.reserve(cant);
+            for (size_t k = 0; k < cant; k++) v->nums.push_back((float)(k < DOBLES_PILA ? pila[k] : resto[k - DOBLES_PILA]));
         }
         return v;
     }

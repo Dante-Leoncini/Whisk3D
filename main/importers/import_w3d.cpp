@@ -4258,6 +4258,7 @@ static bool AbrirEscenaJson(const char* datos, size_t n, const std::string& base
     JParser parser(datos, n);
     JVal* raiz = parser.Valor();
     if (g_w3dCargaReloj) g_w3dCargaFases.jsonMs += CargaAhora() - tMed;
+    w3dLogMemoria("JSON del proyecto leido");
     if (parser.error || raiz->tipo != 4) {
         w3dLogfE("[W3D] el JSON del proyecto no parsea: %s (se abre vacio)", w3dPath.c_str());
         delete raiz;
@@ -5554,6 +5555,7 @@ void AbrirW3D(const std::string& ruta) {
                 "layout %s, icono '%s'",
                 ruta.c_str(), formato, objs, uis, W3dEscenaInicial().c_str(),
                 layoutDelProyecto ? "del proyecto" : "default", g_proyIcono.c_str());
+        w3dLogMemoria("proyecto abierto");
     }
 
     // REPARTO del tiempo de carga por fase (para saber que optimizar en el N95): parse+build de mallas

@@ -35,6 +35,7 @@
 #include "objects/UI.h"            // igualQueRender: el HUD del juego elige lienzo/letterbox
 #include "animation/SkeletalAnimation.h" // EvaluarPoseEsqueleto (pose al reproducir)
 #include "animation/Animation.h"          // CurrentFrame
+#include "w3dlog.h"                      // w3dLogMemoria: la memoria antes / despues de las texturas del Play
 // la sim del juego (scripts lua) esta cargada? (play O pausa; false tras Stop)
 static bool JuegoSimActiva() { extern bool SimActiva(); return SimActiva(); }
 #include "ViewPorts/LayoutInput.h" // LayoutDeleteEdit (menu Delete en edit mode)
@@ -4203,7 +4204,9 @@ bool JuegoEsperarTexturas() {
     char msg[96];
     snprintf(msg, sizeof(msg), "Loading %d texture(s) before Play...", pend);
     Notificar(msg, false);
+    w3dLogMemoria("antes de las texturas del Play");
     CargarTodasTexturasPendientes();
+    w3dLogMemoria("texturas del Play cargadas");
     g_redraw = true;
     return TexturasPendientes() == 0;
 }

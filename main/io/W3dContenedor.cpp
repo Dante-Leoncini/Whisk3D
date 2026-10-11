@@ -264,6 +264,7 @@ bool W3dContenedorMontar(const std::string& rutaW3d) {
     gRutaMontada = rutaW3d;
     W3dAlmacenMontar(a);
     w3dLogf("[W3D] contenedor montado: %s", rutaW3d.c_str());
+    w3dLogMemoria("contenedor montado");
     return true;
 }
 

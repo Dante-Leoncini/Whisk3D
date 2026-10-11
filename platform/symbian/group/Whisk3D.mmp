@@ -10,7 +10,7 @@ TARGET          whisk3D.exe
 TARGETTYPE      exe
 UID             0x100039CE 0xA00D021D
 
-EPOCSTACKSIZE   30000 //originalmente estaba en 30000 67108864
+EPOCSTACKSIZE   0x14000 // 80 KB, el maximo de EKA2 (era 30000: la carga de un proyecto grande -JSON, inflate, prefabs anidados- anda cerca)
 EPOCHEAPSIZE    0x10000 0x6000000  // heap: 64 KB min, 96 MB max (subido de 64 MB para proyectos grandes; el N95 8GB tiene 128 MB RAM)
 
 // Fase 3 unificacion: el codigo compartido del core se compila con este
@@ -327,6 +327,7 @@ SYSTEMINCLUDE   \epoc32\include\platform\mw
 LIBRARY         avkon.lib euser.lib apparc.lib cone.lib eikcore.lib
 LIBRARY         eikcoctl.lib estlib.lib fbscli.lib
 LIBRARY         efsrv.lib
+LIBRARY         hal.lib // HAL::Get(EMemoryRAMFree): la RAM libre en el log ([mem], w3dlog.cpp)
 LIBRARY         ImageConversion.lib
 LIBRARY         mediaclientaudiostream.lib // CMdaAudioOutputStream: salida de audio del Core
 LIBRARY         libgles_cm.lib
