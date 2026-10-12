@@ -503,15 +503,20 @@ void PropsRutinaConstruir(Properties* p) {
     RutinaFilaIcono = RuFilaIcono; RutinaFilaValor = RuFilaValor;
     p->propRutina = new GroupPropertie(T("Routine"));
     p->propRutina->anchoValores = 0.30f;
-    p->propRuLista = new PropButton("All", IconType::camera);
+    p->propRuLista = new PropButton(T("All"), IconType::camera);
     p->propRuLista->button->desplegable = true; p->propRuLista->conLabel = true; p->propRuLista->name = T("Render mode");
     p->propRuLista->action = AccionMenuLista;
     p->propRutina->properties.push_back(p->propRuLista);
-    p->propRuUsar = new PropButton("The list of All", IconType::lista);
+    // BUCLE: cuantas veces corre la lista seguida (la vuelta actual en @bucle[0])
+    p->propRuRepetir = new PropFloat(T("Repeat"));
+    p->propRuRepetir->SetRango(1.0f, 100000.0f); p->propRuRepetir->entero = true;
+    p->propRuRepetir->stepFino = 1.0f; p->propRuRepetir->stepGrueso = 10.0f; p->propRuRepetir->dragStep = 0.2f;
+    p->propRutina->properties.push_back(p->propRuRepetir);
+    p->propRuUsar = new PropButton(T("The list of All"), IconType::lista);
     p->propRuUsar->button->desplegable = true; p->propRuUsar->conLabel = true; p->propRuUsar->name = T("Use");
     p->propRuUsar->action = AccionMenuUsar;
     p->propRutina->properties.push_back(p->propRuUsar);
-    p->propRuPasos = new PropListMeshParts("Steps");
+    p->propRuPasos = new PropListMeshParts(T("Steps"));
     p->propRuPasos->modo = 14;
     p->propRuPasos->filasMax = 8;
     p->propRutina->properties.push_back(p->propRuPasos);
@@ -638,6 +643,7 @@ void PropsRutinaActualizar(Properties* p, bool visible) {
     if (!p || !p->propRutina) return;
     Rutina* r = visible ? RuActiva() : NULL;
     p->propRutina->visible = (r != NULL);
+    if (p->propRuRepetir) p->propRuRepetir->value = r ? &r->repetir : NULL;
     if (!r) {
         if (p->propRuOn) p->propRuOn->value = NULL;
         if (p->propRuManual) p->propRuManual->value = NULL;

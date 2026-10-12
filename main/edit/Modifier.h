@@ -94,6 +94,18 @@ class Modifier {
         //    target se EDITA, su geoVersion cambia y hay que regenerar; si no, no se toca nada (N95).
         unsigned boolTargetGeoVer;
 
+        // --- ARRAY --- N copias de la malla, cada una corrida de la anterior. Los ejes van como en la UI (Y = profundidad,
+        // Z = arriba). El desplazamiento de cada copia = relativo (factor del TAMANO de la malla en ese eje) + constante
+        // (metros) y, si hay 'target' (el mismo campo del Mirror), la transformacion del target respecto del objeto se
+        // ACUMULA copia a copia (rota / escala / corre: espirales, circulos, escaleras). count como float (PropFloat entero).
+        float arrCount;          // copias en total (incluida la original). Default 2
+        bool  arrRelOn;          // desplazamiento relativo (default ON, X = 1: una al lado de la otra)
+        float arrRelX, arrRelY, arrRelZ;
+        bool  arrConstOn;        // desplazamiento constante (default OFF)
+        float arrConstX, arrConstY, arrConstZ;
+        bool  arrMerge;          // soldar los vertices que quedan pegados entre copias
+        float arrMergeDist;
+
         // --- ARMATURE: cache de vertex-animation (bakea el skinning por frame -> reproduccion sin recomputar) ---
         bool  cacheAnim;        // Cache Animation: guarda las poses deformadas en memoria (default OFF)
         float cacheSkip;        // Frame Skip: 0=todos los frames; N=guarda cada N+1 e interpola (menos memoria). float para PropFloat entero.
@@ -178,6 +190,8 @@ class Modifier {
               screwAxis(1), screwStretchU(true), screwStretchV(true),
               screwSmooth(true), screwMerge(true), screwFlip(false),
               boolOp(2), boolTargetGeoVer(0),
+              arrCount(2.0f), arrRelOn(true), arrRelX(1.0f), arrRelY(0.0f), arrRelZ(0.0f),
+              arrConstOn(false), arrConstX(0.0f), arrConstY(0.0f), arrConstZ(0.0f), arrMerge(false), arrMergeDist(0.001f),
               cacheAnim(false), cacheSkip(0.0f),
               metodoPVS(0), sectorPVS(0), sectorFallback(0), soloCamaraActiva(true),
               pvsCargado(false), pvsAplicado(-1), pvsFacesBase(0) {}

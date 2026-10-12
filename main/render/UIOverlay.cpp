@@ -27,6 +27,7 @@
 #include "render/OpcionesRender.h"  // g_redraw: el video animandose pide redibujar
 #ifndef W3D_GAME_RUNTIME
 #include "ViewPorts/Properties.h"   // PropsActivo->renderW/H: la ventana ES el tamano del render
+#include <map>                         // el armado de los textos por elemento (DibujarTextoBloque)
 #else
 // el RUNTIME del juego (sin editor) provee el tamano de la ventana: no hay panel
 extern float g_gameRenderW, g_gameRenderH;
@@ -766,6 +767,26 @@ static w3dui::W3dTextAtlas* FuenteDeTexto2D(Texto2D* t) {
     return Fuente2DObtener(t->fuente);
 }
 
+// EL ARMADO de un texto (el tamano que entra, las lineas partidas y sus anchos) por elemento: se rehace solo si cambio
+// algo de lo que depende (la fuente, el texto, el tamano pedido, el area, el modo de lineas). Un HUD dibuja los mismos
+// textos cada cuadro y rearmarlos eran vectores nuevos (memoria del heap: en el N95, lo caro), la busqueda del tamano
+// que entra (12 vueltas) y medir cada linea. La entrada sabe el serial del objeto (una direccion reciclada no la usa)
+namespace {
+struct ArmadoTexto {
+    unsigned serial;
+    const void* at;
+    std::string txt;
+    float pxPedido, rw, rh;
+    int lineas;
+    bool ajusta;
+    float px, maxW;
+    std::vector<std::string> lin;
+    std::vector<float> anchos;
+    ArmadoTexto() : serial(0), at(0), pxPedido(0), rw(0), rh(0), lineas(0), ajusta(false), px(0), maxW(0) {}
+};
+std::map<const Texto2D*, ArmadoTexto> gArmados;
+}
+
 // dibuja el bloque de TEXTO (con lineas y auto-ajuste) centrado en su ancla; devuelve
 // el rect ocupado en outB[4]. rw/rh = area de referencia (para partir lineas y auto-tam).
 static void DibujarTextoBloque(Texto2D* t, float sx, float sy, float rw, float rh,
@@ -774,21 +795,31 @@ static void DibujarTextoBloque(Texto2D* t, float sx, float sy, float rw, float r
     w3dui::W3dTextAtlas* at = FuenteDeTexto2D(t);
     std::string txt = TextoSegunTipo(t);
     if (!at || txt.empty()) return;
-    float px = t->tam * escala * FactorTexto(t->tamModo);
-    if (t->autoTam && rw > 4.0f && rh > 4.0f)
-        px = PxQueEntra(at, txt, t->lineas, rw, rh);   // ajustar el tamano al area
-    // fuente PIXEL: snap al multiplo entero LOGICO (la vista escala suave encima)
-    px = PxSnap(at, px, t->autoTam);
-    std::vector<std::string> lin;
-    PartirLineas(at, txt, px, (t->lineas != 0) ? rw : 1e9f, t->lineas, lin);
+    const float pxPedido = t->tam * escala * FactorTexto(t->tamModo);
+    const bool ajusta = t->autoTam && rw > 4.0f && rh > 4.0f;
+    if (gArmados.size() > 1024) gArmados.clear();   // (los de elementos que ya no existen)
+    ArmadoTexto& A = gArmados[t];
+    if (A.serial != t->serial || A.at != at || A.pxPedido != pxPedido || A.rw != rw || A.rh != rh ||
+        A.lineas != t->lineas || A.ajusta != ajusta || A.txt != txt) {
+        float pxA = ajusta ? PxQueEntra(at, txt, t->lineas, rw, rh) : pxPedido;   // ajustar el tamano al area
+        // fuente PIXEL: snap al multiplo entero LOGICO (la vista escala suave encima)
+        pxA = PxSnap(at, pxA, t->autoTam);
+        PartirLineas(at, txt, pxA, (t->lineas != 0) ? rw : 1e9f, t->lineas, A.lin);
+        A.anchos.resize(A.lin.size());
+        A.maxW = 0.0f;
+        for (size_t i = 0; i < A.lin.size(); i++) {
+            A.anchos[i] = at->TextWidth(A.lin[i].c_str(), pxA);
+            if (A.anchos[i] > A.maxW) A.maxW = A.anchos[i];
+        }
+        A.serial = t->serial; A.at = at; A.txt = txt; A.pxPedido = pxPedido; A.rw = rw; A.rh = rh;
+        A.lineas = t->lineas; A.ajusta = ajusta; A.px = pxA;
+    }
+    const float px = A.px;
+    const std::vector<std::string>& lin = A.lin;
+    const std::vector<float>& anchos = A.anchos;
+    const float maxW = A.maxW;
     float lh = at->LineHeight(px);
     float bh = lh * lin.size();
-    float maxW = 0.0f;
-    std::vector<float> anchos(lin.size());
-    for (size_t i = 0; i < lin.size(); i++) {
-        anchos[i] = at->TextWidth(lin[i].c_str(), px);
-        if (anchos[i] > maxW) maxW = anchos[i];
-    }
     // el BLOQUE se acomoda alrededor del ancla con align X/Y; cada linea se alinea igual
     float ty = sy;
     if (t->alignV == 1) ty -= bh * 0.5f; else if (t->alignV == 2) ty -= bh;

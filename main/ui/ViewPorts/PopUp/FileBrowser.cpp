@@ -1,3 +1,4 @@
+#include "W3dLang.h"   // T()
 #include "w3dGraphics.h" // abstraccion de graficos (independencia de OpenGL)
 #include "FileBrowser.h"
 #include "ViewPorts/LayoutInput.h" // LayoutKey
@@ -193,7 +194,7 @@ FileBrowser::FileBrowser(const std::string& title, const std::string& accionLabe
     btnView = new Button("", (int)IconType::lista, false);      btnView->centrado = true;
     btnBmAdd = new Button("+", -1, false); btnBmAdd->centrado = true;
     btnBmDel = new Button("-", -1, false); btnBmDel->centrado = true;
-    btnCancel = new Button("Cancelar", -1, false); btnCancel->centrado = true;
+    btnCancel = new Button(T("Cancel"), -1, false); btnCancel->centrado = true;
     btnAction = new Button(accionLabel, -1, false); btnAction->centrado = true;
     btnAction->colorTexto = COL(ColorID::negro); // texto negro sobre el verde
 

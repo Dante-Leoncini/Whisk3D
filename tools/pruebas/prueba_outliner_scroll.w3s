@@ -1,0 +1,36 @@
+# Outliner: sin el separador del constructor y con la altura bien medida, el dedo scrollea hasta la ultima fila
+add cube
+add cube
+add cube
+add cube
+add cube
+add cube
+add cube
+add cube
+add cube
+add cube
+add cube
+add cube
+add cube
+add cube
+add cube
+add cube
+add cube
+add cube
+add cube
+add cube
+add cube
+add cube
+add cube
+add cube
+add cube
+add cube
+add cube
+add cube
+add cube
+add cube
+outscrollfin
+# con las rutinas y el constructor ocultos (menu del ojo) tambien llega al final
+outver 0 0
+outscrollfin
+outver 1 1

@@ -192,7 +192,7 @@ abrirw3d prueba_revision_rtK.w3d
 outvista biblioteca
 outclick Cubo
 outmenu Delete
-outconfirmar si tiene Its objects will be deleted too (Ctrl+Z brings them back).
+outconfirmar si tiene Its objects will be deleted too (Undo brings them back).
 fail selobj Cubo
 undo
 selobj Cubo

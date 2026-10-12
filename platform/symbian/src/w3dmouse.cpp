@@ -201,6 +201,11 @@ extern bool LAltPressed;
 
 static TBool gHayMouseBT = EFalse;
 TBool W3dHayMouseBT() { return gHayMouseBT; }
+// teclado BT: se "detecta" con la primera tecla que llega por hidsrv. Los menus lo usan para mostrar los atajos de
+// teclado de PC en vez de las teclas del keypad (app/W3dAtajos.cpp, W3dAtajoEtiquetaMenu).
+static TBool gHayTecladoBT = EFalse;
+bool W3dSymbianTecladoBT() { return gHayTecladoBT ? true : false; }
+bool W3dSymbianMouseBT()   { return gHayMouseBT ? true : false; }
 
 void CWhisk3D::HidMouseMove(TInt aDx, TInt aDy){
 	gHayMouseBT = ETrue;
@@ -402,6 +407,7 @@ void CWhisk3D::HidMouseWheel(TInt aDelta){
 
 void CWhisk3D::HidKey(TInt aScanCode, TBool aDown){
 	g_redraw = true; // tecla del teclado BT -> redibujar
+	gHayTecladoBT = ETrue;
 	// teclado BT de hinkka: manda CODIGOS DE USO USB HID (a=4..z=29, .=55,
 	// shift izq/der=225/229, alt izq/der=226/230)
 	static TBool hidShift = EFalse;

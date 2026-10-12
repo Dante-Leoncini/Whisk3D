@@ -1141,6 +1141,7 @@ Object* W3dDuplicarUno(Object* src, bool vinculado) {
         Rutina* d = new Rutina(src->Parent, s->name);
         for (int m = 0; m < Rutina::ModoN; m++) { d->listas[m] = s->listas[m]; d->usar[m] = s->usar[m]; }
         d->listaEditada = s->listaEditada; d->pasoActivo = s->pasoActivo; d->sucia = true;
+        d->repetir = s->repetir;
         nuevo = d;
     }
     else if (W3dEsTipoInstancia(src->getType())) {

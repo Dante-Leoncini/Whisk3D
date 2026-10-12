@@ -22,6 +22,7 @@
 #include "objects/Materials.h"         // HayAnimacionActiva / UpdateAnimatedMaterials
 #include "animation/Animation.h"       // PlayAnimation / AnimFPS / AnimTick (avance del play)
 #include "w3dGraphics.h"               // g_statCuadro: las llamadas GL del ultimo cuadro en el [PERF]
+#include <string.h>                    // strlen/memcpy: el volcado de capacidades GL
 
 // BARRA DE PROGRESO (export/import OBJ): el hook de swap que faltaba en Symbian. ProgresoIniciar/Actualizar lo
 // llaman para mostrar la barra DURANTE la operacion bloqueante (sin esto, ProgresoIniciar hacia return y la
@@ -30,6 +31,62 @@ extern void (*LayoutSwapBuffers)();
 static EGLDisplay gSwapDisplay = NULL;
 static EGLSurface gSwapSurface = NULL;
 static void W3dProgresoSwap() { if (gSwapDisplay) eglSwapBuffers(gSwapDisplay, gSwapSurface); }
+
+// ---- LO QUE EXPONE EL DRIVER GL/EGL DEL TELEFONO (diagnostico, una vez al arrancar) ----------------------------
+// Para decidir que caminos de render sirven en cada equipo: las extensiones (programas de vertices, paleta de
+// matrices, multi-draw...), los limites, y si eglGetProcAddress encuentra funciones que el driver no anuncia.
+// El log corta cada linea a ~200 caracteres: los textos largos van en tramos.
+static void LogGlLargo(const char* titulo, const char* txt){
+    if (!txt) { w3dLogf("[gl] %s: (nada)", titulo); return; }
+    const int n = (int)strlen(txt);
+    int i = 0, parte = 1;
+    while (i < n) {
+        int j = i + 150;
+        if (j >= n) j = n;
+        else { int k = j; while (k > i && txt[k] != ' ') k--; if (k > i) j = k; }
+        char buf[192];
+        int len = j - i; if (len > 190) len = 190;
+        memcpy(buf, txt + i, len); buf[len] = 0;
+        w3dLogf("[gl] %s %d: %s", titulo, parte++, buf);
+        i = j;
+        while (i < n && txt[i] == ' ') i++;
+    }
+}
+static void VolcarCapacidadesGL(EGLDisplay d){
+    LogGlLargo("GL_VENDOR", (const char*)glGetString(GL_VENDOR));
+    LogGlLargo("GL_RENDERER", (const char*)glGetString(GL_RENDERER));
+    LogGlLargo("GL_VERSION", (const char*)glGetString(GL_VERSION));
+    LogGlLargo("GL_EXTENSIONS", (const char*)glGetString(GL_EXTENSIONS));
+    LogGlLargo("EGL_VENDOR", eglQueryString(d, EGL_VENDOR));
+    LogGlLargo("EGL_VERSION", eglQueryString(d, EGL_VERSION));
+    LogGlLargo("EGL_EXTENSIONS", eglQueryString(d, EGL_EXTENSIONS));
+    // limites (los de las extensiones por su valor: el SDK puede no traer glext.h)
+    struct Lim { GLenum e; const char* n; };
+    const Lim lim[] = {
+        { GL_MAX_LIGHTS, "GL_MAX_LIGHTS" }, { GL_MAX_TEXTURE_UNITS, "GL_MAX_TEXTURE_UNITS" },
+        { GL_MAX_TEXTURE_SIZE, "GL_MAX_TEXTURE_SIZE" }, { GL_MAX_MODELVIEW_STACK_DEPTH, "GL_MAX_MODELVIEW_STACK_DEPTH" },
+        { 0x8842, "GL_MAX_PALETTE_MATRICES_OES" }, { 0x86A4, "GL_MAX_VERTEX_UNITS_OES" }
+    };
+    for (unsigned k = 0; k < sizeof(lim) / sizeof(lim[0]); k++) {
+        while (glGetError() != GL_NO_ERROR) {}
+        GLint v[4] = { -1, -1, -1, -1 };
+        glGetIntegerv(lim[k].e, v);
+        const GLenum err = glGetError();
+        w3dLogf("[gl] %s = %d%s", lim[k].n, (int)v[0], err != GL_NO_ERROR ? " (el driver no lo conoce)" : "");
+    }
+    // funciones que podrian estar aunque no se anuncien: programas de vertices (IMG_vertex_program, basado en
+    // ARB_vertex_program), la paleta de matrices, multi-draw, draw_texture, clip planes de IMG, map buffer
+    const char* fns[] = {
+        "glProgramStringARB", "glBindProgramARB", "glGenProgramsARB", "glProgramLocalParameter4fARB",
+        "glProgramEnvParameter4fARB", "glVertexAttribPointerARB", "glEnableVertexAttribArrayARB",
+        "glCurrentPaletteMatrixOES", "glLoadPaletteFromModelViewMatrixOES", "glMatrixIndexPointerOES",
+        "glWeightPointerOES", "glMultiDrawArraysEXT", "glMultiDrawElementsEXT", "glDrawTexiOES",
+        "glClipPlanefIMG", "glMapBufferOES", "glGenFramebuffersOES", "glQueryMatrixxOES"
+    };
+    for (unsigned k = 0; k < sizeof(fns) / sizeof(fns[0]); k++)
+        w3dLogf("[gl] eglGetProcAddress(%s): %s", fns[k], eglGetProcAddress(fns[k]) != NULL ? "SI" : "no");
+    while (glGetError() != GL_NO_ERROR) {}
+}
 
 
 // ================= MEMBER FUNCTIONS =======================
@@ -208,6 +265,7 @@ void CWhisk3DContainer::ConstructL(const TRect& /*aRect*/){
 
     iWhisk3D = CWhisk3D::NewL( size.iWidth, size.iHeight, iInputHandler ); // Create an instance of Whisk3D
     iWhisk3D->AppInit();                                       // Initialize OpenGL ES
+    VolcarCapacidadesGL( iEglDisplay );   // (despues de AppInit: ahi arranca el log) que expone este driver
 
     // Fase 1 unificacion: arbol de viewports compartido (core/ui). Es el
     // equivalente al rootViewport->Resize(winW, winH) del main.cpp de PC:

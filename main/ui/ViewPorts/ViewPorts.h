@@ -90,6 +90,7 @@ bool BrushBarEditando();            // el foco esta en modo ajuste (OK apretado)
 void BrushBarSoltarFoco();          // saca el foco (al salir del modo pintura)
 class ViewportBase;
 void BrushBarOlvidarViewport(ViewportBase* vp); // el viewport murio en medio del gesto: olvidarlo
+bool BrushBarArrastrandoRadio();       // la barra del RADIO del pincel se esta arrastrando (vista previa en el 3D)
 
 // Variables UV/indices
 extern GLubyte indicesBorder[];

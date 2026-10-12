@@ -37,12 +37,15 @@ enum W3dTecla {
     W3dK_LEFT, W3dK_RIGHT, W3dK_UP, W3dK_DOWN,
     W3dK_LSHIFT, W3dK_LCTRL, W3dK_LALT,
     W3dK_PGUP, W3dK_PGDN, // paginado (los usa el editor de texto del IDE)
-    W3dK_F2,              // renombrar (el outliner por recursos; como en Blender)
+    W3dK_F2,              // renombrar (outliner)
 
     // --- teclado numerico (en el telefono, el keypad ES el teclado) ---
     W3dK_KP_0 = 0x120, W3dK_KP_1, W3dK_KP_2, W3dK_KP_3, W3dK_KP_4,
     W3dK_KP_5, W3dK_KP_6, W3dK_KP_7, W3dK_KP_8, W3dK_KP_9,
-    W3dK_KP_ENTER, W3dK_KP_PERIOD
+    W3dK_KP_ENTER, W3dK_KP_PERIOD,
+
+    // --- teclas de funcion (F2 ya tenia su lugar arriba). Las usan los atajos reasignables (app/W3dAtajos.h) ---
+    W3dK_F1 = 0x130, W3dK_F3 = 0x132, W3dK_F4, W3dK_F5, W3dK_F6, W3dK_F7, W3dK_F8, W3dK_F9, W3dK_F10, W3dK_F11, W3dK_F12
 };
 
 // Botones del mouse. En el telefono no hay mouse fisico: el cursor virtual manda estos mismos, asi que el "ok" es un

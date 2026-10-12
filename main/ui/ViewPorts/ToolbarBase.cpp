@@ -311,6 +311,7 @@ void BrushBarDragSoltar(){
 }
 
 int  BrushBarFoco(){ return gBBfoco; }
+bool BrushBarArrastrandoRadio(){ return gBBvp && gBBidx == 0 && gBBmovio; }
 bool BrushBarEditando(){ return gBBedit; }
 void BrushBarSoltarFoco(){ gBBfoco = -1; gBBedit = false; }
 

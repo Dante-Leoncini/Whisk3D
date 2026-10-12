@@ -1,3 +1,6 @@
+#include "ViewPorts/PopUp/AtajosPopup.h"
+#include "WhiskUI/widgets/PopupMenu.h"
+#include "app/W3dAtajos.h"   // atajos reasignables (atajo*, teclareal)
 #include "test/W3dScript.h"
 #include "test/W3dPruebasRecursos.h" // los comandos de recursos/carga/formatos (archivo aparte: compila rapido)
 #include "W3dNombres.h"          // nombres unicos: la regla comun (tests de los helpers puros)
@@ -19,6 +22,10 @@
 #include "edit/Proporcional.h"
 #include "io/TexturaGenerada.h"      // newtex / texgentest / newtexclean
 #include "render/RayTracer.h"        // rtrender / rtpixel / rtsave / rttris
+#include "io/UVExportar.h"            // uvexport / uvexportdef
+#include "ViewPorts/PopUp/ExportarUVPopup.h"   // uvexportpopup / uvexportnow
+#include "ViewPorts/PopUp/GuardarComoPopup.h"  // guardarcomo
+#include "ViewPorts/PopUp/TransformRedoPanel.h"  // trpanel / trfijar / trboton / trinfo
 #include "io/TexturaEditada.h"       // texdab / texpixel / texsave / texext / texint / texlabel / texpaint3d     // prop / xform / vertat / objmove / objat       // unwrap / smartuv / lightmap / followquads / uvreset / unwraptest     // Nuevo/MoverMeshPart (funciones libres del editor)
 #include "edit/WeightPaint.h"  // wptest: pincel + escritura de pesos (fase 2 weight paint)
 #include "edit/BoneEdit.h"     // bonetest: Edit Mode de huesos (fase 3)
@@ -4204,6 +4211,14 @@ bool W3dRunCommand(const std::string& linea, std::string& err) {
         printf("      [guardarw3d] %s -> %s\n", ruta.c_str(), ok?"OK":"FALLO");
         return ok;
     }
+    // ---- w3dpath <ruta> : la ruta del proyecto ACTUAL (lo que fija Guardar como / Abrir en la UI: el proximo "Guardar"
+    //      de un archivo interno reescribe ese .w3d) ----
+    if (cmd == "w3dpath") {
+        std::string ruta; std::getline(ss, ruta);
+        size_t p = ruta.find_first_not_of(" \t"); if (p != std::string::npos) ruta = ruta.substr(p);
+        extern std::string w3dPath; w3dPath = ruta;
+        return true;
+    }
     // ---- abrirw3d <ruta> : cierra el proyecto actual y abre otro EN CALIENTE ----
     if (cmd == "abrirw3d") {
         std::string ruta; std::getline(ss, ruta);
@@ -4850,7 +4865,7 @@ bool W3dRunCommand(const std::string& linea, std::string& err) {
     //  rutinainfo <rutina>                         los pasos de cada lista, si es valida y el motivo
     //  memoria <nombre> <i> <valor>                escribe una memoria (lo mismo que setMemoria de lua)
     if (cmd == "rutina" || cmd == "rutinapaso" || cmd == "rutinalista" || cmd == "rutinausar" || cmd == "rutinainfo" || cmd == "rutinasel" ||
-        cmd == "rutinaset") {
+        cmd == "rutinaset" || cmd == "rutinarepetir") {
         std::string nom; ss >> nom;
         Object* o = SceneCollection ? FindObjectByName(SceneCollection, nom) : NULL;
         if (cmd == "rutina") {
@@ -4864,6 +4879,8 @@ bool W3dRunCommand(const std::string& linea, std::string& err) {
         Rutina* r = (Rutina*)o;
         static const char* modos[] = { "defecto", "solido", "material", "render", "alambre", "zbuffer" };
         if (cmd == "rutinasel") { int i = 0; ss >> i; r->pasoActivo = i; return true; }   // el paso elegido (0..)
+        // rutinarepetir <rutina> <n> : el BUCLE de rutina (la lista corre n veces)
+        if (cmd == "rutinarepetir") { int n = 1; ss >> n; r->repetir = (float)n; g_w3dRutinasGen++; return true; }
         // rutinaset <rutina> <i> on 0|1 | n v1 v2...   un campo del paso i (0..) de la lista que se edita (como setPaso)
         if (cmd == "rutinaset") {
             int i = 0; std::string campo; ss >> i >> campo;
@@ -8134,6 +8151,35 @@ bool W3dRunCommand(const std::string& linea, std::string& err) {
         int tipo = (t=="screw")?0:(t=="mirror")?1:(t=="array")?2:(t=="subsurf")?3:(t=="boolean")?4:(t=="cullingtri")?(int)ModifierType::CullingTri:-1;
         if (tipo < 0) { err = "tipo de modificador desconocido: '" + t + "'"; return false; }
         UndoModAgregar(m, tipo); m->GenerarMallaModificada(); return true; // la MISMA puerta que el boton Add (deja paso de undo)
+    }
+    // ---- modarray copias relX relY relZ [constX constY constZ] [merge] : parametros del Array activo (ejes de la UI) ----
+    // ---- genbbox [nverts ncaras] [minx miny minz maxx maxy maxz tol] : caja de la malla GENERADA (ejes internos) ----
+    if (cmd == "modarray") {
+        Mesh* m = ScriptActiveMesh(); if (!m) { err = "no hay malla activa"; return false; }
+        if (m->modificadorActivo < 0 || m->modificadorActivo >= (int)m->modificadores.size()) { err = "sin modificador activo"; return false; }
+        Modifier* md = m->modificadores[m->modificadorActivo];
+        if (md->tipo != ModifierType::Array) { err = "modarray: el activo no es un Array"; return false; }
+        float n = 2, rx = 1, ry = 0, rz = 0, cx = 0, cy = 0, cz = 0; int mg = 0;
+        ss >> n >> rx >> ry >> rz;
+        md->arrCount = n; md->arrRelX = rx; md->arrRelY = ry; md->arrRelZ = rz; md->arrRelOn = true;
+        if (ss >> cx >> cy >> cz) { md->arrConstOn = true; md->arrConstX = cx; md->arrConstY = cy; md->arrConstZ = cz; if (ss >> mg) md->arrMerge = (mg != 0); }
+        m->GenerarMallaModificada(); return true;
+    }
+    if (cmd == "genbbox") {
+        Mesh* m = ScriptActiveMesh(); if (!m) { err = "no hay malla activa"; return false; }
+        if (!m->genValido || !m->genVertex) { err = "genbbox: la malla no tiene malla generada"; return false; }
+        Vector3 mn(1e30f,1e30f,1e30f), mx(-1e30f,-1e30f,-1e30f);
+        for (int i = 0; i < m->genVertexSize; i++) { const float* q = &m->genVertex[i*3];
+            if (q[0] < mn.x) mn.x = q[0]; if (q[1] < mn.y) mn.y = q[1]; if (q[2] < mn.z) mn.z = q[2];
+            if (q[0] > mx.x) mx.x = q[0]; if (q[1] > mx.y) mx.y = q[1]; if (q[2] > mx.z) mx.z = q[2]; }
+        printf("      [genbbox] verts=%d tris=%d caja (%.3f,%.3f,%.3f)..(%.3f,%.3f,%.3f)\n", m->genVertexSize, m->genFacesSize / 3, mn.x, mn.y, mn.z, mx.x, mx.y, mx.z);
+        float a[6], tol = 0.01f;
+        if (ss >> a[0] >> a[1] >> a[2] >> a[3] >> a[4] >> a[5]) {
+            ss >> tol;
+            const float r[6] = { mn.x, mn.y, mn.z, mx.x, mx.y, mx.z };
+            for (int k = 0; k < 6; k++) if (fabsf(r[k] - a[k]) > tol) { char b[200]; sprintf(b, "genbbox: caja (%.3f,%.3f,%.3f)..(%.3f,%.3f,%.3f), se esperaba (%.3f,%.3f,%.3f)..(%.3f,%.3f,%.3f)", r[0],r[1],r[2],r[3],r[4],r[5],a[0],a[1],a[2],a[3],a[4],a[5]); err = b; return false; }
+        }
+        return true;
     }
     // ---- modtarget <n> : setea el target del Mirror activo = hijo n de la escena ----
     if (cmd == "modtarget") {
@@ -28870,7 +28916,7 @@ bool W3dRunCommand(const std::string& linea, std::string& err) {
         W3dIdioma prevL = g_idioma; bool prevAA = cfg.enableAntialiasing;
         W3dIdiomaSet(W3dLangPT); cfg.enableAntialiasing = !prevAA;
         bool escribio = W3dConfigGuardar();
-        std::string ruta = w3dFileSystem::GetResDir() + "/config.ini";
+        std::string ruta = w3dFileSystem::GetUserDataDir() + "/config.ini";   // (la carpeta escribible del usuario)
         std::string txt; { FILE* f = fopen(ruta.c_str(), "rb");
             if (f){ char b[512]; size_t n; while ((n = fread(b,1,sizeof b,f)) > 0) txt.append(b,n); fclose(f); } }
         bool tieneIdioma = (txt.find("idioma = pt") != std::string::npos);
@@ -29597,6 +29643,184 @@ bool W3dRunCommand(const std::string& linea, std::string& err) {
               bm += (long)r->facesSize * (long)sizeof(MeshIndex);
           }
           printf("      [memtex] mallas: %d en el registro, %d cargadas, %.2f MiB\n", nreg, nm, bm / 1048576.0); }
+        return true;
+    }
+    // ---- ATAJOS REASIGNABLES (app/W3dAtajos.h). En --script el archivo es /tmp/w3d_prueba_atajos.ini y arranca
+    //      con los de fabrica (main.cpp), asi las pruebas nunca tocan el atajos.ini del usuario.
+    //   atajoscheck                    la tabla: sin combinaciones por defecto repetidas en un contexto, todas leibles,
+    //                                  y cada nombre de tecla ida y vuelta
+    //   atajo <id> <lista>             fija las combinaciones ("Ctrl+M, G"; vacio = ninguna)
+    //   atajoagregar <id> <combo>      agrega una (como la ventana): se la saca a la otra funcion del contexto
+    //   atajover <id> <lista>          ERROR si la funcion no tiene exactamente esa lista ("" = ninguna)
+    //   atajoreset [id]                vuelve a fabrica (una o todas)
+    //   atajosguardar / atajoscargar   escribe / relee el archivo
+    //   atajocapturar <id> <combo>     la ventana esperando tecla + la tecla apretada por la puerta real
+    //   teclareal <vista> <combo>      la combinacion por la MISMA puerta que el teclado (InputUsuarioSDL3), con el foco
+    //                                  en el viewport <vista> (3d uv timeline outliner 2d props ide)
+    //   objvisible <0|1>               ERROR si el objeto activo no esta asi
+    //   xformactivo <0|1>              ERROR si (no) hay un transform de objetos/malla en curso en el 3D
+    if (cmd == "atajoscheck") {
+        int malas = 0;
+        for (int i = 0; i < W3dAtajosCantidad(); i++) {
+            const W3dAtajoDef& a = W3dAtajoInfo(i);
+            std::vector<W3dCombo> v = W3dAtajoCombos(i);
+            if (v.empty()) { printf("      [atajoscheck] %s: el defecto '%s' no se pudo leer\n", a.id, a.defecto); malas++; }
+            for (int j = 0; j < i; j++) {
+                if (W3dAtajoInfo(j).ctx != a.ctx) continue;
+                const std::vector<W3dCombo>& w = W3dAtajoCombos(j);
+                for (size_t x = 0; x < v.size(); x++) for (size_t y = 0; y < w.size(); y++)
+                    if (v[x] == w[y]) { printf("      [atajoscheck] %s y %s comparten %s\n", a.id, W3dAtajoInfo(j).id, W3dComboTexto(v[x]).c_str()); malas++; }
+                if (!strcmp(W3dAtajoInfo(j).id, a.id)) { printf("      [atajoscheck] id repetido %s\n", a.id); malas++; }
+            }
+            for (size_t x = 0; x < v.size(); x++) {
+                W3dCombo c; if (!W3dComboDesdeTexto(W3dComboTexto(v[x]), c) || !(c == v[x])) { printf("      [atajoscheck] %s: '%s' no vuelve\n", a.id, W3dComboTexto(v[x]).c_str()); malas++; }
+            }
+        }
+        const int teclas[] = { W3dK_RETURN, W3dK_ESCAPE, W3dK_DELETE, W3dK_TAB, W3dK_SPACE, W3dK_KP_PERIOD, W3dK_KP_0, W3dK_F1, W3dK_F12, ',', '+', '/', '.', 'q', '7' };
+        for (size_t k = 0; k < sizeof(teclas) / sizeof(teclas[0]); k++) {
+            W3dCombo c(teclas[k], W3dMOD_CTRL | W3dMOD_SHIFT), d;
+            if (!W3dComboDesdeTexto(W3dComboTexto(c), d) || !(c == d)) { printf("      [atajoscheck] '%s' no vuelve\n", W3dComboTexto(c).c_str()); malas++; }
+        }
+        printf("      [atajoscheck] %d funciones, %d problemas\n", W3dAtajosCantidad(), malas);
+        if (malas) { err = "atajoscheck: la tabla tiene problemas"; return false; }
+        return true;
+    }
+    if (cmd == "atajo" || cmd == "atajoagregar" || cmd == "atajover") {
+        std::string id; ss >> id;
+        std::string resto; std::getline(ss, resto);
+        while (!resto.empty() && (resto[0] == ' ' || resto[0] == '\t')) resto.erase(0, 1);
+        if (resto.size() >= 2 && resto[0] == '"' && resto[resto.size() - 1] == '"') resto = resto.substr(1, resto.size() - 2);
+        const int i = W3dAtajoBuscar(id.c_str());
+        if (i < 0) { err = cmd + ": no existe la funcion '" + id + "'"; return false; }
+        if (cmd == "atajo") {
+            if (!W3dAtajosFijar(i, resto.c_str())) { err = "atajo: no se entiende '" + resto + "'"; return false; }
+        } else if (cmd == "atajoagregar") {
+            W3dCombo c; if (!W3dComboDesdeTexto(resto, c)) { err = "atajoagregar: no se entiende '" + resto + "'"; return false; }
+            int quitada = -1; W3dAtajoAgregar(i, c, &quitada);
+            if (quitada >= 0) printf("      [atajoagregar] %s se la saco a %s\n", resto.c_str(), W3dAtajoInfo(quitada).id);
+        } else if (W3dAtajoTexto(i) != resto) {
+            err = "atajover: " + id + " tiene '" + W3dAtajoTexto(i) + "', se esperaba '" + resto + "'"; return false;
+        }
+        printf("      [%s] %s = %s\n", cmd.c_str(), id.c_str(), W3dAtajoTexto(i).c_str());
+        return true;
+    }
+    if (cmd == "atajoreset") {
+        std::string id; ss >> id;
+        if (id.empty()) { W3dAtajosRestablecerTodo(); printf("      [atajoreset] todos\n"); return true; }
+        const int i = W3dAtajoBuscar(id.c_str());
+        if (i < 0) { err = "atajoreset: no existe '" + id + "'"; return false; }
+        W3dAtajoRestablecer(i);
+        printf("      [atajoreset] %s = %s\n", id.c_str(), W3dAtajoTexto(i).c_str());
+        return true;
+    }
+    if (cmd == "atajosguardar") {
+        if (!W3dAtajosGuardar()) { err = "atajosguardar: no se pudo escribir " + W3dAtajosRuta(); return false; }
+        printf("      [atajosguardar] %s\n", W3dAtajosRuta().c_str());
+        return true;
+    }
+    if (cmd == "atajoscargar") {
+        if (!W3dAtajosCargar()) { err = "atajoscargar: no se pudo leer " + W3dAtajosRuta(); return false; }
+        printf("      [atajoscargar] %s\n", W3dAtajosRuta().c_str());
+        return true;
+    }
+    if (cmd == "teclareal" || cmd == "atajocapturar") {
+        std::string vista; ss >> vista;
+        std::string resto; std::getline(ss, resto);
+        while (!resto.empty() && resto[0] == ' ') resto.erase(0, 1);
+        int kind = 1;
+        if (cmd == "atajocapturar") {
+            const int i = W3dAtajoBuscar(vista.c_str());
+            if (i < 0) { err = "atajocapturar: no existe '" + vista + "'"; return false; }
+            g_atajoCapturando = i;
+        } else {
+            kind = vista == "3d" ? 1 : vista == "outliner" ? 2 : vista == "props" ? 3 : vista == "uv" ? 4 :
+                   vista == "timeline" ? 5 : vista == "2d" ? 6 : vista == "ide" ? 8 : -1;
+            if (kind < 0) { err = "teclareal: vista desconocida '" + vista + "'"; return false; }
+        }
+        W3dCombo c; if (!W3dComboDesdeTexto(resto, c)) { err = cmd + ": no se entiende '" + resto + "'"; return false; }
+        struct VK { static ViewportBase* Buscar(ViewportBase* n, int k) { if (!n) return NULL; if (n->isLeaf()) return n->ViewportKind() == k ? n : NULL;
+                        ViewportBase* a = Buscar(((ViewportColumn*)n)->childA, k); if (a) return a; return Buscar(((ViewportColumn*)n)->childB, k); } };
+        ViewportBase* vp = VK::Buscar(rootViewport, kind);
+        if (!vp) { err = cmd + ": no hay un viewport '" + vista + "' en el layout"; return false; }
+        extern void InputUsuarioSDL3(SDL_Event&);
+        // el foco por hover sale de la posicion REAL del mouse: se congela en el viewport pedido mientras dura la tecla
+        const bool congelado = ViewPortClickDown;
+        viewPortActive = vp; ViewPortClickDown = true;
+        struct Ev { static void Tecla(Uint32 tipo, SDL_Keycode k, Uint16 mod) { extern void InputUsuarioSDL3(SDL_Event&);
+            SDL_Event ev; memset(&ev, 0, sizeof(ev)); ev.type = tipo; ev.key.keysym.sym = k; ev.key.keysym.mod = mod;
+            ev.key.keysym.scancode = SDL_GetScancodeFromKey(k); ev.key.state = (tipo == SDL_KEYDOWN) ? SDL_PRESSED : SDL_RELEASED;
+            InputUsuarioSDL3(ev); } };
+        Uint16 mod = 0;
+        if (c.mods & W3dMOD_CTRL)  { mod |= KMOD_LCTRL;  Ev::Tecla(SDL_KEYDOWN, SDLK_LCTRL, mod); }
+        if (c.mods & W3dMOD_SHIFT) { mod |= KMOD_LSHIFT; Ev::Tecla(SDL_KEYDOWN, SDLK_LSHIFT, mod); }
+        if (c.mods & W3dMOD_ALT)   { mod |= KMOD_LALT;   Ev::Tecla(SDL_KEYDOWN, SDLK_LALT, mod); }
+        extern SDL_Keycode W3dTeclaASDLPublica(int);
+        const SDL_Keycode k = W3dTeclaASDLPublica(c.tecla);
+        if (k == SDLK_UNKNOWN) { err = cmd + ": la tecla no existe en SDL"; return false; }
+        Ev::Tecla(SDL_KEYDOWN, k, mod);
+        Ev::Tecla(SDL_KEYUP, k, mod);
+        if (c.mods & W3dMOD_ALT)   { mod &= ~KMOD_LALT;   Ev::Tecla(SDL_KEYUP, SDLK_LALT, mod); }
+        if (c.mods & W3dMOD_SHIFT) { mod &= ~KMOD_LSHIFT; Ev::Tecla(SDL_KEYUP, SDLK_LSHIFT, mod); }
+        if (c.mods & W3dMOD_CTRL)  { mod &= ~KMOD_LCTRL;  Ev::Tecla(SDL_KEYUP, SDLK_LCTRL, mod); }
+        if (!congelado) ViewPortClickDown = false;
+        if (rootViewport) rootViewport->Render();
+        printf("      [%s] %s %s\n", cmd.c_str(), vista.c_str(), W3dComboTexto(c).c_str());
+        return true;
+    }
+    // ---- atajosventana [contexto] [fila] : abre la ventana de atajos en ese contexto (W3dAtajoCtx) y fila ----
+    if (cmd == "atajosventana") {
+        int c = -1, f = -1; ss >> c >> f;
+        extern void AbrirAtajosPopup(); AbrirAtajosPopup();
+        AtajosPopup* ap = AtajosPopupActual();
+        if (!ap) { err = "atajosventana: no abrio"; return false; }
+        if (c >= 0) { ap->ctx = c; ap->sel = 0; ap->ArmarFilas(); }
+        if (f >= 0) { ap->sel = f; ap->AsegurarVisible(); }
+        if (rootViewport) rootViewport->Render();
+        printf("      [atajosventana] contexto %d, %d funciones, fila %d (%s)\n", ap->ctx, (int)ap->filas.size(), ap->sel,
+               ap->Seleccionada() >= 0 ? W3dAtajoInfo(ap->Seleccionada()).id : "-");
+        return true;
+    }
+    // ---- menuatajo <hint> <esperado...> : lo que muestra un item de menu con ese hint ("@3d.mover"), por la misma
+    //      puerta que el dibujo del menu (MenuAtajoVisible). "-" = vacio ----
+    if (cmd == "menuatajo") {
+        std::string hint; ss >> hint;
+        std::string esp; std::getline(ss, esp);
+        while (!esp.empty() && esp[0] == ' ') esp.erase(0, 1);
+        if (esp == "-") esp.clear();
+        MenuItem it("x", 0);
+        it.atajo = hint;
+        const std::string ve = MenuAtajoVisible(&it);
+        printf("      [menuatajo] %s -> '%s'\n", hint.c_str(), ve.c_str());
+        if (ve != esp) { err = "menuatajo: " + hint + " muestra '" + ve + "', se esperaba '" + esp + "'"; return false; }
+        return true;
+    }
+    if (cmd == "objvisible") {
+        int v = 1; ss >> v;
+        if (!ObjActivo) { err = "objvisible: no hay objeto activo"; return false; }
+        printf("      [objvisible] '%s' visible=%d\n", ObjActivo->name.c_str(), (int)ObjActivo->visible);
+        if ((int)ObjActivo->visible != (v != 0)) { err = "objvisible: '" + ObjActivo->name + "' no tiene la visibilidad esperada"; return false; }
+        return true;
+    }
+    if (cmd == "xformactivo") {
+        int v = 1; ss >> v;
+        const bool hay = (estado != editNavegacion) || EditXformActivo();
+        printf("      [xformactivo] %d (estado %d)\n", (int)hay, estado);
+        if ((int)hay != (v != 0)) { err = "xformactivo: no es lo esperado"; return false; }
+        return true;
+    }
+    // ---- tris3d [delta] : triangulos de ESCENA del viewport 3D activo en este cuadro; con 'delta' compara contra el
+    //      llamado anterior (cuantos triangulos mas / menos se dibujaron) ----
+    if (cmd == "tris3d") {
+        static int anterior = -1;
+        int delta = 0; const bool hayDelta = (bool)(ss >> delta);
+        extern Viewport3D* Viewport3DActive;
+        if (!rootViewport) { err = "tris3d: sin layout"; return false; }
+        rootViewport->Render();
+        Viewport3D* vp = Viewport3DActive; if (!vp) { err = "tris3d: sin viewport 3D"; return false; }
+        const int t = vp->statTrisFrame;
+        printf("      [tris3d] %d (antes %d)\n", t, anterior);
+        if (hayDelta && anterior >= 0 && t - anterior != delta) { char b[120]; sprintf(b, "tris3d: %d -> %d (%+d), se esperaba %+d", anterior, t, t - anterior, delta); err = b; anterior = t; return false; }
+        anterior = t;
         return true;
     }
     if (cmd == "statsvivo") {
@@ -30547,6 +30771,8 @@ bool W3dRunCommand(const std::string& linea, std::string& err) {
         return true;
     }
     // ---- brushradius px : radio del pincel en pixeles de pantalla ----
+    // ---- esperar ms : pausa real (animaciones por tiempo: el desvanecido de la vista previa del radio) ----
+    if (cmd == "esperar") { int ms = 0; ss >> ms; if (ms > 0) SDL_Delay((Uint32)ms); return true; }
     if (cmd == "brushradius") { float r = 40; ss >> r; BrushGet().radioPx = r; return true; }
     // ---- brushcolor r g b [a] [fuerza] : color (0..1) y fuerza del pincel ----
     if (cmd == "brushcolor") {
@@ -30722,6 +30948,274 @@ bool W3dRunCommand(const std::string& linea, std::string& err) {
         RTInvalidar();
         return true;
     }
+    // ---- uvexport w h ruta.png : el mapa UV de la malla activa (filtrado por la textura mostrada) a un PNG RGBA ----
+    if (cmd == "uvexport") {
+        int w = 0, h = 0; std::string ruta; ss >> w >> h >> ruta;
+        Mesh* m = ScriptActiveMesh();
+        if (!m) { err = "uvexport: no hay malla activa"; return false; }
+        std::string msg;
+        if (!UVExportarPNG(m, UVTexturaMostrada(m), w, h, ruta, msg)) { err = "uvexport: " + msg; return false; }
+        return true;
+    }
+    // ---- uvexportalfa w h x y alfa [tol] : rasteriza el mapa UV en memoria y compara el alfa de un pixel ----
+    if (cmd == "uvexportalfa") {
+        int w = 0, h = 0, x = 0, y = 0, ea = 0, tol = 2; ss >> w >> h >> x >> y >> ea >> tol;
+        Mesh* m = ScriptActiveMesh();
+        std::vector<unsigned char> rgba; int caras = 0;
+        if (!UVExportarRaster(m, UVTexturaMostrada(m), w, h, rgba, &caras)) { err = "uvexportalfa: no hay UV"; return false; }
+        if (x < 0 || y < 0 || x >= w || y >= h) { err = "uvexportalfa: fuera de la imagen"; return false; }
+        const int a = rgba[((size_t)y * w + x) * 4 + 3];
+        printf("      [uvexportalfa] (%d,%d) alfa=%d (%d caras)\n", x, y, a, caras);
+        if (abs(a - ea) > tol) { char b[96]; sprintf(b, "uvexportalfa: alfa %d, se esperaba %d", a, ea); err = b; return false; }
+        return true;
+    }
+    // ---- uvexportdef w h : el tamano que propone el popup (textura mostrada / 512 en PC) tiene que ser w x h ----
+    if (cmd == "uvexportdef") {
+        int ew = 0, eh = 0; ss >> ew >> eh;
+        Mesh* m = ScriptActiveMesh();
+        int w = 0, h = 0; UVExportarTamDefecto(UVTexturaMostrada(m), w, h);
+        printf("      [uvexportdef] %dx%d (nombre '%s')\n", w, h, UVExportarNombreDefecto(m, UVTexturaMostrada(m)).c_str());
+        if (w != ew || h != eh) { char b[96]; sprintf(b, "uvexportdef: %dx%d, se esperaba %dx%d", w, h, ew, eh); err = b; return false; }
+        return true;
+    }
+    // ---- uvexportpopup : abre el formulario "Export UV Layout" (para uishot / popupinfo) ----
+    if (cmd == "uvexportpopup") { AbrirExportarUVPopup(); return true; }
+    // ---- uvexportnow : exporta con lo que dice el formulario (sin confirmar sobrescritura) ----
+    if (cmd == "uvexportnow") {
+        std::string ruta, msg;
+        if (!ExportarUVAhora(ruta, msg)) { err = "uvexportnow: " + msg; return false; }
+        printf("      [uvexportnow] -> %s\n", ruta.c_str());
+        return true;
+    }
+    // ---- objscaleat x y z [tol] / objroteuler x y z [tol] : escala / euler (grados) del objeto activo (ejes internos) ----
+    if (cmd == "objscaleat" || cmd == "objroteuler") {
+        if (!ObjActivo) { err = cmd + ": no hay objeto activo"; return false; }
+        float ex = 0, ey = 0, ez = 0, tol = 0.01f; ss >> ex >> ey >> ez >> tol;
+        const Vector3 v = (cmd == "objscaleat") ? ObjActivo->scale : ObjActivo->rotEuler;
+        printf("      [%s] (%.4f, %.4f, %.4f)\n", cmd.c_str(), v.x, v.y, v.z);
+        if (fabsf(v.x - ex) > tol || fabsf(v.y - ey) > tol || fabsf(v.z - ez) > tol) {
+            char b[200]; sprintf(b, "%s: (%.4f,%.4f,%.4f), se esperaba (%.4f,%.4f,%.4f)", cmd.c_str(), v.x, v.y, v.z, ex, ey, ez); err = b; return false;
+        }
+        return true;
+    }
+    // ---- objxf rotate|scale eje(x|y|z|xyz) valor : rota (grados) / escala (factor) los objetos seleccionados y CONFIRMA
+    //      como el click / Enter (Viewport3D::Aceptar: abre el panel de la ultima operacion si esta prendido) ----
+    if (cmd == "objxf") {
+        std::string q, e; float v = 0; ss >> q >> e >> v;
+        if (InteractionMode != ObjectMode) { err = "objxf necesita Object Mode"; return false; }
+        const int eje = (e == "x") ? X : (e == "y") ? Y : (e == "z") ? Z : XYZ;
+        if (q == "rotate") SetRotacion(); else if (q == "scale") SetEscala(); else { err = "objxf: rotate|scale"; return false; }
+        if (estado == editNavegacion) { err = "objxf: no arranco (sin objeto activo seleccionado)"; return false; }
+        axisSelect = eje; SetTransformNumerico(v);
+        if (Viewport3DActive) Viewport3DActive->Aceptar(); else { UndoTransformConfirmar(); ReestablecerEstado(true); }
+        return true;
+    }
+    // ---- trpanel on|off : el panel "ajustar la ultima operacion" se abre solo tras cada transform (en el harness arranca off) ----
+    // ---- trfijar campo valor : edita un valor del panel abierto (re-hace la operacion) ----
+    // ---- trboton 1|0 : Aceptar / Cancelar del panel ----
+    // ---- trinfo tipo : el panel tiene que estar abierto con esa operacion (mover|rotar|escalar|cerrado) ----
+    if (cmd == "trpanel") { std::string v; ss >> v; extern bool g_transformRedoAuto; g_transformRedoAuto = (v != "off" && v != "0"); return true; }
+    if (cmd == "trfijar") { int c = 0; float v = 0; ss >> c >> v; if (!TransformRedoFijar(c, v)) { err = "trfijar: el panel no esta abierto"; return false; } return true; }
+    if (cmd == "trboton") { int a = 1; ss >> a; TransformRedoBoton(a != 0); return true; }
+    if (cmd == "trinfo") {
+        std::string e; ss >> e;
+        const int t = TransformRedoTipo();
+        const char* nom = (t == translacion) ? "mover" : (t == rotacion) ? "rotar" : (t == EditScale) ? "escalar" : "cerrado";
+        printf("      [trinfo] panel: %s\n", nom);
+        if (!e.empty() && e != nom) { err = std::string("trinfo: panel ") + nom + ", se esperaba " + e; return false; }
+        return true;
+    }
+    // ---- outver constructor rutinas : los filtros del menu del ojo del outliner (1 = se muestran) ----
+    if (cmd == "outver") { int c = 1, r = 1; ss >> c >> r; extern bool g_outVerConstructor, g_outVerRutinas; g_outVerConstructor = (c != 0); g_outVerRutinas = (r != 0); return true; }
+    // ---- outscrollfin : arrastra (tactil) el outliner hasta el final: la ULTIMA fila tiene que quedar entera a la vista
+    //      (la altura del contenido se medira mal -> el scroll no llegaba). Tambien vale con los filtros del ojo ----
+    if (cmd == "outscrollfin") {
+        struct VK { static ViewportBase* Buscar(ViewportBase* n, int k) { if (!n) return NULL; if (n->isLeaf()) return n->ViewportKind() == k ? n : NULL;
+                        ViewportBase* a = Buscar(((ViewportColumn*)n)->childA, k); if (a) return a; return Buscar(((ViewportColumn*)n)->childB, k); } };
+        if (rootViewport) rootViewport->Render();
+        Outliner* ol = (Outliner*)VK::Buscar(rootViewport, 2);
+        if (!ol || !SceneCollection || SceneCollection->Childrens.empty()) { err = "outscrollfin: sin outliner / escena"; return false; }
+        rootViewport->Render();
+        for (int i = 0; i < 400; i++) ol->event_finger_scroll(ol->x + 10, ol->y + 40, 0, -40);   // dedo hacia arriba = bajar
+        rootViewport->Render();
+        Object* ultimo = SceneCollection->Childrens.back();
+        while (ultimo->desplegado && !ultimo->Childrens.empty()) ultimo = ultimo->Childrens.back();
+        extern int OutlinerFilaDeObjeto(Object*);
+        const int fila = OutlinerFilaDeObjeto(ultimo);
+        const int yTop = borderGS + ol->PosY + ol->BarTopOffset() + fila * RenglonHeightGS, yBot = yTop + RenglonHeightGS;
+        printf("      [outscrollfin] ultima fila %d ('%s'): y %d..%d de %d (PosY %d)\n", fila, ultimo->name.c_str(), yTop, yBot, ol->height, ol->PosY);
+        if (fila < 0 || yBot > ol->height || yTop < ol->BarTopOffset()) { err = "outscrollfin: la ultima fila no se llega a ver"; return false; }
+        return true;
+    }
+    // ---- vistatactil 0|1 : el toggle "vista" de la barra tactil (el dedo navega en Edit Mode / pintura) ----
+    if (cmd == "vistatactil") { int v = 0; ss >> v; extern bool g_viewEditMode; g_viewEditMode = (v != 0); return true; }
+    // ---- gizmomodo n : fija el modo del gizmo (0 mover, 1 rotar, 2 escalar) ----
+    if (cmd == "gizmomodo") { int m = 0; ss >> m; GizmoSetModo(m); return true; }
+    // ---- gizmomodos : el gizmo con sus 3 modos, con eventos de mouse REALES. Click rapido = modo siguiente (sin
+    //      cambio ni paso de undo); rotar con el semicirculo de un eje (el punto agarrado queda bajo el puntero);
+    //      escalar con la punta cuadrada; un toque (dedo) tambien cambia de modo ----
+    if (cmd == "gizmomodos") {
+#ifndef W3D_SYMBIAN
+        if (!rootViewport) { err = "gizmomodos: sin layout"; return false; }
+        rootViewport->Render();
+        extern Viewport3D* Viewport3DActive;
+        Viewport3D* vp = Viewport3DActive;
+        if (!vp || !ObjActivo) { err = "gizmomodos: sin viewport 3D / objeto activo"; return false; }
+        struct EV {
+            static void Boton(Uint32 tipo, int x, int y, Uint32 quien) { extern void InputUsuarioSDL3(SDL_Event&);
+                SDL_Event ev; memset(&ev, 0, sizeof(ev)); ev.type = tipo; ev.button.button = SDL_BUTTON_LEFT; ev.button.which = quien;
+                ev.button.x = x; ev.button.y = y; ev.button.clicks = 1; ev.button.state = (tipo == SDL_MOUSEBUTTONDOWN) ? SDL_PRESSED : SDL_RELEASED;
+                InputUsuarioSDL3(ev); }
+            static void Mover(int x, int y) { extern void InputUsuarioSDL3(SDL_Event&);
+                SDL_Event ev; memset(&ev, 0, sizeof(ev)); ev.type = SDL_MOUSEMOTION; ev.motion.which = 0; ev.motion.state = SDL_BUTTON_LMASK;
+                ev.motion.x = x; ev.motion.y = y; InputUsuarioSDL3(ev); }
+        };
+        bool ok = true;
+        GizmoSetModo(GizmoModoMover);
+        rootViewport->Render();
+        float sx = 0, sy = 0;
+        // (1) click rapido en el centro: pasa a ROTAR, nada se mueve y no queda paso de undo
+        if (!GizmoManijaEnPantalla(vp, GizmoCentro, sx, sy)) { err = "gizmomodos: no hay gizmo"; return false; }
+        const Vector3 pos0 = ObjActivo->pos; const void* undo0 = UndoUltimo();
+        int X0 = vp->x + (int)sx, Y0 = vp->y + (int)sy;
+        EV::Mover(X0, Y0); EV::Boton(SDL_MOUSEBUTTONDOWN, X0, Y0, 0); EV::Boton(SDL_MOUSEBUTTONUP, X0, Y0, 0);
+        const bool aRotar = GizmoModo() == GizmoModoRotar, quieto = (ObjActivo->pos - pos0).Length() < 1e-5f && UndoUltimo() == undo0;
+        printf("      [gizmomodos] click rapido -> modo=%d (rotar=1) sin cambios=%d\n", GizmoModo(), quieto);
+        if (!aRotar || !quieto) ok = false;
+        // (2) ROTAR: arrastrar el semicirculo del eje Z (vertical) 30 grados antihorario alrededor del centro
+        rootViewport->Render();
+        float cx = 0, cy = 0;
+        Vector3 c = ObjActivo->pos; vp->ProyectarPunto(c, cx, cy);
+        if (!GizmoManijaEnPantalla(vp, GizmoEjeZ, sx, sy)) { err = "gizmomodos: no encuentro el semicirculo Z"; return false; }
+        const Quaternion r0 = ObjActivo->Rot();
+        const float rad = sqrtf((sx - cx) * (sx - cx) + (sy - cy) * (sy - cy)), a0 = atan2f(-(sy - cy), sx - cx);
+        EV::Mover(vp->x + (int)sx, vp->y + (int)sy); EV::Boton(SDL_MOUSEBUTTONDOWN, vp->x + (int)sx, vp->y + (int)sy, 0);
+        float axf = sx, ayf = sy;
+        for (int i = 1; i <= 15; i++) {
+            const float a = a0 + (30.0f * i / 15.0f) * 3.14159265f / 180.0f;
+            axf = cx + rad * cosf(a); ayf = cy - rad * sinf(a);
+            EV::Mover(vp->x + (int)(axf + 0.5f), vp->y + (int)(ayf + 0.5f));
+        }
+        EV::Boton(SDL_MOUSEBUTTONUP, vp->x + (int)(axf + 0.5f), vp->y + (int)(ayf + 0.5f), 0);
+        const float giro = 2.0f * acosf(fabsf(r0.w*ObjActivo->Rot().w + r0.x*ObjActivo->Rot().x + r0.y*ObjActivo->Rot().y + r0.z*ObjActivo->Rot().z) > 1.0f ? 1.0f :
+                                        fabsf(r0.w*ObjActivo->Rot().w + r0.x*ObjActivo->Rot().x + r0.y*ObjActivo->Rot().y + r0.z*ObjActivo->Rot().z)) * 57.2957795f;
+        // (el puntero recorre 30 grados de un circulo EN PANTALLA; en el plano del circulo, visto en perspectiva como
+        //  una elipse, son menos: lo que se pide es que gire y que el punto agarrado siga al puntero)
+        printf("      [gizmomodos] rotar: giro %.1f grados\n", giro);
+        if (giro < 5.0f) ok = false;
+        // el SENTIDO: el punto del arco agarrado, girado con la rotacion del objeto, cae bajo el puntero final
+        {
+            Vector3 o, d0;   // punto agarrado en el mundo: se reconstruye proyectando el arco (el centro del semicirculo)
+            CameraBase cam = vp->VistaCam(); Vector3 hc = (cam.pos - c).Normalized();
+            Vector3 dir = hc - Vector3(0, 1, 0) * hc.Dot(Vector3(0, 1, 0)); dir = dir.Normalized();   // el +Z de la UI es el Y interno
+            float s1x, s1y; vp->ProyectarPunto(c + dir, s1x, s1y);
+            const float R = sqrtf((s1x - cx) * (s1x - cx) + (s1y - cy) * (s1y - cy));
+            const Vector3 Pw = c + dir * (rad / (R > 1e-4f ? R : 1.0f));
+            const Quaternion dq = ObjActivo->Rot() * r0.Inverted();
+            const Vector3 Pr = c + dq * (Pw - c);
+            float px, py; vp->ProyectarPunto(Pr, px, py);
+            const float dist = sqrtf((px - axf) * (px - axf) + (py - ayf) * (py - ayf));
+            printf("      [gizmomodos] rotar: el punto agarrado quedo a %.1f px del puntero\n", dist);
+            if (dist > 6.0f * GlobalScale) ok = false;
+            (void)o; (void)d0;
+        }
+        // (3) click rapido -> ESCALAR; arrastrar la punta X hacia afuera: escala X sube, Y/Z no
+        rootViewport->Render();
+        GizmoManijaEnPantalla(vp, GizmoCentro, sx, sy);
+        X0 = vp->x + (int)sx; Y0 = vp->y + (int)sy;
+        EV::Mover(X0, Y0); EV::Boton(SDL_MOUSEBUTTONDOWN, X0, Y0, 0); EV::Boton(SDL_MOUSEBUTTONUP, X0, Y0, 0);
+        printf("      [gizmomodos] click rapido -> modo=%d (escalar=2)\n", GizmoModo());
+        if (GizmoModo() != GizmoModoEscalar) ok = false;
+        rootViewport->Render();
+        vp->ProyectarPunto(ObjActivo->pos, cx, cy);
+        if (!GizmoManijaEnPantalla(vp, GizmoEjeX, sx, sy)) { err = "gizmomodos: no encuentro la punta X"; return false; }
+        const Vector3 s0 = ObjActivo->scale;
+        const float ux = sx - cx, uy = sy - cy;   // direccion de la punta en pantalla: se estira al doble
+        EV::Mover(vp->x + (int)sx, vp->y + (int)sy); EV::Boton(SDL_MOUSEBUTTONDOWN, vp->x + (int)sx, vp->y + (int)sy, 0);
+        for (int i = 1; i <= 10; i++) EV::Mover(vp->x + (int)(sx + ux * i / 10.0f), vp->y + (int)(sy + uy * i / 10.0f));
+        EV::Boton(SDL_MOUSEBUTTONUP, vp->x + (int)(sx + ux), vp->y + (int)(sy + uy), 0);
+        printf("      [gizmomodos] escalar X: %.3f -> %.3f (y %.3f -> %.3f)\n", s0.x, ObjActivo->scale.x, s0.z, ObjActivo->scale.z);
+        if (ObjActivo->scale.x < s0.x * 1.5f || fabsf(ObjActivo->scale.z - s0.z) > 1e-3f) ok = false;
+        // (4) un TOQUE con el dedo sobre el gizmo: modo siguiente (vuelve a mover)
+        rootViewport->Render();
+        GizmoManijaEnPantalla(vp, GizmoCentro, sx, sy);
+        X0 = vp->x + (int)sx; Y0 = vp->y + (int)sy;
+        EV::Boton(SDL_MOUSEBUTTONDOWN, X0, Y0, SDL_TOUCH_MOUSEID); EV::Boton(SDL_MOUSEBUTTONUP, X0, Y0, SDL_TOUCH_MOUSEID);
+        printf("      [gizmomodos] toque -> modo=%d (mover=0)\n", GizmoModo());
+        if (GizmoModo() != GizmoModoMover) ok = false;
+        if (!ok) { err = "gizmomodos: el gizmo no se comporto como se esperaba"; return false; }
+        return true;
+#else
+        err = "gizmomodos: sin mouse de PC"; return false;
+#endif
+    }
+    // ---- altnavtest : navegacion con Alt inyectando eventos de mouse REALES (la misma puerta que SDL):
+    //      Alt+arrastre orbita sin tocar la seleccion; Alt+Shift+arrastre desplaza; sin Alt el arrastre es la caja de
+    //      seleccion (no navega); Alt+click quieto sigue pickeando ----
+    if (cmd == "altnavtest") {
+#ifndef W3D_SYMBIAN
+        if (!rootViewport) { err = "altnavtest: sin layout"; return false; }
+        rootViewport->Render();
+        extern Viewport3D* Viewport3DActive;
+        Viewport3D* vp = Viewport3DActive;
+        if (!vp) { err = "altnavtest: sin viewport 3D"; return false; }
+        struct EV {
+            static void Boton(Uint32 tipo, int x, int y) { extern void InputUsuarioSDL3(SDL_Event&);
+                SDL_Event ev; memset(&ev, 0, sizeof(ev)); ev.type = tipo; ev.button.button = SDL_BUTTON_LEFT; ev.button.which = 0;
+                ev.button.x = x; ev.button.y = y; ev.button.clicks = 1; ev.button.state = (tipo == SDL_MOUSEBUTTONDOWN) ? SDL_PRESSED : SDL_RELEASED;
+                InputUsuarioSDL3(ev); }
+            static void Mover(int x, int y, int xr, int yr) { extern void InputUsuarioSDL3(SDL_Event&);
+                SDL_Event ev; memset(&ev, 0, sizeof(ev)); ev.type = SDL_MOUSEMOTION; ev.motion.which = 0; ev.motion.state = SDL_BUTTON_LMASK;
+                ev.motion.x = x; ev.motion.y = y; ev.motion.xrel = xr; ev.motion.yrel = yr; InputUsuarioSDL3(ev); }
+            static void Arrastre(int cx, int cy) {
+                Boton(SDL_MOUSEBUTTONDOWN, cx, cy);
+                for (int i = 1; i <= 12; i++) Mover(cx + i * 6, cy + i * 2, 6, 2);
+                Boton(SDL_MOUSEBUTTONUP, cx + 72, cy + 24);
+            }
+            static int Seleccionados(Object* o) { if (!o) return 0; int n = o->select ? 1 : 0; for (size_t i = 0; i < o->Childrens.size(); i++) n += Seleccionados(o->Childrens[i]); return n; }
+            static float Giro(const Quaternion& a, const Quaternion& b) { float d = a.w*b.w + a.x*b.x + a.y*b.y + a.z*b.z; return d < 0 ? -d : d; }
+        };
+        const int cx = vp->x + vp->width / 2, cy = vp->y + vp->height / 2;
+        EV::Mover(cx, cy, 0, 0); SDL_Delay(1);
+        bool ok = true; char b[200];
+        // (1) Alt + arrastre: orbita, el pivote queda, la seleccion no cambia, no hay caja
+        const int sel0 = EV::Seleccionados(SceneCollection);
+        Quaternion r0 = vp->viewRot; Vector3 p0 = vp->pivot;
+        SDL_SetModState(KMOD_LALT); LAltPressed = true;
+        EV::Arrastre(cx, cy);
+        const bool orbito = EV::Giro(r0, vp->viewRot) < 0.9999f, pivQuieto = (vp->pivot - p0).Length() < 1e-4f;
+        const bool selQuieta = EV::Seleccionados(SceneCollection) == sel0;
+        sprintf(b, "      [altnav] Alt+arrastre: orbito=%d pivote_quieto=%d seleccion_igual=%d caja=%d\n", orbito, pivQuieto, selQuieta, BoxSelectActivo() ? 1 : 0);
+        printf("%s", b); if (!orbito || !pivQuieto || !selQuieta || BoxSelectActivo()) ok = false;
+        // (2) Alt + Shift + arrastre: desplaza (el pivote se mueve) sin girar
+        Quaternion r1 = vp->viewRot; Vector3 p1 = vp->pivot;
+        SDL_SetModState((SDL_Keymod)(KMOD_LALT | KMOD_LSHIFT)); LShiftPressed = true;
+        EV::Arrastre(cx, cy);
+        const bool desplazo = (vp->pivot - p1).Length() > 1e-4f, sinGiro = EV::Giro(r1, vp->viewRot) > 0.99999f;
+        printf("      [altnav] Alt+Shift+arrastre: desplazo=%d sin_giro=%d\n", desplazo, sinGiro);
+        if (!desplazo || !sinGiro) ok = false;
+        // (3) sin Alt: el arrastre izquierdo NO navega (es la caja de seleccion)
+        Quaternion r2 = vp->viewRot; Vector3 p2 = vp->pivot;
+        SDL_SetModState(KMOD_NONE); LAltPressed = false; LShiftPressed = false;
+        EV::Arrastre(cx, cy);
+        const bool quieto = EV::Giro(r2, vp->viewRot) > 0.99999f && (vp->pivot - p2).Length() < 1e-4f;
+        printf("      [altnav] arrastre sin Alt: la vista no se movio=%d\n", quieto);
+        if (!quieto) ok = false;
+        // (4) Alt + click QUIETO sobre el centro (el cubo): sigue pickeando
+        DeseleccionarTodo(); ObjActivo = NULL;
+        vp->pivot = Vector3(0, 0, 0); vp->RecalcOrbitPosition(); rootViewport->Render();
+        SDL_SetModState(KMOD_LALT); LAltPressed = true;
+        EV::Boton(SDL_MOUSEBUTTONDOWN, cx, cy); EV::Boton(SDL_MOUSEBUTTONUP, cx, cy);
+        const int selClick = EV::Seleccionados(SceneCollection);
+        printf("      [altnav] Alt+click quieto: seleccionados=%d (activo %s)\n", selClick, ObjActivo ? ObjActivo->name.c_str() : "-");
+        if (selClick < 1) ok = false;
+        SDL_SetModState(KMOD_NONE); LAltPressed = false; LShiftPressed = false;
+        if (!ok) { err = "altnavtest: la navegacion con Alt no se comporto como se esperaba"; return false; }
+        return true;
+#else
+        err = "altnavtest: sin mouse de PC"; return false;
+#endif
+    }
     // ---- rtsave ruta.png : guarda el ultimo rtrender ----
     if (cmd == "rtsave") {
         std::string ruta; ss >> ruta;
@@ -30789,9 +31283,37 @@ bool W3dRunCommand(const std::string& linea, std::string& err) {
         if (!cambio) { err = "texpaint3d: no pinto nada"; return false; }
         return true;
     }
+    // ---- texpaintrazo <n> <radio> [maxms] : un trazo de n toques sin soltar (el dedo arrastrando); imprime los ms.
+    //      Con maxms: ERROR si tardo mas (cuida que pintar no vuelva a ser lento) ----
+    if (cmd == "texpaintrazo") {
+        int n = 100; float radio = 80; double maxms = -1; ss >> n >> radio >> maxms;
+        if (!viewPortActive || viewPortActive->ViewportKind() != 1 || InteractionMode != TexturePaint) { err = "texpaintrazo: hace falta la vista 3D en Texture Paint"; return false; }
+        rootViewport->Render();
+        extern double W3dTexPaint3DTrazoMs(Viewport3D*, int, float);
+        const double ms = W3dTexPaint3DTrazoMs((Viewport3D*)viewPortActive, n, radio);
+        printf("      [texpaintrazo] %d toques: %.0f ms (%.2f ms por toque)\n", n, ms, ms / (n > 0 ? n : 1));
+        if (ms < 0) { err = "texpaintrazo: no se pudo pintar"; return false; }
+        if (maxms > 0 && ms > maxms) { char b[96]; sprintf(b, "texpaintrazo: %.0f ms > %.0f", ms, maxms); err = b; return false; }
+        return true;
+    }
     // ---- texcaras : para cada cara de la malla activa dice si mira a la camara y si su texel central esta pintado
     //      (distinto del gris de fondo). Falla si alguna cara DE ESPALDAS quedo pintada o si ninguna de frente lo esta ----
+    // ---- texpinturainfo : estado de la pintura de textura de la malla activa: material propio (no el por defecto),
+    //      textura en memoria ("*"), UV sin pisarse. Falla si algo de eso no se cumple ----
+    if (cmd == "texpinturainfo") {
+        Mesh* m = ScriptActiveMesh(); if (!m) { err = "texpinturainfo: sin malla"; return false; }
+        extern Texture* WP3DTexturaPintada();
+        Texture* t = WP3DTexturaPintada();
+        const int p = UVParteMostrada(m);
+        Material* mt = (p >= 0 && p < (int)m->materialsGroup.size()) ? m->materialsGroup[(size_t)p].material : NULL;
+        const float sol = UVFraccionSolapada(m);
+        printf("      [texpinturainfo] textura=%s material=%s (defecto=%d) uv pisadas=%.2f\n", t ? TexEditEtiqueta(t).c_str() : "-",
+               mt ? mt->name.c_str() : "-", mt == MaterialDefecto ? 1 : 0, sol);
+        if (!t || !mt || mt == MaterialDefecto || sol > 0.05f) { err = "texpinturainfo: la pintura no quedo armada"; return false; }
+        return true;
+    }
     if (cmd == "texcaras") {
+        int baseR = 128, baseG = 128, baseB = 128; ss >> baseR >> baseG >> baseB;   // el color con que arranco la textura
         Mesh* m = ScriptActiveMesh(); if (!m || !m->uv) { err = "texcaras: sin malla con UV"; return false; }
         if (!viewPortActive || viewPortActive->ViewportKind() != 1) { err = "texcaras: el viewport activo no es 3D"; return false; }
         Viewport3D* vp = (Viewport3D*)viewPortActive; vp->BindVista();
@@ -30809,7 +31331,7 @@ bool W3dRunCommand(const std::string& linea, std::string& err) {
             const bool deFrente = nrm.Dot(c - vp->viewPos) < 0.0f;
             int x = (int)(u * te->w), y = (int)(v * te->h); if (x < 0) x = 0; if (y < 0) y = 0; if (x >= te->w) x = te->w - 1; if (y >= te->h) y = te->h - 1;
             const unsigned char* p = &te->rgba[((size_t)y * te->w + x) * 4];
-            const bool pintada = !(p[0] == 128 && p[1] == 128 && p[2] == 128);
+            const bool pintada = !(p[0] == baseR && p[1] == baseG && p[2] == baseB);
             printf("      [texcaras] cara %d: %s, texel central (%d,%d,%d) %s\n", (int)f, deFrente ? "de frente" : "de espaldas", p[0], p[1], p[2], pintada ? "PINTADO" : "sin pintar");
             if (deFrente) { frente++; if (pintada) frentePintadas++; } else if (pintada) espaldaPintadas++;
         }
@@ -30828,6 +31350,84 @@ bool W3dRunCommand(const std::string& linea, std::string& err) {
         LayoutCambiarTipoViewport(v, nuevo);
         return true;
     }
+    // ---- uvguardarclick : click REAL (eventos de mouse) en el boton de guardar (diskette) de la barra del primer UV editor ----
+    if (cmd == "uvguardarclick") {
+#ifndef W3D_SYMBIAN
+        struct VK { static ViewportBase* Buscar(ViewportBase* n, int k) { if (!n) return NULL; if (n->isLeaf()) return n->ViewportKind() == k ? n : NULL;
+                        ViewportBase* a = Buscar(((ViewportColumn*)n)->childA, k); if (a) return a; return Buscar(((ViewportColumn*)n)->childB, k); } };
+        if (rootViewport) rootViewport->Render();
+        UVEditor* uv = (UVEditor*)VK::Buscar(rootViewport, 4);
+        if (!uv) { err = "uvguardarclick: no hay UV editor en el layout"; return false; }
+        uv->SyncBarra(); uv->ActualizarBarra();
+        Button* b = BarRolBtn(uv->BarButtons, BRUV_Guardar);
+        if (!b || !b->visible) { err = "uvguardarclick: el boton de guardar no esta visible"; return false; }
+        const int bx = b->sx + b->width / 2, by = b->sy + b->height / 2;
+        extern void InputUsuarioSDL3(SDL_Event&);
+        SDL_Event ev; memset(&ev, 0, sizeof(ev));
+        ev.type = SDL_MOUSEMOTION; ev.motion.x = bx; ev.motion.y = by; InputUsuarioSDL3(ev);
+        memset(&ev, 0, sizeof(ev)); ev.type = SDL_MOUSEBUTTONDOWN; ev.button.button = SDL_BUTTON_LEFT; ev.button.x = bx; ev.button.y = by; ev.button.clicks = 1; ev.button.state = SDL_PRESSED; InputUsuarioSDL3(ev);
+        ev.type = SDL_MOUSEBUTTONUP; ev.button.state = SDL_RELEASED; InputUsuarioSDL3(ev);
+        printf("      [uvguardarclick] boton en (%d,%d), menu abierto=%d\n", bx, by, LayoutMenuAbierto() ? 1 : 0);
+        if (!LayoutMenuAbierto()) { err = "uvguardarclick: el menu no se abrio"; return false; }
+        return true;
+#else
+        err = "uvguardarclick: sin mouse de PC"; return false;
+#endif
+    }
+    // ---- idecargar ruta.lua [esperado] : "Load .lua..." del primer IDE del layout; con 'esperado' la ruta abierta tiene que
+    //      ser esa (p.ej. scripts/x.lua = quedo importado adentro del proyecto). Imprime la ruta y la primera linea ----
+    if (cmd == "idecargar") {
+        std::string ruta, esperado; ss >> ruta >> esperado;
+        struct VK { static ViewportBase* Buscar(ViewportBase* n, int k) { if (!n) return NULL; if (n->isLeaf()) return n->ViewportKind() == k ? n : NULL;
+                        ViewportBase* a = Buscar(((ViewportColumn*)n)->childA, k); if (a) return a; return Buscar(((ViewportColumn*)n)->childB, k); } };
+        IDE* ide = (IDE*)VK::Buscar(rootViewport, 8);
+        if (!ide) { err = "idecargar: no hay IDE en el layout (vpkind ... 7)"; return false; }
+        extern void LayoutIDECargarLua(IDE*, const std::string&);
+        LayoutIDECargarLua(ide, ruta);
+        const std::string txt = ide->GetTexto();
+        printf("      [idecargar] abierto '%s' | primera linea: '%s'\n", ide->archivo.c_str(), txt.substr(0, txt.find('\n')).c_str());
+        if (ide->archivo.empty()) { err = "idecargar: el IDE no abrio nada"; return false; }
+        if (!esperado.empty() && ide->archivo != esperado) { err = "idecargar: se abrio '" + ide->archivo + "', se esperaba '" + esperado + "'"; return false; }
+        std::vector<std::string> lista; IDEColectarScripts(&lista);
+        bool enLista = false; for (size_t i = 0; i < lista.size(); i++) if (lista[i] == ide->archivo) enLista = true;
+        printf("      [idecargar] en la lista del selector: %s (%d scripts)\n", enLista ? "si" : "no", (int)lista.size());
+        return true;
+    }
+    // ---- idearchivo n : accion del menu Archivo del primer IDE (1 Guardar 2 Guardar como 3 Guardar en el w3d) ----
+    // ---- idefuera carpeta : "Guardar fuera del w3d..." con la carpeta ya elegida ----
+    // ---- ideinfo [esperado] : el archivo abierto en el IDE (con esperado, falla si no es ese) ----
+    if (cmd == "idearchivo" || cmd == "idefuera" || cmd == "ideinfo") {
+        struct VK { static ViewportBase* Buscar(ViewportBase* n, int k) { if (!n) return NULL; if (n->isLeaf()) return n->ViewportKind() == k ? n : NULL;
+                        ViewportBase* a = Buscar(((ViewportColumn*)n)->childA, k); if (a) return a; return Buscar(((ViewportColumn*)n)->childB, k); } };
+        IDE* ide = (IDE*)VK::Buscar(rootViewport, 8);
+        if (!ide) { err = cmd + ": no hay IDE en el layout"; return false; }
+        if (cmd == "idearchivo") { int id = 0; ss >> id; extern void LayoutIDEArchivoAccion(IDE*, int); LayoutIDEArchivoAccion(ide, id); }
+        else if (cmd == "idefuera") { std::string c; ss >> c; extern void LayoutIDEFueraDelW3d(IDE*, const std::string&); LayoutIDEFueraDelW3d(ide, c); }
+        else {
+            std::string esperado; ss >> esperado;
+            printf("      [ideinfo] archivo='%s' sucio=%d interno=%d\n", ide->archivo.c_str(), ide->sucio ? 1 : 0, W3dEsNombreDeEntrada(ide->archivo) ? 1 : 0);
+            if (!esperado.empty() && ide->archivo != esperado) { err = "ideinfo: abierto '" + ide->archivo + "', se esperaba '" + esperado + "'"; return false; }
+        }
+        return true;
+    }
+    // ---- guardarcomo nombre interno(0|1|-1) [carpetaDisco] [forzar] : completa el "Guardar como..." abierto y guarda ----
+    if (cmd == "guardarcomo") {
+        std::string nombre, carpetaDisco; int interno = -1, forzar = 0; ss >> nombre >> interno >> carpetaDisco >> forzar;
+        if (carpetaDisco == "-") carpetaDisco.clear();
+        if (!GuardarComoAbierto()) { err = "guardarcomo: el formulario no esta abierto"; return false; }
+        GuardarComoFijar(nombre, interno, std::string(), carpetaDisco);
+        std::string msg;
+        const bool ok = GuardarComoAhora(forzar != 0, msg);
+        printf("      [guardarcomo] %s %s\n", ok ? "OK" : "NO", msg.c_str());
+        if (!ok) { err = "guardarcomo: " + msg; return false; }
+        return true;
+    }
+    // ---- uvguardar n : accion del menu guardar del editor UV (1 Guardar 3 en el w3d 4 exportar mapa 5 guardar como) ----
+    // ---- uvfuera carpeta : "Guardar fuera del w3d..." de la textura con la carpeta ya elegida ----
+    // ---- uvguardar3d n : accion del menu guardar abierto desde la barra del 3D (pintura de textura) ----
+    if (cmd == "uvguardar3d") { int id = 0; ss >> id; extern void LayoutUVGuardarAccion3D(int); LayoutUVGuardarAccion3D(id); return true; }
+    if (cmd == "uvguardar") { int id = 0; ss >> id; extern void LayoutUVGuardarAccion(int); LayoutUVGuardarAccion(id); return true; }
+    if (cmd == "uvfuera") { std::string c; ss >> c; extern void LayoutUVFueraDelW3d(const std::string&); LayoutUVFueraDelW3d(c); return true; }
     // ---- uveditar : entra/sale de la pintura de textura en el primer UV editor del layout (el boton "Edit") ----
     if (cmd == "uveditar") {
         struct VK { static ViewportBase* Buscar(ViewportBase* n, int k) { if (!n) return NULL; if (n->isLeaf()) return n->ViewportKind() == k ? n : NULL;

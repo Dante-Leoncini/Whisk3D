@@ -144,6 +144,8 @@ bool Viewport3D::ToolbarVisible() const {
     // INVISIBLE seguia consumiendo los clicks (ToolbarClick "consumia igual") y le
     // restaba su franja al lienzo del juego.
     { extern bool SimActiva(); if (AnimEsJuego && SimActiva()) return false; }
+    // el panel "ajustar la ultima operacion" ocupa su lugar mientras esta abierto
+    { extern bool TransformRedoAbierto(const Viewport3D*); if (TransformRedoAbierto(this)) return false; }
 #ifdef W3D_SYMBIAN
     return cfg.nuevoUsuario; // el N95 va a teclas; un N8 tactil la prende por config
 #else

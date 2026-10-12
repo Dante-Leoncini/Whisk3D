@@ -3607,11 +3607,14 @@ void UndoConMover(Object* o, int dir) {   // -1 = sube (hacia el principio), +1 
 }
 
 extern void RedoMeshPanelCerrar();   // RedoMeshPanel.cpp: el panel redo (Add/Normales/Loop Cut) trabaja sobre un snapshot que el undo deja viejo
+void (*g_undoCambioHook)() = NULL;   // el panel de la ultima operacion (TransformRedoPanel) se cierra con Ctrl+Z / Ctrl+Y
+const void* UndoUltimo() { return g_undo.empty() ? NULL : (const void*)g_undo.back(); }
 void UndoDeshacer() {
     // el modo mover de la biblioteca a medias: este Ctrl+Z solo lo cancela (RecursosProyecto.h)
     if (W3dVistaRecAntesDeUndo()) return;
     if (g_undo.empty()) return;
     RedoMeshPanelCerrar();
+    if (g_undoCambioHook) g_undoCambioHook();
     UndoCmd* c = g_undo.back(); g_undo.pop_back();
     c->Aplicar();          // intercambia: el comando queda con el estado NUEVO
     g_redo.push_back(c);   // disponible para rehacer
@@ -3622,6 +3625,7 @@ void UndoRehacer() {
     if (W3dVistaRecAntesDeUndo()) return;   // (idem el Ctrl+Y)
     if (g_redo.empty()) return;
     RedoMeshPanelCerrar();
+    if (g_undoCambioHook) g_undoCambioHook();
     UndoCmd* c = g_redo.back(); g_redo.pop_back();
     c->Aplicar();          // intercambia de nuevo: re-aplica el cambio
     g_undo.push_back(c);

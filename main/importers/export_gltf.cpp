@@ -1,3 +1,4 @@
+#include "W3dLang.h"   // T(): los avisos salen en el idioma del editor
 #include "io/W3dMallaBin.h"   // la edicion pendiente de una malla de un recurso (se materializa al exportar)
 #include "objects/MallaRecurso.h" // W3dMallaSoltarEdicion: vuelve a quedar pendiente al terminar
 #include "export_gltf.h"
@@ -186,7 +187,7 @@ void OrdenCarasGLB(const Mesh* m, std::vector<int>& orden) {
 // ============================================================================
 bool ExportGLTF(const std::string& filepath, bool selectedOnly, bool binary) {
     std::vector<Mesh*> meshes; RecolectarMeshes(SceneCollection, selectedOnly, meshes);
-    if (meshes.empty()) { w3dLogfE("ExportGLTF: no hay meshes"); Notificar("glTF: nothing to export", true); return false; }
+    if (meshes.empty()) { w3dLogfE("ExportGLTF: no hay meshes"); Notificar(T("glTF: nothing to export"), true); return false; }
     // las mallas de un RECURSO compartido tienen la edicion (las caras) PENDIENTE: el export
     // emite por caras, asi que se leen antes (objects/MallaRecurso.h) y, al terminar, las que se
     // leyeron solo para esto vuelven a quedar pendientes (no queda la memoria de todas cargada)
@@ -681,7 +682,7 @@ bool ExportGLTF(const std::string& filepath, bool selectedOnly, bool binary) {
 
     // cerrar la barra de progreso EN LOS DOS caminos (faltaba: quedaba "activa" para siempre,
     // y con eso la barra del icono del dock se quedaba prendida a medias)
-    if (!ok) { ProgresoFin(); w3dLogfE("ExportGLTF: no pude escribir %s", filepath.c_str()); Notificar("glTF: could not write the file", true); return false; }
+    if (!ok) { ProgresoFin(); w3dLogfE("ExportGLTF: no pude escribir %s", filepath.c_str()); Notificar(T("glTF: could not write the file"), true); return false; }
     ProgresoFin();
     w3dLogf("ExportGLTF: %s (%d malla(s), %d hueso(s), %d clip(s), buffer=%d bytes)", filepath.c_str(), (int)meshesJson.size(), nBones, (int)animsJson.size(), (int)buf.bin.size());
 #ifdef __EMSCRIPTEN__

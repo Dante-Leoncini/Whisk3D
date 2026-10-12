@@ -33,6 +33,7 @@
             android:name=".Whisk3DActivity"
             android:exported="true"
             android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|keyboard|navigation|uiMode|density|touchscreen|locale|fontScale"
             android:label="@string/app_name">
             <intent-filter>

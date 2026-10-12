@@ -35,6 +35,7 @@
 //  camino de siempre y queda convertido a .w3dm AL GUARDAR. Lo que ya se habia perdido no se
 //  resucita (no existe en el .glb): la migracion corta la perdida hacia adelante.
 // ============================================================================
+#include "W3dLang.h"   // T(): los avisos salen en el idioma del editor
 #include "io/GuardarW3D.h"
 #include "io/JsonW3d.h"                // JsonNumTexto: floats con round-trip EXACTO
 #include "io/UI2DFormato.h"
@@ -1399,6 +1400,15 @@ static void EscribirModificadores(std::string& s, Mesh* m, int ind) {
             s += ", \"merge\": "; s += md->merge ? "true" : "false";
             s += ", \"mergeDist\": "; JNum(s, md->mergeDist);
             s += ", \"clipping\": "; s += md->clipping ? "true" : "false";
+        } else if (md->tipo == ModifierType::Array) {
+            s += ", \"copias\": "; JNum(s, md->arrCount);
+            s += ", \"relativo\": "; s += md->arrRelOn ? "true" : "false";
+            s += ", \"rel\": ["; JNum(s, md->arrRelX); s += ", "; JNum(s, md->arrRelY); s += ", "; JNum(s, md->arrRelZ); s += "]";
+            s += ", \"constante\": "; s += md->arrConstOn ? "true" : "false";
+            s += ", \"const\": ["; JNum(s, md->arrConstX); s += ", "; JNum(s, md->arrConstY); s += ", "; JNum(s, md->arrConstZ); s += "]";
+            if (md->target) { s += ", \"target\": "; JEsc(s, md->target->name); }
+            s += ", \"merge\": "; s += md->arrMerge ? "true" : "false";
+            s += ", \"mergeDist\": "; JNum(s, md->arrMergeDist);
         } else if (md->tipo == ModifierType::SubdivisionSurface) {
             s += ", \"nivel\": "; JNum(s, md->subLevel);
             s += ", \"nivelRender\": "; JNum(s, md->subRenderLevel);
@@ -3137,7 +3147,7 @@ bool GuardarW3D(const std::string& ruta) {
         if (ok && !esc.Verificar(falta)) {
             w3dLogfE("[W3D] el guardado se ABORTA: la referencia interna '%s' no tiene entrada en el .w3d",
                      falta.c_str());
-            Notificar("Guardar ABORTADO: falta '" + falta + "' adentro del proyecto; NO se toco " + Base(ruta), true);
+            Notificar(std::string(T("Save CANCELLED: missing inside the project:")) + " '" + falta + "'. " + T("The file was not touched:") + " " + Base(ruta), true);
             ok = false;
         }
         // el harness inyecta aca el disco lleno (comando 'saveatom')
@@ -3151,7 +3161,7 @@ bool GuardarW3D(const std::string& ruta) {
         if (!ok) {
             remove(tmpZip.c_str());
             if (falta.empty())
-                Notificar("Guardar: escritura incompleta; NO se toco " + Base(ruta), true);
+                Notificar(std::string(T("Save: incomplete write. The file was not touched:")) + " " + Base(ruta), true);
             return false;
         }
         // el contenedor viejo tiene el archivo destino ABIERTO: soltarlo antes del rename
@@ -3160,7 +3170,7 @@ bool GuardarW3D(const std::string& ruta) {
         if (!RenombrarSobre(tmpZip, ruta)) {
             remove(tmpZip.c_str());
             if (estabaMontado) W3dContenedorMontar(w3dPath);   // volver a lo que habia
-            Notificar("Guardar: no pude reemplazar " + Base(ruta) + " (quedo la version anterior)", true);
+            Notificar(std::string(T("Save: could not replace the file (the previous version was kept):")) + " " + Base(ruta), true);
             return false;
         }
         // y se monta el que acabamos de escribir: de aca en adelante las rutas en
@@ -3199,7 +3209,7 @@ bool GuardarW3D(const std::string& ruta) {
                      gNoCubiertos);
             Notificar(b, true);
         } else {
-            Notificar("Proyecto guardado: " + Base(ruta), false);
+            Notificar(T("Project saved: ") + Base(ruta), false);
         }
         w3dLogf("[W3D] guardado %s (contenedor v4 estilo ODF: mimetype + LEEME.txt + "
                 "proyecto.json + escenas/ + scripts/ + assets)", ruta.c_str());

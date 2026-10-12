@@ -23,17 +23,22 @@ struct TexturaEditable {
     bool modificada;                    // cambios sin guardar (el "*")
     bool enMemoria;                     // interna que todavia no esta en ningun contenedor/disco
     std::vector<unsigned char> pngGuardado;   // "Save" sin contenedor montado: la version guardada, hasta guardar el proyecto
-    TexturaEditable() : tex(0), w(0), h(0), alpha(false), modificada(false), enMemoria(false) {}
+    bool mipsPendientes;                // se subio durante un trazo sin rehacer los mipmaps (TexEditFinTrazo los rehace)
+    TexturaEditable() : tex(0), w(0), h(0), alpha(false), modificada(false), enMemoria(false), mipsPendientes(false) {}
 };
 
 TexturaEditable* TexEditBuscar(Texture* t);                       // NULL si no esta en edicion
 TexturaEditable* TexEditObtener(Texture* t);                      // la trae a memoria (decodifica) si hace falta
 Texture* TexEditCrear(const std::string& nombre, const std::vector<unsigned char>& rgba, int w, int h, bool alpha); // nueva, en memoria
-void TexEditSubir(TexturaEditable* te, int x0, int y0, int x1, int y1);   // sube a la GPU el rect [x0,x1)x[y0,y1)
+// sube a la GPU el rect [x0,x1)x[y0,y1). trazo=true (pintura en vivo): sin rehacer los mipmaps en cada toque (en Android
+// es la textura entera cada vez); TexEditFinTrazo los rehace una sola vez al soltar.
+void TexEditSubir(TexturaEditable* te, int x0, int y0, int x1, int y1, bool trazo = false);
+void TexEditFinTrazo(TexturaEditable* te);
 bool TexEditEsExterna(const Texture* t);
 bool TexEditGuardar(TexturaEditable* te, std::string& msg);
 bool TexEditHacerExterna(TexturaEditable* te, const std::string& rutaDisco, std::string& msg);
 bool TexEditHacerInterna(TexturaEditable* te, std::string& msg);
+bool TexEditGuardarComoInterna(TexturaEditable* te, const std::string& nombre, bool forzar, bool* existe, std::string& msg);
 std::string TexEditEtiqueta(const Texture* t);                   // nombre de archivo + "*" si esta sin guardar
 bool TexEditSinGuardar(const Texture* t);
 // guardado del proyecto: el PNG de una interna que solo vive en memoria (true = usar estos bytes)

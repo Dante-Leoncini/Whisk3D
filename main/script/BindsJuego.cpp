@@ -733,6 +733,71 @@ static int LRelojMs(lua_State* L) {
     lua_pushnumber(L, g_w3dRelojMsHook ? g_w3dRelojMsHook() : (double)clock() * 1000.0 / (double)CLOCKS_PER_SEC);
     return 1;
 }
+// ---- LINEAS (polilineas cerradas suavizadas con Catmull-Rom): la cuenta de un punto en C. En lua era lo mas caro de
+// un juego de carreras en el N95 (cada rival, cada cuadro: ~40 multiplicaciones y una docena de lecturas de tabla) ----
+// lineaCrear(nombre, {{x, y, z}, ...}) -> id: copia los puntos (la linea es CERRADA: despues del ultimo vuelve al
+// primero). El mismo nombre reusa su lugar (abrir el proyecto otra vez no acumula copias).
+// lineaPunto(id, s) -> x, y, z, rumbo, largo, cabeceo: s en tramos (s = 3.25: un cuarto entre el punto 4 y el 5,
+// base 1 como la tabla), la curva de Catmull-Rom por los 4 puntos de alrededor. rumbo en grados (adelante = (-sin,
+// -cos) en x/z, la convencion del motor), largo = el largo horizontal del tramo, cabeceo = su pendiente en grados
+static std::vector<std::vector<double> > gLineas;
+static std::map<std::string, int> gLineaDe;
+static int LLineaCrear(lua_State* L) {
+    const std::string nombre = luaL_checkstring(L, 1);
+    luaL_checktype(L, 2, LUA_TTABLE);
+    const int n = (int)lua_rawlen(L, 2);
+    std::vector<double> v((size_t)n * 3);
+    for (int i = 0; i < n; i++) {
+        lua_rawgeti(L, 2, i + 1);
+        for (int c = 0; c < 3; c++) {
+            lua_rawgeti(L, -1, c + 1);
+            v[(size_t)i * 3 + c] = lua_tonumber(L, -1);
+            lua_pop(L, 1);
+        }
+        lua_pop(L, 1);
+    }
+    std::map<std::string, int>::iterator it = gLineaDe.find(nombre);
+    int id;
+    if (it != gLineaDe.end()) { id = it->second; gLineas[(size_t)id - 1].swap(v); }
+    else { gLineas.push_back(v); id = (int)gLineas.size(); gLineaDe[nombre] = id; }
+    lua_pushinteger(L, (lua_Integer)id);
+    return 1;
+}
+static int LLineaPunto(lua_State* L) {
+    const int id = (int)luaL_checkinteger(L, 1);
+    const double s = luaL_checknumber(L, 2);
+    if (id < 1 || id > (int)gLineas.size() || gLineas[(size_t)id - 1].size() < 3) return 0;
+    const std::vector<double>& P = gLineas[(size_t)id - 1];
+    const int n = (int)(P.size() / 3);
+    // (las MISMAS cuentas y en el mismo orden que la version de lua: los mismos numeros)
+    const double fl = floor(s);
+    int i = (int)fmod(fl, (double)n); if (i < 0) i += n;
+    const double f = s - fl;
+    const double* a = &P[(size_t)i * 3];
+    const double* b = &P[(size_t)((i + 1) % n) * 3];
+    const double* p0 = &P[(size_t)((i - 1 + n) % n) * 3];
+    const double* p3 = &P[(size_t)((i + 2) % n) * 3];
+    const double f2 = f * f, f3 = f * f * f;
+    const double a1 = a[0], b1 = b[0], p01 = p0[0], p31 = p3[0];
+    const double a2 = a[1], b2 = b[1], p02 = p0[1], p32 = p3[1];
+    const double a3 = a[2], b3 = b[2], p03 = p0[2], p33 = p3[2];
+    const double c1 = 2 * p01 - 5 * a1 + 4 * b1 - p31, d1 = 3 * a1 - p01 - 3 * b1 + p31;
+    const double c3 = 2 * p03 - 5 * a3 + 4 * b3 - p33, d3 = 3 * a3 - p03 - 3 * b3 + p33;
+    const double px = 0.5 * (2 * a1 + (b1 - p01) * f + c1 * f2 + d1 * f3);
+    const double py = 0.5 * (2 * a2 + (b2 - p02) * f + (2 * p02 - 5 * a2 + 4 * b2 - p32) * f2 + (3 * a2 - p02 - 3 * b2 + p32) * f3);
+    const double pz = 0.5 * (2 * a3 + (b3 - p03) * f + c3 * f2 + d3 * f3);
+    double tx = 0.5 * ((b1 - p01) + 2 * c1 * f + 3 * d1 * f2);
+    double tz = 0.5 * ((b3 - p03) + 2 * c3 * f + 3 * d3 * f2);
+    if (tx * tx + tz * tz < 1e-8) { tx = b1 - a1; tz = b3 - a3; }
+    const double gr = 180.0 / 3.141592653589793238462643383279502884;
+    const double largo = sqrt((b1 - a1) * (b1 - a1) + (b3 - a3) * (b3 - a3));
+    lua_pushnumber(L, px); lua_pushnumber(L, py); lua_pushnumber(L, pz);
+    lua_pushnumber(L, atan2(-tx, -tz) * gr);
+    lua_pushnumber(L, largo);
+    lua_pushnumber(L, largo > 0.01 ? atan((b2 - a2) / largo) * gr : 0.0);
+    return 6;
+}
+
 // perfilLua(cuadros [, etiqueta [, instrucciones [, lineas]]]): PERFIL POR MUESTREO del script que lo llama (diagnostico, tambien en
 // el N95). Se llama al EMPEZAR cada actualizar(): marca el borde del cuadro. Cada `instrucciones` instrucciones de la VM
 // (1000 por defecto) un hook carga el tiempo de pared transcurrido a la LINEA que corre (tiempo propio), a su FUNCION
@@ -748,7 +813,9 @@ struct PerfilLua {
     double ultimo, total;
     int cuadros, cada, top;
     unsigned llamada;   // la llamada del motor de la ultima muestra (W3dScript.cpp: g_w3dScriptLlamadas)
-    PerfilLua() : ultimo(0.0), total(0.0), cuadros(0), cada(0), top(30), llamada(0) {}
+    long muestras;      // los hooks que saltaron: x instrucciones = las instrucciones de la VM (no depende del reloj)
+    int instr;
+    PerfilLua() : ultimo(0.0), total(0.0), cuadros(0), cada(0), top(30), llamada(0), muestras(0), instr(1000) {}
 };
 PerfilLua gPerfilLua;
 }
@@ -757,6 +824,7 @@ static double PerfilReloj() {
 }
 extern unsigned g_w3dScriptLlamadas;
 static void PerfilHook(lua_State* L, lua_Debug* ar) {
+    gPerfilLua.muestras++;
     // la primera muestra de una llamada nueva del motor trae lo de afuera de lua (el render): no se cuenta
     if (gPerfilLua.llamada != g_w3dScriptLlamadas) {
         gPerfilLua.llamada = g_w3dScriptLlamadas;
@@ -839,18 +907,20 @@ static int LPerfilLua(lua_State* L) {
     PerfilLua& p = gPerfilLua;
     if (cada <= 0) { lua_sethook(L, NULL, 0, 0); p = PerfilLua(); g_rutinaPerfil = false; return 0; }
     if (p.cada == 0 || p.etiqueta != et) {
-        p = PerfilLua(); p.etiqueta = et; p.cada = cada; p.top = top;
-        lua_sethook(L, PerfilHook, LUA_MASKCOUNT, instr > 0 ? instr : 1000);
+        p = PerfilLua(); p.etiqueta = et; p.cada = cada; p.top = top; p.instr = instr > 0 ? instr : 1000;
+        lua_sethook(L, PerfilHook, LUA_MASKCOUNT, p.instr);
         PerfilRutinasCero(); g_rutinaPerfil = true;
     } else if (++p.cuadros >= cada) {
-        w3dLogf("PERFIL lua %s: %d cuadros, %.3f ms/cuadro muestreados (lineas de auto.lua=ms por cuadro)",
-                p.etiqueta.c_str(), p.cuadros, p.total / p.cuadros);
+        w3dLogf("PERFIL lua %s: %d cuadros, %.3f ms/cuadro muestreados, ~%ld instrucciones de la VM por cuadro "
+                "(lineas de auto.lua=ms por cuadro)", p.etiqueta.c_str(), p.cuadros, p.total / p.cuadros,
+                p.muestras * (long)p.instr / p.cuadros);
         PerfilVolcar("lineas", p.linea, p.top, p.cuadros);
         PerfilVolcar("propio", p.propio, 16, p.cuadros);
         PerfilVolcar("inclusivo", p.inclusivo, 16, p.cuadros);
         PerfilRutinasVolcar(p.cuadros); PerfilRutinasCero();
         const std::string e = p.etiqueta;
-        p = PerfilLua(); p.etiqueta = e; p.cada = cada; p.top = top;
+        const int ins = p.instr;
+        p = PerfilLua(); p.etiqueta = e; p.cada = cada; p.top = top; p.instr = ins;
     }
     p.ultimo = PerfilReloj();
     p.llamada = g_w3dScriptLlamadas;
@@ -1563,6 +1633,8 @@ void BindsJuegoRegistrar(void* Lv) {
     lua_pushcfunction(L, LRelojAudio);  lua_setglobal(L, "relojAudio");
     lua_pushcfunction(L, LRelojMs);     lua_setglobal(L, "relojMs");
     lua_pushcfunction(L, LPerfilLua);   lua_setglobal(L, "perfilLua");
+    lua_pushcfunction(L, LLineaCrear);  lua_setglobal(L, "lineaCrear");
+    lua_pushcfunction(L, LLineaPunto);  lua_setglobal(L, "lineaPunto");
     lua_pushcfunction(L, LPararSonidos); lua_setglobal(L, "pararSonidos");
     lua_pushcfunction(L, LAjustarSonido); lua_setglobal(L, "ajustarSonido");
     lua_pushcfunction(L, LSonidoPosicion); lua_setglobal(L, "sonidoPosicion");

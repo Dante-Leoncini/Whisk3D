@@ -1,3 +1,4 @@
+#include "W3dLang.h"   // T(): los avisos salen en el idioma del editor
 #include "import_obj.h"
 #include "render/OpcionesRender.h"   // RenderType / g_redraw: son del editor
 #include "w3dVersion.h" // W3dVersion() para el header del .obj exportado
@@ -285,7 +286,9 @@ static void RevisarDormidas() {
     const unsigned int nacidos = W3dObjetosNacidos();
     bool revisar = (nacidos != visto && cuadros >= 4);
 #ifndef W3D_SIN_EDITOR
-    if (cuadros >= 16) revisar = true;
+    // editando (un material asignado a mano no hace nacer nada) cada 16 cuadros; jugando, como el juego compilado:
+    // recorrer todos los materiales de la escena cada 16 cuadros era un tiron periodico en el N95
+    { extern bool W3dJuegoCorriendo(); if (cuadros >= 16 && !W3dJuegoCorriendo()) revisar = true; }
 #endif
     if (!revisar) return;
     visto = nacidos;
@@ -899,7 +902,7 @@ bool LeerOBJ(const std::vector<const char*>& lines,
     // rota, y ademas armar 200k+ verts revienta la RAM del N95). En PC/Android/WebGL/N8 esto NO corre: MeshIndex es de
     // 32 bits y entra de una (ver crossplatform.h).
     if ((int)(Wobj.vertex.size() / 3) > W3D_MAX_INDEX16) {
-        Notificar("Modelo muy grande para el N95: pasa 65535 vertices (limite de 16 bits)", true);
+        Notificar(T("Model too big for the N95: more than 65535 vertices (16-bit limit)"), true);
         delete mesh;   // borra la malla recien creada (vacia; el dtor de Object la detacha del padre)
         return false;  // no importar este objeto
     }
@@ -1528,6 +1531,6 @@ bool ImportOBJ(const std::string& filepath, bool NoMerge = false) {
 
     w3dLog("ImportOBJ: FIN OK (si crashea despues de esto, es el render de la malla importada)");
     ProgresoFin();
-    Notificar("OBJ imported successfully!", false); // toast verde de exito
+    Notificar(T("OBJ imported successfully!"), false); // toast verde de exito
     return true;
 }

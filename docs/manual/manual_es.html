@@ -1,0 +1,869 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Manual de Whisk3D</title>
+<style>
+:root {
+  --fondo: #f6f7f5; --papel: #ffffff; --texto: #1d211c; --suave: #5b6358; --linea: #d9ded6;
+  --acento: #2f8f2f; --acento-suave: #e3f2e1; --codigo: #f0f2ee; --aviso: #fff6dc; --aviso-borde: #e0b84a;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --fondo: #121411; --papel: #1b1e1a; --texto: #e4e8e1; --suave: #9aa395; --linea: #30352e;
+    --acento: #5fd35f; --acento-suave: #1f3320; --codigo: #232722; --aviso: #2e2816; --aviso-borde: #8a6d1f;
+  }
+}
+:root[data-theme="dark"] {
+  --fondo: #121411; --papel: #1b1e1a; --texto: #e4e8e1; --suave: #9aa395; --linea: #30352e;
+  --acento: #5fd35f; --acento-suave: #1f3320; --codigo: #232722; --aviso: #2e2816; --aviso-borde: #8a6d1f;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--fondo); color: var(--texto); font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+.pagina { max-width: 960px; margin: 0 auto; padding: 24px 16px 64px; }
+header.portada { border-bottom: 3px solid var(--acento); margin-bottom: 24px; padding-bottom: 12px; }
+header.portada h1 { margin: 0 0 4px; font-size: 2rem; }
+header.portada p { margin: 0; color: var(--suave); }
+h2 { margin-top: 48px; padding-top: 8px; border-top: 1px solid var(--linea); font-size: 1.5rem; }
+h3 { margin-top: 32px; font-size: 1.2rem; color: var(--acento); }
+h4 { margin-top: 24px; font-size: 1.05rem; }
+a { color: var(--acento); }
+nav.indice { background: var(--papel); border: 1px solid var(--linea); border-radius: 8px; padding: 12px 20px; }
+nav.indice ol { margin: 4px 0; padding-left: 20px; }
+code, kbd, pre { font-family: ui-monospace, "JetBrains Mono", Consolas, monospace; font-size: 0.92em; }
+code { background: var(--codigo); padding: 1px 5px; border-radius: 4px; }
+kbd { background: var(--papel); border: 1px solid var(--linea); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; white-space: nowrap; }
+pre { background: var(--codigo); border: 1px solid var(--linea); border-radius: 8px; padding: 12px 14px; overflow-x: auto; line-height: 1.45; }
+pre code { background: none; padding: 0; }
+table { width: 100%; border-collapse: collapse; margin: 12px 0 20px; background: var(--papel); font-size: 0.95rem; }
+th, td { text-align: left; vertical-align: top; padding: 7px 10px; border: 1px solid var(--linea); }
+th { background: var(--acento-suave); font-weight: 600; }
+td:first-child { white-space: nowrap; font-weight: 500; }
+.tabla { overflow-x: auto; }
+.nota { background: var(--aviso); border-left: 4px solid var(--aviso-borde); padding: 10px 14px; border-radius: 6px; margin: 14px 0; }
+.consejo { background: var(--acento-suave); border-left: 4px solid var(--acento); padding: 10px 14px; border-radius: 6px; margin: 14px 0; }
+.pie { margin-top: 56px; color: var(--suave); font-size: 0.9rem; }
+@media (max-width: 600px) { td:first-child { white-space: normal; } }
+</style>
+</head>
+<body>
+<div class="pagina">
+<header class="portada">
+  <h1>Manual de Whisk3D</h1>
+  <p>Qué puede hacer el editor, ordenado por panel y por modo. Borrador para revisar.</p>
+</header>
+<nav class="indice">
+<strong>Contenido</strong>
+<ol>
+  <li><a href="#intro">Qué es Whisk3D</a></li>
+  <li><a href="#interfaz">La interfaz</a></li>
+  <li><a href="#navegacion">Navegación en la Vista 3D</a></li>
+  <li><a href="#vista3d">Vista 3D</a>
+    <ul>
+      <li><a href="#barra3d">Barra superior</a> · <a href="#transformar">Mover, rotar y escalar</a></li>
+      <li><a href="#modo-objeto">Modo Objeto</a> · <a href="#anadir">Menú Añadir</a></li>
+      <li><a href="#modo-edicion">Modo Edición (mallas)</a> · <a href="#curvas">Curvas</a></li>
+      <li><a href="#modo-edicion-esq">Modo Edición de esqueleto</a> · <a href="#modo-pose">Modo Pose</a></li>
+      <li><a href="#pintura">Modos de pintura</a>: <a href="#pintura-pesos">pesos</a>, <a href="#pintura-vertices">vértices</a>, <a href="#pintura-textura">textura</a></li>
+      <li><a href="#otras3d">Otras funciones</a> · <a href="#modificadores">Modificadores</a></li>
+    </ul>
+  </li>
+  <li><a href="#uv">Editor UV</a></li>
+  <li><a href="#timeline">Línea de tiempo</a></li>
+  <li><a href="#outliner">Outliner</a></li>
+  <li><a href="#propiedades">Propiedades</a></li>
+  <li><a href="#editor2d">Editor 2D</a></li>
+  <li><a href="#ide">Editor de scripts (IDE)</a></li>
+  <li><a href="#consola">Consola</a></li>
+  <li><a href="#proyecto">El proyecto (.w3d) y los archivos</a></li>
+  <li><a href="#atajos">Atajos de teclado</a></li>
+</ol>
+<p style="margin:8px 0 0">Para programar juegos, ver <a href="lua_es.html">Lua en Whisk3D</a>.</p>
+</nav>
+<!-- ======================================================================= -->
+<h2 id="intro">1. Qué es Whisk3D</h2>
+<p>Whisk3D es un editor 3D y motor de juegos hecho desde cero. Con él se modela, se pinta, se anima, se arman interfaces 2D y se programan juegos en Lua. Funciona en <strong>PC</strong> (Linux, Windows), <strong>Android</strong>, el <strong>navegador</strong> (Web) y el <strong>Nokia N95</strong> (Symbian).</p>
+<p>Todo el trabajo se guarda en un archivo de proyecto <code>.w3d</code>. Adentro viajan la escena y también los recursos: texturas (<code>texturas/</code>), scripts (<code>scripts/</code>), sonidos, escenas, prefabs. Un recurso puede vivir <strong>dentro</strong> del .w3d o <strong>fuera</strong>, como un archivo suelto en el disco; los menús "Guardar en el w3d" y "Guardar fuera del w3d" lo mueven de un lado al otro.</p>
+<div class="nota">Este manual describe lo que Whisk3D sabe hacer hoy. Los nombres de las funciones son los que se ven en el editor en español. Las teclas indicadas son las de fábrica: se pueden cambiar en <a href="#atajos">Atajos de teclado</a>.</div>
+
+<!-- ======================================================================= -->
+<h2 id="interfaz">2. La interfaz</h2>
+<p>La ventana se divide en <strong>viewports</strong> (paneles). Cada uno puede ser de un tipo: Vista 3D, Outliner, Propiedades, Editor UV, Línea de tiempo, Editor 2D, Consola o Editor de scripts (IDE).</p>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Descripción</th><th>Cómo se usa</th></tr>
+<tr><td>Viewport activo</td><td>El viewport que recibe el teclado. Se marca con un borde verde y sigue al puntero: las teclas van al panel que está bajo el mouse.</td><td>Mover el mouse encima. En táctil, tocarlo.</td></tr>
+<tr><td>Cambiar el tipo de viewport</td><td>Convierte el panel en otro tipo de editor.</td><td>Botón de la esquina izquierda de su barra superior.</td></tr>
+<tr><td>Dividir en columnas / filas</td><td>Parte el viewport en dos.</td><td>Botón de la esquina → Dividir en columnas / Dividir en filas.</td></tr>
+<tr><td>Maximizar / Minimizar</td><td>Agranda el viewport a toda la ventana, y lo devuelve a su lugar.</td><td>Botón de la esquina → Maximizar.</td></tr>
+<tr><td>Redimensionar</td><td>Cambia el tamaño de los paneles.</td><td>Arrastrar el borde entre dos viewports (o la esquina).</td></tr>
+<tr><td>Barra superior</td><td>Los menús del viewport. Si no entra, se desplaza.</td><td>Rueda del mouse o arrastrar con el dedo.</td></tr>
+<tr><td>Barra de menús por teclado</td><td>Abre la barra de menús del viewport activo para recorrerla con las flechas.</td><td><kbd>M</kbd> (en Modo Edición, <kbd>M</kbd> es Fusionar).</td></tr>
+<tr><td>Deshacer / Rehacer</td><td>Vuelve atrás o adelante la última acción.</td><td><kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Y</kbd> o <kbd>Ctrl+Shift+Z</kbd>; flechas de la barra inferior.</td></tr>
+<tr><td>Guardar proyecto</td><td>Guarda el .w3d abierto (si es nuevo, pide nombre).</td><td><kbd>Ctrl+S</kbd>, o Propiedades → pestaña Archivo/Render → tarjeta Archivo (ver <a href="#proyecto">El proyecto</a>).</td></tr>
+<tr><td>Pantalla completa</td><td>Entra y sale de pantalla completa.</td><td><kbd>F11</kbd>. En Android es automática si el teléfono no tiene notch.</td></tr>
+<tr><td>Reproducir / Pausa</td><td>Reproduce la animación (o el juego) desde cualquier panel.</td><td><kbd>Espacio</kbd> o el botón Play de la línea de tiempo.</td></tr>
+</table></div>
+<p><strong>En Android</strong>: en vertical el layout es Vista 3D arriba y Propiedades abajo; en horizontal se suma la línea de tiempo. Cuando se abre el teclado en pantalla (por ejemplo en el editor de scripts), el viewport activo se maximiza en la parte visible y vuelve a su lugar al cerrarlo.</p>
+
+<!-- ======================================================================= -->
+<h2 id="navegacion">3. Navegación en la Vista 3D</h2>
+<h3>Con mouse (PC)</h3>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Descripción</th><th>Cómo se usa</th></tr>
+<tr><td>Orbitar</td><td>Gira la vista alrededor del punto de pivote.</td><td>Botón del medio + arrastrar, o <kbd>Alt</kbd> + botón izquierdo + arrastrar.</td></tr>
+<tr><td>Desplazar (paneo)</td><td>Mueve la vista de costado.</td><td><kbd>Shift</kbd> + botón del medio, o <kbd>Alt+Shift</kbd> + botón izquierdo + arrastrar.</td></tr>
+<tr><td>Zoom</td><td>Acerca o aleja.</td><td>Rueda del mouse.</td></tr>
+<tr><td>Seleccionar</td><td>Elige lo que está bajo el puntero (se decide al soltar).</td><td>Click izquierdo; <kbd>Shift</kbd>+click suma o quita.</td></tr>
+<tr><td>Selección por caja</td><td>Arrastrar sobre el fondo marca un rectángulo.</td><td>Arrastrar con el botón izquierdo, o <kbd>B</kbd>.</td></tr>
+<tr><td>Menú contextual</td><td>Abre el menú del modo en el puntero (durante un transform, lo cancela).</td><td>Click derecho.</td></tr>
+<tr><td>Bloquear órbita</td><td>Lo que orbitaba pasa a desplazar: la vista queda como un tablero 2D.</td><td>Menú Vista → Bloquear Órbita.</td></tr>
+</table></div>
+<h3>Con teclado</h3>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Descripción</th><th>Atajo</th></tr>
+<tr><td>Vista frontal / trasera</td><td>Mira de frente o de atrás.</td><td><kbd>Num1</kbd> / <kbd>Ctrl+Num1</kbd></td></tr>
+<tr><td>Vista derecha / izquierda</td><td>Mira de costado.</td><td><kbd>Num3</kbd> / <kbd>Ctrl+Num3</kbd></td></tr>
+<tr><td>Vista superior / inferior</td><td>Mira desde arriba o desde abajo.</td><td><kbd>Num7</kbd> / <kbd>Ctrl+Num7</kbd></td></tr>
+<tr><td>Perspectiva / Ortográfica</td><td>Alterna entre las dos proyecciones.</td><td><kbd>Num5</kbd></td></tr>
+<tr><td>Girar la vista</td><td>Rota la vista 15° sobre su eje.</td><td><kbd>Num4</kbd> / <kbd>Num6</kbd></td></tr>
+<tr><td>Vista de cámara</td><td>Mira a través de la cámara activa (otra vez: sale).</td><td><kbd>Num0</kbd></td></tr>
+<tr><td>Hacer cámara activa</td><td>El objeto activo pasa a ser la cámara activa.</td><td><kbd>Ctrl+Num0</kbd></td></tr>
+<tr><td>Encuadrar selección</td><td>Centra la vista en lo seleccionado y ajusta el zoom.</td><td><kbd>Num.</kbd> (punto del teclado numérico)</td></tr>
+<tr><td>Vista local</td><td>Muestra solo lo seleccionado y lo encuadra; otra vez restaura todo.</td><td><kbd>/</kbd></td></tr>
+<tr><td>Importar modelo</td><td>Abre el explorador para importar OBJ, FBX, glTF o GLB (solo PC).</td><td><kbd>Num9</kbd></td></tr>
+</table></div>
+<h3>Con los dedos (Android, Web táctil)</h3>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Descripción</th><th>Gesto</th></tr>
+<tr><td>Orbitar</td><td>Gira la vista.</td><td>Arrastrar un dedo.</td></tr>
+<tr><td>Zoom y desplazar</td><td>Pellizcar acerca o aleja; mover los dos dedos juntos desplaza.</td><td>Dos dedos.</td></tr>
+<tr><td>Seleccionar</td><td>Elige lo que está bajo el dedo.</td><td>Tocar y levantar sin moverse.</td></tr>
+<tr><td>Encuadrar selección</td><td>Igual que <kbd>Num.</kbd>.</td><td>Doble toque con dos dedos.</td></tr>
+<tr><td>Modificadores táctiles</td><td>Botones Shift y Ctrl de la barra inferior: quedan prendidos (verde) para sumar a la selección o elegir caminos.</td><td>Tocar Shift / Ctrl.</td></tr>
+<tr><td>Vista (navegar)</td><td>En Modo Edición y en los modos de pintura, el dedo navega en vez de seleccionar o pintar.</td><td>Botón con forma de monitor de la barra inferior.</td></tr>
+</table></div>
+<h3>Con el teclado del Nokia N95</h3>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Tecla</th></tr>
+<tr><td>Orbitar</td><td>Flechas (mantener)</td></tr>
+<tr><td>Zoom / Encuadrar selección</td><td><kbd>0</kbd> + arriba/abajo / <kbd>0</kbd> solo</td></tr>
+<tr><td>Desplazar</td><td><kbd>*</kbd> + flechas</td></tr>
+<tr><td>Vistas (frontal, costado, arriba) / Perspectiva-Ortográfica</td><td><kbd>#</kbd> + flechas / <kbd>#</kbd> solo</td></tr>
+<tr><td>Mover / Rotar / Escalar (durante el transform: eje X / Y / Z)</td><td><kbd>1</kbd> / <kbd>2</kbd> / <kbd>3</kbd></td></tr>
+<tr><td>Confirmar / Cancelar</td><td>OK (centro) / <kbd>C</kbd></td></tr>
+<tr><td>Borrar (sin nada que cancelar) / Deshacer y Rehacer</td><td><kbd>C</kbd> / <kbd>C</kbd> + izquierda o derecha</td></tr>
+<tr><td>Cambiar el sombreado</td><td><kbd>6</kbd></td></tr>
+<tr><td>Extruir (Modo Edición)</td><td><kbd>7</kbd></td></tr>
+<tr><td>Loop Cut (Modo Edición) / vista de cámara (fuera de edición)</td><td><kbd>8</kbd></td></tr>
+<tr><td>Bloquear órbita</td><td><kbd>9</kbd></td></tr>
+<tr><td>Ciclar la selección / sumar, quitar, todo o nada</td><td>Lápiz / Lápiz + flechas</td></tr>
+<tr><td>Barra de menús / cursor virtual</td><td>Tecla de selección izquierda / derecha</td></tr>
+<tr><td>Cambiar de viewport, redimensionar, maximizar</td><td>Tecla verde (sola, + flechas, + OK)</td></tr>
+<tr><td>Modo juego a pantalla completa</td><td>Tecla verde + <kbd>0</kbd></td></tr>
+</table></div>
+<p>El N95 también acepta mouse y teclado Bluetooth. Para escribir texto se usa T9.</p>
+
+<!-- ======================================================================= -->
+<h2 id="vista3d">4. Vista 3D</h2>
+<p>La Vista 3D es donde se ve y se edita la escena. Trabaja en distintos <strong>modos</strong>: lo que hacen los clicks, las teclas y los menús depende del modo actual. El modo se elige con el selector de la barra superior (solo aparece si el objeto activo es una malla o un esqueleto) o con <kbd>Tab</kbd>.</p>
+<div class="tabla"><table>
+<tr><th>Modo</th><th>Para qué objetos</th><th>Para qué sirve</th></tr>
+<tr><td><a href="#modo-objeto">Modo Objeto</a></td><td>Todos</td><td>Crear, mover, rotar, escalar, duplicar, emparentar y borrar objetos enteros.</td></tr>
+<tr><td><a href="#modo-edicion">Modo Edición</a></td><td>Mallas y curvas</td><td>Editar vértices, aristas y caras (modelar).</td></tr>
+<tr><td><a href="#modo-edicion-esq">Modo Edición de esqueleto</a></td><td>Esqueletos</td><td>Crear y acomodar los huesos.</td></tr>
+<tr><td><a href="#modo-pose">Modo Pose</a></td><td>Esqueletos</td><td>Posar y animar los huesos.</td></tr>
+<tr><td><a href="#pintura-pesos">Pintura de pesos</a></td><td>Solo mallas 3D</td><td>Pintar cuánto mueve cada hueso a cada vértice.</td></tr>
+<tr><td><a href="#pintura-vertices">Pintura de vértices</a></td><td>Solo mallas 3D</td><td>Pintar colores directamente sobre los vértices.</td></tr>
+<tr><td><a href="#pintura-textura">Pintura de textura</a></td><td>Solo mallas 3D</td><td>Pintar sobre la textura, directamente encima del objeto.</td></tr>
+</table></div>
+
+<h3 id="barra3d">Barra superior de la Vista 3D</h3>
+<div class="tabla"><table>
+<tr><th>Botón</th><th>Descripción</th></tr>
+<tr><td>Selector de modo</td><td>Cambia de modo (Objeto, Edición, Pose, Pintura…).</td></tr>
+<tr><td>Vértice / Arista / Cara</td><td>Solo en Modo Edición: qué se selecciona.</td></tr>
+<tr><td>Punto de pivote</td><td>Alrededor de qué se rota y escala: Cursor 3D, Orígenes individuales, Punto medio o Elemento activo. Con la casilla Bloquear normales.</td></tr>
+<tr><td>Orientación</td><td>Los ejes del transform: Global, Local, Normal (la dirección de la cara) o Vista.</td></tr>
+<tr><td>Imán (Snap)</td><td>Opciones de imán. Se pone verde si está activo (<kbd>Shift+Tab</kbd>).</td></tr>
+<tr><td>Edición proporcional</td><td>Al mover algo, lo que está cerca lo acompaña con suavidad. Se pone verde si está activa (<kbd>O</kbd>).</td></tr>
+<tr><td>Vista</td><td>Cámaras, puntos de vista, encuadrar, vista local, perspectiva, bloquear órbita.</td></tr>
+<tr><td>Seleccionar</td><td>Todo, ninguno, invertir, caja, vinculado, loops y caminos.</td></tr>
+<tr><td>Añadir (+)</td><td>Solo en Modo Objeto: crear objetos nuevos.</td></tr>
+<tr><td>Malla</td><td>Solo en Modo Edición: las operaciones de modelado.</td></tr>
+<tr><td>Guardar textura (diskette)</td><td>Solo en Pintura de textura. Verde si hay pintura sin guardar.</td></tr>
+<tr><td>Animación (rombo)</td><td>Insertar, borrar y limpiar keyframes; rastro de movimiento.</td></tr>
+<tr><td>Contexto</td><td>El menú del modo: Objeto, Vértice/Arista/Cara, Armature o Pose.</td></tr>
+<tr><td>Superposiciones (ojo)</td><td>Qué ayudas se dibujan: piso, ejes, gizmo, cursor 3D, normales, estadísticas, rayos X.</td></tr>
+<tr><td>Render (cámara)</td><td>El modo de sombreado.</td></tr>
+<tr><td>Escena</td><td>Elegir qué escena, juego o prefab del proyecto se edita, y crear nuevos.</td></tr>
+<tr><td>UV</td><td>Solo en Modo Edición: desplegar y proyectar UVs.</td></tr>
+</table></div>
+
+<h3>Menús comunes a varios modos</h3>
+<h4>Seleccionar</h4>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Descripción</th><th>Atajo</th></tr>
+<tr><td>Todo</td><td>Selecciona todo.</td><td><kbd>A</kbd></td></tr>
+<tr><td>Ninguno</td><td>Deselecciona todo.</td><td><kbd>Alt+A</kbd></td></tr>
+<tr><td>Invertir</td><td>Lo seleccionado se deselecciona y al revés.</td><td><kbd>Ctrl+I</kbd></td></tr>
+<tr><td>Selección por caja</td><td>Arrastrar de izquierda a derecha (verde) toma solo lo que queda entero adentro; de derecha a izquierda (azul) alcanza con rozar. <kbd>Shift</kbd> suma.</td><td><kbd>B</kbd></td></tr>
+<tr><td>Ver selección</td><td>Muestra u oculta el contorno de lo seleccionado.</td><td>Menú</td></tr>
+</table></div>
+<h4>Render (modos de sombreado)</h4>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Descripción</th></tr>
+<tr><td>Vista Render</td><td>Con las luces de la escena. Si el trazado de rayos está activo, muestra la imagen trazada de a poco.</td></tr>
+<tr><td>Vista Material</td><td>La de fábrica: una luz neutra desde la vista, sin depender de las luces de la escena.</td></tr>
+<tr><td>Vista Sólido / Alámbrica / ZBuffer</td><td>Gris sólido, solo las aristas, o la profundidad.</td></tr>
+<tr><td>Vista Normal / Vista Alpha</td><td>Las normales en color, o la transparencia en blanco y negro.</td></tr>
+<tr><td>Alambre: solo lo visible</td><td>La vista alámbrica muestra solo lo que se dibuja de verdad.</td></tr>
+</table></div>
+<h4>Superposiciones</h4>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Descripción</th><th>Atajo</th></tr>
+<tr><td>Mostrar superposiciones</td><td>Prende o apaga todas las ayudas visuales de una vez.</td><td><kbd>K</kbd></td></tr>
+<tr><td>Piso, Eje X, Eje Y, Orígenes, Cursor 3D, Líneas de relación</td><td>Cada ayuda por separado.</td><td>Menú</td></tr>
+<tr><td>Gizmo</td><td>El gizmo de mover/rotar/escalar.</td><td>Menú</td></tr>
+<tr><td>Objetos</td><td>Mostrar u ocultar esqueletos, luces, cámaras, vacíos, partículas, curvas, hitboxes.</td><td>Menú</td></tr>
+<tr><td>Normales</td><td>Dibuja las normales de vértice, personalizadas o de cara, con su tamaño.</td><td>Menú</td></tr>
+<tr><td>Estadísticas</td><td>FPS, vértices, caras, llamadas de dibujo y tiempos.</td><td>Menú</td></tr>
+<tr><td>Rayos X</td><td>La malla en edición se ve semitransparente y se pueden elegir los elementos de atrás.</td><td>Menú</td></tr>
+</table></div>
+<h4>Imán (Snap)</h4>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Descripción</th><th>Atajo</th></tr>
+<tr><td>Activar imán</td><td>Lo que se mueve se pega a vértices, aristas, caras o sus centros.</td><td><kbd>Shift+Tab</kbd></td></tr>
+<tr><td>Base y destino de snap</td><td>Qué punto de lo movido se pega (más cercano, centro, mediana, activo) y a qué.</td><td>Menú</td></tr>
+<tr><td>Proyectar en cara / Cara más cercana</td><td>Para retopología: los vértices se apoyan sobre otra superficie.</td><td>Menú</td></tr>
+<tr><td>Afectar mover / rotar / escalar</td><td>En qué operaciones actúa el imán.</td><td>Menú</td></tr>
+<tr><td>Menú Snap del cursor</td><td>Selección a la cuadrícula, al cursor o al activo; Cursor a lo seleccionado, al origen, a la cuadrícula o al activo.</td><td><kbd>Shift+S</kbd></td></tr>
+</table></div>
+<h4>Edición proporcional</h4>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Descripción</th><th>Atajo</th></tr>
+<tr><td>Activar</td><td>Al mover, rotar o escalar, los vecinos acompañan según la distancia.</td><td><kbd>O</kbd></td></tr>
+<tr><td>Solo conectados</td><td>Mide la distancia por las aristas: no arrastra piezas sueltas.</td><td>Menú</td></tr>
+<tr><td>Caída</td><td>Forma de la influencia: suave, esfera, raíz, cuadrado inverso, aguda, lineal, constante, aleatoria.</td><td>Menú</td></tr>
+<tr><td>Tamaño proporcional</td><td>El radio de influencia. Durante el transform se cambia con la rueda o con <kbd>RePág</kbd> / <kbd>AvPág</kbd>.</td><td>Menú / rueda</td></tr>
+</table></div>
+
+<h3 id="transformar">Mover, rotar y escalar</h3>
+<p>Funciona igual en Modo Objeto, Modo Edición, Pose y en la edición de huesos.</p>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Descripción</th><th>Atajo</th></tr>
+<tr><td>Mover (trasladar)</td><td>Lo seleccionado sigue al puntero.</td><td><kbd>G</kbd></td></tr>
+<tr><td>Rotar</td><td>Gira alrededor del pivote. Otra <kbd>R</kbd> alterna entre giro libre (trackball) y orbital.</td><td><kbd>R</kbd></td></tr>
+<tr><td>Escalar</td><td>Agranda o achica desde el pivote.</td><td><kbd>S</kbd></td></tr>
+<tr><td>Restringir a un eje</td><td>Durante el transform. Apretar otra vez cicla Global → Local → Vista → libre.</td><td><kbd>X</kbd> / <kbd>Y</kbd> / <kbd>Z</kbd></td></tr>
+<tr><td>Restringir a un plano</td><td>Excluye ese eje (mueve en los otros dos).</td><td><kbd>Shift+X</kbd> / <kbd>Shift+Y</kbd> / <kbd>Shift+Z</kbd></td></tr>
+<tr><td>Valor exacto</td><td>Tipear un número o una cuenta (<code>2*3</code>, <code>(1+0.5)/2</code>). <kbd>-</kbd> invierte el signo, <kbd>Retroceso</kbd> borra.</td><td>Números</td></tr>
+<tr><td>Confirmar</td><td>Acepta la operación.</td><td>Click izquierdo, <kbd>Enter</kbd>, tilde verde</td></tr>
+<tr><td>Cancelar</td><td>Todo vuelve a como estaba.</td><td><kbd>Esc</kbd>, click derecho, cruz roja</td></tr>
+<tr><td>Pasos finos</td><td>Mueve, rota o escala de a poco.</td><td>Flechas</td></tr>
+</table></div>
+<p>Mientras dura, la barra superior muestra lo que se está haciendo, por ejemplo "Mover X 1.5 en X global". En táctil, tocar esa barra abre un teclado numérico.</p>
+<h4>El gizmo</h4>
+<p>El gizmo aparece sobre el pivote en Modo Objeto y en Modo Edición (se prende y apaga en Superposiciones → Gizmo).</p>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Descripción</th></tr>
+<tr><td>Gizmo de mover</td><td>Flechas = un eje; cuadrados = un plano; círculo central = libre.</td></tr>
+<tr><td>Gizmo de rotar</td><td>Un semicírculo de color por eje, un anillo blanco para girar de cara a la vista, y el interior para girar libre.</td></tr>
+<tr><td>Gizmo de escalar</td><td>Puntas cuadradas por eje; el círculo central escala parejo.</td></tr>
+<tr><td>Cambiar de gizmo</td><td>Un click (o toque) rápido sobre el gizmo, sin arrastrar, pasa de Mover a Rotar, a Escalar y vuelta a Mover.</td></tr>
+</table></div>
+<h4>Ajustar la última operación</h4>
+<p>Después de mover, rotar o escalar (en Modo Objeto o Edición) aparece abajo a la izquierda un panel con lo que se hizo: los valores X, Y, Z (o el ángulo), la orientación y la edición proporcional con sus opciones. Cambiar un valor rehace la operación con el valor nuevo. <strong>Cancelar</strong> la deshace y <strong>Aceptar</strong> la deja. Un click afuera del panel también acepta. Mientras el panel está abierto, la barra inferior de la Vista 3D se oculta.</p>
+<h4>Barra inferior</h4>
+<p>Tiene Deshacer y Rehacer, las últimas acciones usadas y el botón de edición proporcional. Durante un transform muestra la tilde (aceptar), la cruz (cancelar), la orientación y los ejes X / Y / Z (dos ejes prendidos = un plano). En táctil, después de extruir aparece <strong>Repetir</strong>, que acepta y vuelve a extruir.</p>
+
+<!-- ===== Modo Objeto ===== -->
+<h3 id="modo-objeto">Modo Objeto</h3>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Descripción</th><th>Cómo se usa</th></tr>
+<tr><td>Seleccionar</td><td>Elige un objeto. Click en el vacío deselecciona.</td><td>Click; <kbd>Shift</kbd>+click suma o quita</td></tr>
+<tr><td>Mover / Rotar / Escalar</td><td>Ver <a href="#transformar">Mover, rotar y escalar</a>.</td><td><kbd>G</kbd> / <kbd>R</kbd> / <kbd>S</kbd>, gizmo</td></tr>
+<tr><td>Añadir</td><td>Crea un objeto nuevo en el cursor 3D (ver <a href="#anadir">menú Añadir</a>).</td><td><kbd>Shift+A</kbd> o botón +</td></tr>
+<tr><td>Aplicar</td><td>Hornea la posición, la rotación, la escala o todo en la malla (el objeto queda en 0, 0, 0 sin rotar y a escala 1).</td><td><kbd>Ctrl+A</kbd></td></tr>
+<tr><td>Definir origen</td><td>Geometría al origen, Origen a la geometría, Origen al cursor 3D.</td><td>Menú Objeto</td></tr>
+<tr><td>Duplicar objetos</td><td>Copia independiente; queda agarrada para moverla.</td><td><kbd>Shift+D</kbd></td></tr>
+<tr><td>Duplicar vinculado</td><td>Copia que comparte la malla con el original (editar una edita las dos).</td><td><kbd>Alt+D</kbd></td></tr>
+<tr><td>Unir</td><td>Junta las mallas seleccionadas en el objeto activo.</td><td><kbd>Ctrl+J</kbd></td></tr>
+<tr><td>Emparentar</td><td>Lo seleccionado pasa a ser hijo del activo (con o sin mantener el transform).</td><td><kbd>Ctrl+P</kbd></td></tr>
+<tr><td>Desemparentar</td><td>Quita el padre (manteniendo o no la posición).</td><td><kbd>Alt+P</kbd></td></tr>
+<tr><td>Borrar</td><td>Borra los objetos seleccionados (pide confirmación).</td><td><kbd>X</kbd> o <kbd>Supr</kbd></td></tr>
+<tr><td>Ocultar / Mostrar</td><td>Alterna la visibilidad del objeto activo.</td><td><kbd>H</kbd></td></tr>
+<tr><td>Crear prefab / Desempaquetar prefab</td><td>Convierte la selección en un prefab reutilizable, o vuelve a separar una instancia.</td><td>Menú Objeto</td></tr>
+<tr><td>Insertar keyframe</td><td>Guarda la posición, rotación y/o escala en el frame actual (menú de canales). <kbd>Shift+I</kbd> guarda todo sin preguntar.</td><td><kbd>I</kbd></td></tr>
+<tr><td>Borrar / Limpiar keyframes</td><td>Borra el keyframe del frame actual o toda la animación.</td><td>Menú Animación</td></tr>
+<tr><td>Rastro de movimiento</td><td>Dibuja el camino que recorren los objetos animados.</td><td>Menú Animación</td></tr>
+<tr><td>Cambiar de modo</td><td>Malla: Objeto ↔ Edición. Esqueleto: Objeto ↔ Pose. Curva: edición de nodos.</td><td><kbd>Tab</kbd></td></tr>
+</table></div>
+
+<h3 id="anadir">Menú Añadir</h3>
+<p>Solo en Modo Objeto. Lo nuevo aparece en el cursor 3D y queda seleccionado. Las primitivas abren un panel para ajustar sus medidas.</p>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Descripción</th></tr>
+<tr><td>Malla</td><td>Plano, Cubo, Círculo, Esfera UV, Cono, Cilindro (con tamaño, radio, segmentos, sombreado suave). También Vértice (un punto suelto para empezar a modelar) y Referencia (un plano con una imagen, para calcar).</td></tr>
+<tr><td>Vacío</td><td>Un objeto sin malla, para agrupar o como punto de referencia.</td></tr>
+<tr><td>Cámara / Luz / Niebla</td><td>Cámara, luz y niebla de la escena.</td></tr>
+<tr><td>Esqueleto</td><td>Un esqueleto con un hueso, para animar personajes.</td></tr>
+<tr><td>Ruta</td><td>Una curva de dos nodos (se edita como malla: <kbd>E</kbd> agrega nodos).</td></tr>
+<tr><td>Colección</td><td>Una carpeta para ordenar objetos.</td></tr>
+<tr><td>UI</td><td>Una interfaz 2D para juegos (se edita en el Editor 2D).</td></tr>
+<tr><td>Hitbox</td><td>Una caja de detección de choques; si hay un objeto activo nace como hijo, de su tamaño.</td></tr>
+<tr><td>Physics</td><td>No crea objeto: le agrega un cuerpo rígido al objeto activo.</td></tr>
+<tr><td>Partículas</td><td>Un emisor de partículas.</td></tr>
+<tr><td>LOD / Culling / Grid Cull</td><td>Objetos de optimización: niveles de detalle y ocultamiento de lo que no se ve.</td></tr>
+<tr><td>Limpiar Z / Recorte</td><td>Herramientas de dibujo: limpiar la profundidad o recortar una zona de pantalla.</td></tr>
+<tr><td>Prefab / Escena / Proxy W3D</td><td>Insertar un prefab del proyecto, otra escena, o un prefab de una librería externa.</td></tr>
+<tr><td>Importar</td><td>OBJ, FBX, glTF, GLB o una interfaz Whisk3D UI.</td></tr>
+<tr><td>Núcleo (avanzado)</td><td>Rutinas: listas de pasos de dibujo que se arman a mano (transformar, dibujar, texturas, luces, niebla, mezcla, profundidad, control, Llamar Lua). Incluye <strong>Bucle de rutina</strong>: una rutina que repite sus pasos varias veces (por ejemplo "trasladar, dibujar" 20 veces), como un array pero más rápido.</td></tr>
+</table></div>
+
+<!-- ===== Modo Edición ===== -->
+<h3 id="modo-edicion">Modo Edición (mallas)</h3>
+<p>Se entra con <kbd>Tab</kbd> sobre una malla. Se trabaja sobre <strong>vértices</strong>, <strong>aristas</strong> o <strong>caras</strong> según el botón de la barra superior.</p>
+<h4>Seleccionar</h4>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Descripción</th><th>Atajo</th></tr>
+<tr><td>Seleccionar</td><td>Elige un vértice, arista o cara.</td><td>Click; <kbd>Shift</kbd>+click alterna</td></tr>
+<tr><td>Seleccionar vinculado</td><td>Toda la isla conectada bajo el puntero.</td><td><kbd>L</kbd></td></tr>
+<tr><td>Seleccionar loop</td><td>Un anillo de aristas o de caras.</td><td><kbd>Shift+Alt</kbd>+click</td></tr>
+<tr><td>Camino más corto</td><td>Selecciona el camino entre el activo y el clickeado.</td><td><kbd>Ctrl</kbd>+click</td></tr>
+<tr><td>Camino más corto (rellenar región)</td><td>Selecciona toda la región entre los dos.</td><td><kbd>Ctrl+Shift</kbd>+click</td></tr>
+<tr><td>Todo / Ninguno / Invertir / Caja</td><td>Como en Modo Objeto, sobre los elementos de la malla.</td><td><kbd>A</kbd> / <kbd>Alt+A</kbd> / <kbd>Ctrl+I</kbd> / <kbd>B</kbd></td></tr>
+</table></div>
+<h4>Modelar</h4>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Descripción</th><th>Atajo</th></tr>
+<tr><td>Mover / Rotar / Escalar</td><td>Transforma lo seleccionado. Con un mover en curso, otra <kbd>G</kbd> pasa a deslizar.</td><td><kbd>G</kbd> / <kbd>R</kbd> / <kbd>S</kbd></td></tr>
+<tr><td>Encoger / Engordar</td><td>Mueve cada vértice por su normal (infla o desinfla).</td><td><kbd>Alt+S</kbd></td></tr>
+<tr><td>Extruir</td><td>Saca geometría nueva desde lo seleccionado (las caras salen por su normal).</td><td><kbd>E</kbd></td></tr>
+<tr><td>Loop Cut y Deslizar</td><td>Corta un anillo de aristas. La rueda cambia la cantidad de cortes; click aplica y después se desliza.</td><td><kbd>Ctrl+R</kbd></td></tr>
+<tr><td>Nueva arista / cara desde vértices</td><td>Une los vértices seleccionados con una arista o una cara.</td><td><kbd>F</kbd></td></tr>
+<tr><td>Conectar camino de vértices</td><td>Corta en línea recta entre dos vértices.</td><td><kbd>J</kbd></td></tr>
+<tr><td>Deslizar vértices</td><td>Desliza los vértices a lo largo de sus aristas.</td><td><kbd>Shift+V</kbd></td></tr>
+<tr><td>Rasgar</td><td>Separa la malla por la selección.</td><td><kbd>V</kbd></td></tr>
+<tr><td>Duplicar</td><td>Copia lo seleccionado y lo deja agarrado.</td><td><kbd>Shift+D</kbd></td></tr>
+<tr><td>Separar</td><td>Pasa las caras seleccionadas a un objeto nuevo.</td><td><kbd>P</kbd></td></tr>
+<tr><td>Fusionar</td><td>Suelda vértices: en el centro, en el cursor, colapsar o por distancia.</td><td><kbd>M</kbd></td></tr>
+<tr><td>Auto fusionar</td><td>Al terminar de mover, suelda los vértices que quedaron más cerca que el umbral.</td><td>Menú Malla</td></tr>
+<tr><td>Borrar</td><td>Vértices, aristas, caras o loops de aristas.</td><td><kbd>X</kbd> o <kbd>Supr</kbd></td></tr>
+<tr><td>Recalcular normales / Voltear</td><td>Corrige hacia dónde miran las caras, o las da vuelta.</td><td><kbd>Shift+N</kbd></td></tr>
+<tr><td>Triangular caras</td><td>Parte en triángulos las caras de más de 3 lados.</td><td><kbd>Ctrl+T</kbd></td></tr>
+<tr><td>Sombreado suave / plano</td><td>Cómo se ilumina la superficie.</td><td>Menú Cara</td></tr>
+<tr><td>Marcar / limpiar afilado</td><td>Aristas que se ven duras aunque la malla sea suave.</td><td>Menú Arista</td></tr>
+<tr><td>Marcar / limpiar costura</td><td>Por dónde se corta la malla al desplegar las UV.</td><td>Menú Arista o UV</td></tr>
+<tr><td>Menú de contexto</td><td>Las operaciones del sub-modo actual (vértice, arista o cara) en el puntero.</td><td><kbd>W</kbd> o click derecho</td></tr>
+<tr><td>Insertar keyframe</td><td>Guarda la forma de la malla en el frame actual (animación de vértices).</td><td><kbd>I</kbd></td></tr>
+</table></div>
+<h4>Menú UV</h4>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Descripción</th><th>Atajo</th></tr>
+<tr><td>Desplegar</td><td>Basado en ángulos, conforme o de mínimo estiramiento: abre la malla por sus costuras.</td><td><kbd>U</kbd></td></tr>
+<tr><td>Proyección UV inteligente</td><td>Corta y despliega sola según los ángulos entre caras.</td><td><kbd>U</kbd></td></tr>
+<tr><td>Empaquetar lightmap / Seguir quads activos</td><td>Islas ordenadas sin solaparse / UV ordenadas siguiendo la cara activa.</td><td><kbd>U</kbd></td></tr>
+<tr><td>Proyección de cubo, cilindro, esfera, desde la vista</td><td>Proyecciones simples.</td><td><kbd>U</kbd></td></tr>
+<tr><td>Restablecer</td><td>Cada cara ocupa toda la imagen.</td><td><kbd>U</kbd></td></tr>
+</table></div>
+
+<h3 id="curvas">Edición de curvas (rutas)</h3>
+<p>Con <kbd>Tab</kbd> sobre una curva se editan sus nodos como si fuera una malla de puntos: <kbd>G</kbd> mueve, <kbd>E</kbd> agrega el nodo siguiente, <kbd>X</kbd> borra.</p>
+
+<h3 id="modo-edicion-esq">Modo Edición de esqueleto</h3>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Descripción</th><th>Atajo</th></tr>
+<tr><td>Seleccionar</td><td>Elige una punta del hueso o el hueso entero; arrastrar lo mueve al toque.</td><td>Click; <kbd>Shift</kbd> suma</td></tr>
+<tr><td>Todo / Ninguno</td><td>Selecciona o deselecciona todos los huesos.</td><td><kbd>A</kbd> / <kbd>Alt+A</kbd></td></tr>
+<tr><td>Extruir hueso</td><td>Crea un hueso nuevo desde cada punta seleccionada.</td><td><kbd>E</kbd></td></tr>
+<tr><td>Mover / Rotar / Escalar</td><td>Con ejes y planos como siempre.</td><td><kbd>G</kbd> / <kbd>R</kbd> / <kbd>S</kbd></td></tr>
+<tr><td>Duplicar</td><td>Copia los huesos y los deja agarrados.</td><td><kbd>Shift+D</kbd></td></tr>
+<tr><td>Borrar</td><td>Borra los huesos (sus hijos pasan al abuelo).</td><td><kbd>X</kbd> o <kbd>Supr</kbd></td></tr>
+<tr><td>Emparentar</td><td>Mantener offset o conectado.</td><td><kbd>Ctrl+P</kbd></td></tr>
+<tr><td>Desconectar / Desemparentar</td><td>Suelta el hueso de su padre.</td><td><kbd>Alt+P</kbd></td></tr>
+</table></div>
+
+<h3 id="modo-pose">Modo Pose</h3>
+<p>Solo para esqueletos. Sirve para posar y animar.</p>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Descripción</th><th>Atajo</th></tr>
+<tr><td>Seleccionar hueso</td><td>Elige un hueso.</td><td>Click; <kbd>Shift</kbd> suma</td></tr>
+<tr><td>Mover / Rotar / Escalar</td><td>Posa los huesos seleccionados.</td><td><kbd>G</kbd> / <kbd>R</kbd> / <kbd>S</kbd></td></tr>
+<tr><td>Limpiar posición / rotación / escala</td><td>Devuelve el hueso a su pose de reposo en ese canal.</td><td><kbd>Alt+G</kbd> / <kbd>Alt+R</kbd> / <kbd>Alt+S</kbd></td></tr>
+<tr><td>Insertar keyframe</td><td>Guarda la pose en el frame actual.</td><td><kbd>I</kbd> / <kbd>Shift+I</kbd></td></tr>
+</table></div>
+
+<!-- ===== Pintura ===== -->
+<h3 id="pintura">Modos de pintura</h3>
+<div class="nota">Los tres modos de pintura son <strong>solo para mallas 3D</strong>: no aparecen con cámaras, luces, esqueletos, curvas ni elementos 2D. Mientras se pinta, el click no cambia la selección; para pintar otro objeto se lo elige en el Outliner.</div>
+<h4>Lo común a los tres</h4>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Descripción</th><th>Cómo se usa</th></tr>
+<tr><td>Pintar</td><td>Pinta solo las caras de frente que se ven (con Rayos X, también las de atrás). Cada trazo es un paso de deshacer.</td><td>Click y arrastrar</td></tr>
+<tr><td>Radio</td><td>El tamaño del pincel en píxeles. Al cambiarlo aparece un círculo en el centro de la vista con el tamaño real.</td><td>Barra arrastrable sobre la barra inferior</td></tr>
+<tr><td>Valor</td><td>La intensidad del pincel.</td><td>Barra arrastrable</td></tr>
+<tr><td>Caída</td><td>Cómo se suaviza el borde del pincel; se puede dibujar una curva propia.</td><td>Botón de caída</td></tr>
+<tr><td>Vista (táctil)</td><td>Prendido: el dedo navega. Apagado: el dedo pinta.</td><td>Botón con forma de monitor</td></tr>
+</table></div>
+<h4 id="pintura-pesos">Pintura de pesos</h4>
+<p>Pinta cuánto influye un hueso en cada vértice (azul = nada, rojo = todo). Es lo que hace que la malla se deforme bien con el esqueleto.</p>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Descripción</th></tr>
+<tr><td>Modo del pincel</td><td>Sumar (+), Restar (−) o Igualar (=, pone el valor exacto).</td></tr>
+<tr><td>Grupo de vértices</td><td>Qué grupo (hueso) se pinta; se pueden agregar grupos. Si no hay ninguno, el primer trazo crea uno.</td></tr>
+<tr><td>Marcas</td><td>Muestra un cuadradito por vértice; el pincel actúa solo sobre ellos.</td></tr>
+<tr><td>Solo lo seleccionado</td><td>Protege lo no seleccionado (se ve oscurecido).</td></tr>
+</table></div>
+<h4 id="pintura-vertices">Pintura de vértices</h4>
+<p>Pinta colores sobre los vértices de una <strong>malla 3D</strong> (no sirve para imágenes ni elementos 2D: para eso está la pintura de textura). Es muy liviana y es la forma recomendada de dar color en el N95.</p>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Descripción</th></tr>
+<tr><td>Color</td><td>Abre el selector de color (RGB, HSV, hexadecimal o un índice de la paleta).</td></tr>
+<tr><td>Por vértice / por esquina</td><td>Por vértice, el color se comparte entre las caras; por esquina, cada cara puede tener el suyo (bordes duros).</td></tr>
+<tr><td>Capa de color</td><td>Elegir o crear capas de color.</td></tr>
+<tr><td>Marcas / Solo lo seleccionado</td><td>Igual que en pintura de pesos.</td></tr>
+</table></div>
+<h4 id="pintura-textura">Pintura de textura</h4>
+<p>Pinta directamente sobre el objeto 3D y el trazo va a parar a su textura.</p>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Descripción</th></tr>
+<tr><td>Textura automática</td><td>Si la malla no tiene textura, al primer trazo se crea sola: un material propio, UV automáticas y una imagen de 1024×1024 (256×256 en el N95) del color del material.</td></tr>
+<tr><td>Color, caída, radio, valor</td><td>Como en los otros modos.</td></tr>
+<tr><td>Guardar textura</td><td>La pintura vive en memoria hasta que se guarda. El diskette se pone verde si hay cambios sin guardar. Opciones: Guardar, Guardar como…, Guardar en el w3d y Guardar fuera del w3d…</td></tr>
+</table></div>
+
+<!-- ===== Otras ===== -->
+<h3 id="otras3d">Otras funciones de la Vista 3D</h3>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Descripción</th><th>Cómo se usa</th></tr>
+<tr><td>Vista de cámara</td><td>Mira a través de la cámara activa con un marco del tamaño del render. Adentro, la rueda o el pellizco hacen zoom de inspección sin mover la cámara.</td><td><kbd>Num0</kbd></td></tr>
+<tr><td>Vista local</td><td>Aísla lo seleccionado (con sus padres e hijos); repetir restaura.</td><td><kbd>/</kbd></td></tr>
+<tr><td>Cursor 3D</td><td>Punto donde nacen los objetos nuevos; también sirve de pivote. Se ubica con el menú Snap (<kbd>Shift+S</kbd>).</td><td><kbd>Shift+S</kbd></td></tr>
+<tr><td>Trazado de rayos</td><td>Render realista con sombras suaves, transparencias, reflejos (rugosidad y metálico del material) y normal maps. Se activa en Propiedades → Render y se ve en Vista Render; la imagen se va completando de a poco.</td><td>Propiedades → Render</td></tr>
+<tr><td>Modo juego</td><td>Con la animación "Juego" en Play, los clicks y las teclas van al juego. <kbd>Esc</kbd> pausa.</td><td>Botones Play / Parar de la barra</td></tr>
+</table></div>
+
+<h3 id="modificadores">Modificadores</h3>
+<p>Se agregan en Propiedades (tarjeta Modificadores → Añadir) y cambian la malla sin destruirla: se pueden apagar, reordenar o aplicar (hornear) cuando se quiera.</p>
+<div class="tabla"><table>
+<tr><th>Modificador</th><th>Descripción</th></tr>
+<tr><td>Espejo</td><td>Refleja la malla en X, Y y/o Z (o respecto de otro objeto). Puede soldar el centro y evitar que se cruce.</td></tr>
+<tr><td>Array</td><td>Hace copias en fila: cantidad, desplazamiento relativo (según el tamaño), desplazamiento constante (en metros) y opcionalmente según otro objeto (acumulativo: espirales, escaleras). Puede soldar las copias.</td></tr>
+<tr><td>Superficie de subdivisión</td><td>Suaviza la malla subdividiéndola (niveles para la vista y para el render).</td></tr>
+<tr><td>Booleano</td><td>Intersección, unión o diferencia con otro objeto.</td></tr>
+<tr><td>Screw</td><td>Gira un perfil alrededor de un eje (tornillos, jarrones, resortes).</td></tr>
+<tr><td>Esqueleto</td><td>Deforma la malla con un esqueleto.</td></tr>
+<tr><td>Culling</td><td>Optimización: no dibuja las partes que no se ven desde la cámara.</td></tr>
+</table></div>
+
+<!-- ======================================================================= -->
+<h2 id="uv">5. Editor UV</h2>
+<p>Muestra cómo se apoya la textura sobre la malla. Para editar, la malla tiene que estar en <strong>Modo Edición en la Vista 3D</strong>; si no, el editor solo muestra la textura. El modo del Editor UV es propio: no cambia el modo de la Vista 3D. Las herramientas para desplegar y proyectar UVs están en la Vista 3D (Modo Edición, tecla <kbd>U</kbd>).</p>
+<h3>Navegación y barra superior</h3>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Descripción</th><th>Cómo se usa</th></tr>
+<tr><td>Zoom / Desplazar</td><td>Acerca hacia el puntero / mueve la vista.</td><td>Rueda / botón del medio o flechas; táctil: 1 dedo desplaza, 2 dedos zoom</td></tr>
+<tr><td>Modo</td><td>Modo Objeto, Modo Edición, Pintura de pesos, Editar huesos y Modo Pose (estos dos si la malla tiene esqueleto 2D).</td><td>Botón de modo, <kbd>Tab</kbd></td></tr>
+<tr><td>Vértice / Arista / Cara</td><td>Qué se selecciona en Modo Edición.</td><td>Botón</td></tr>
+<tr><td>Pivote</td><td>Cursor, orígenes individuales o punto medio.</td><td>Botón</td></tr>
+<tr><td>Cursor</td><td>Cursor a la selección, selección al cursor, cursor al centro.</td><td>Menú</td></tr>
+<tr><td>Vista</td><td>Sincronizar selección (la selección UV es la misma que la de la malla), Repetir textura (mosaico), Mostrar chrome UV, Encuadrar selección, Encuadrar todo.</td><td>Menú; <kbd>Num.</kbd></td></tr>
+<tr><td>Textura</td><td>Qué textura se muestra: Nueva textura…, Auto (la de la parte activa), o cualquiera del proyecto.</td><td>Menú</td></tr>
+<tr><td>Nueva textura</td><td>Crea una imagen (nombre, tamaño, color, transparencia; lisa, grilla UV o grilla de colores), la guarda en el proyecto y la asigna al material.</td><td>Textura → Nueva textura…</td></tr>
+<tr><td>Mipmap</td><td>Muestra un nivel de mipmap en particular, para revisarlo.</td><td>Botón Mip</td></tr>
+<tr><td>Editar</td><td>Entra y sale de la pintura de textura sobre la imagen.</td><td>Botón Editar</td></tr>
+<tr><td>Guardar (diskette, siempre visible)</td><td>Guardar, Guardar como…, Guardar fuera del w3d…, Guardar en el w3d, Exportar mapa UV…</td><td>Menú</td></tr>
+<tr><td>Exportar mapa UV</td><td>Guarda un PNG con fondo transparente: caras semitransparentes (más opacas donde se superponen) y líneas opacas. Se elige nombre, carpeta y resolución (de fábrica 512, 256 en el N95, o el tamaño de la textura mostrada).</td><td>Guardar → Exportar mapa UV…</td></tr>
+<tr><td>Animación</td><td>Insertar, borrar o limpiar keyframes de la capa UV, o de la pose 2D.</td><td>Menú</td></tr>
+</table></div>
+<h3>Modo Objeto (UV)</h3>
+<p>Click elige qué se edita: un esqueleto 2D (si se toca un hueso) o la geometría. <kbd>Tab</kbd> entra a editar lo elegido.</p>
+<h3>Modo Edición (UV)</h3>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Descripción</th><th>Atajo</th></tr>
+<tr><td>Seleccionar</td><td>Vértices, aristas o caras UV. Sin sincronizar, la Vista 3D filtra: solo se ven las caras seleccionadas en 3D.</td><td>Click; <kbd>Shift</kbd>+click</td></tr>
+<tr><td>Todo / Ninguno / Invertir</td><td>Sobre lo visible.</td><td><kbd>A</kbd> / <kbd>Alt+A</kbd> / <kbd>Ctrl+I</kbd></td></tr>
+<tr><td>Seleccionar vinculado</td><td>La isla UV bajo el puntero (<kbd>Shift</kbd> suma).</td><td><kbd>L</kbd></td></tr>
+<tr><td>Selección por caja</td><td>Rectángulo; <kbd>Shift</kbd> suma.</td><td><kbd>B</kbd></td></tr>
+<tr><td>Mover / Rotar / Escalar</td><td>Transforma los UV. <kbd>X</kbd> / <kbd>Y</kbd> bloquean un eje; se puede tipear el valor (1.0 = una baldosa).</td><td><kbd>G</kbd> / <kbd>R</kbd> / <kbd>S</kbd></td></tr>
+<tr><td>Ubicar el cursor 2D</td><td>Pone el cursor donde se clickea.</td><td>Click derecho</td></tr>
+<tr><td>Insertar keyframe</td><td>Guarda la capa UV en la animación de vértices activa.</td><td><kbd>I</kbd></td></tr>
+</table></div>
+<h3>Pintura de pesos (UV)</h3>
+<p>Pinta los pesos de los huesos 2D sobre el mapa UV, con los mismos controles que en la Vista 3D (modo +/−/=, grupo, marcas, caída, solo lo seleccionado). <kbd>Ctrl</kbd>+click sobre un hueso lo elige para pintar.</p>
+<h3>Editar huesos y Modo Pose (esqueleto 2D)</h3>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Descripción</th><th>Atajo</th></tr>
+<tr><td>Añadir esqueleto 2D / hueso</td><td>Crea el esqueleto 2D de la malla (con su grupo UV) o agrega un hueso.</td><td>Menú Añadir</td></tr>
+<tr><td>Seleccionar</td><td>Una punta o el hueso entero; arrastrar lo mueve.</td><td>Click; <kbd>A</kbd> / <kbd>Alt+A</kbd> / <kbd>Ctrl+I</kbd> / <kbd>L</kbd> / <kbd>B</kbd></td></tr>
+<tr><td>Mover / Rotar / Escalar</td><td>En Editar huesos cambia la posición de reposo; en Pose, posa (los UV pesados siguen al hueso).</td><td><kbd>G</kbd> / <kbd>R</kbd> / <kbd>S</kbd></td></tr>
+<tr><td>Extruir / Duplicar / Borrar</td><td>Solo en Editar huesos.</td><td><kbd>E</kbd> / <kbd>Shift+D</kbd> / <kbd>X</kbd></td></tr>
+<tr><td>Emparentar / Desemparentar</td><td>Mantener offset o conectado / desconectar.</td><td><kbd>Ctrl+P</kbd> / <kbd>Alt+P</kbd></td></tr>
+<tr><td>Insertar keyframe</td><td>En Pose: menú de canales, o todo con <kbd>Shift+I</kbd>.</td><td><kbd>I</kbd></td></tr>
+</table></div>
+<h3>Pintura de textura (UV)</h3>
+<p>Con el botón <strong>Editar</strong> se pinta directamente sobre la imagen, con color, caída, radio y fuerza. Se guarda desde el diskette.</p>
+
+<!-- ======================================================================= -->
+<h2 id="timeline">6. Línea de tiempo</h2>
+<p>Muestra y edita la animación: hoja de keyframes (dope sheet) o editor de curvas. Muestra lo animado de lo <strong>seleccionado</strong>.</p>
+<h3>Barra superior</h3>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Descripción</th></tr>
+<tr><td>Transporte</td><td>Ir al inicio, keyframe anterior, fotograma anterior, reproducir hacia atrás, reproducir / pausa, fotograma siguiente, keyframe siguiente, ir al final.</td></tr>
+<tr><td>Inicio / Fin / FPS</td><td>Rango y velocidad de la animación (click para tipear).</td></tr>
+<tr><td>Animación</td><td>Qué animación se edita (escena, clips, esqueletos, objetos, flipbooks, Juego, Mix) y crear nuevas.</td></tr>
+<tr><td>Auto Key</td><td>En rojo: cada transform graba keyframes solo.</td></tr>
+<tr><td>Curvas / Dope Sheet</td><td>Cambia entre la hoja de keyframes y el editor de curvas.</td></tr>
+<tr><td>Seleccionar, Key, Vista, Pivote</td><td>Menús de selección, operaciones sobre keyframes, encuadre y panel lateral, y desde dónde escala la <kbd>S</kbd> (centro o frame actual).</td></tr>
+</table></div>
+<h3>Navegar el tiempo</h3>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Descripción</th><th>Atajo</th></tr>
+<tr><td>Cambiar de frame</td><td>Click o arrastre sobre los números de frame (scrub). El frame actual (verde) se puede tipear.</td><td>Click</td></tr>
+<tr><td>Fotograma anterior / siguiente</td><td>Un frame para atrás o adelante.</td><td><kbd>Izquierda</kbd> / <kbd>Derecha</kbd></td></tr>
+<tr><td>Keyframe anterior / siguiente</td><td>Salta al keyframe más cercano.</td><td><kbd>Abajo</kbd> / <kbd>Arriba</kbd></td></tr>
+<tr><td>Ir al inicio / al final</td><td>Primer o último frame.</td><td><kbd>Inicio</kbd> / <kbd>Fin</kbd></td></tr>
+<tr><td>Reproducir / Pausa</td><td>Desde cualquier panel.</td><td><kbd>Espacio</kbd></td></tr>
+<tr><td>Zoom y desplazar</td><td>Rueda = zoom (en curvas, <kbd>Ctrl</kbd> = solo tiempo, <kbd>Shift</kbd> = solo valor); botón del medio = desplazar.</td><td>Rueda / botón del medio</td></tr>
+<tr><td>Encuadrar selección</td><td>Ajusta la vista a lo seleccionado.</td><td><kbd>Num.</kbd></td></tr>
+</table></div>
+<h3>Editar keyframes (dope sheet y curvas)</h3>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Descripción</th><th>Atajo</th></tr>
+<tr><td>Seleccionar</td><td>Click en un rombo, o en una fila para tomar todos sus keyframes; <kbd>Shift</kbd> suma.</td><td>Click; <kbd>A</kbd> / <kbd>Alt+A</kbd> / <kbd>Ctrl+I</kbd></td></tr>
+<tr><td>Mover keyframes</td><td>Corre los keyframes en el tiempo (también arrastrando un rombo).</td><td><kbd>G</kbd></td></tr>
+<tr><td>Escalar keyframes</td><td>Estira o comprime desde el pivote.</td><td><kbd>S</kbd></td></tr>
+<tr><td>Rotar manijas</td><td>Solo en curvas.</td><td><kbd>R</kbd></td></tr>
+<tr><td>Duplicar</td><td>Copia los keyframes y los deja agarrados.</td><td><kbd>Shift+D</kbd></td></tr>
+<tr><td>Borrar</td><td>Borra los keyframes (o las curvas de las filas) seleccionados.</td><td><kbd>X</kbd></td></tr>
+<tr><td>Interpolación</td><td>Constante, lineal o Bezier.</td><td><kbd>T</kbd></td></tr>
+<tr><td>Tipo de manija</td><td>Libre, alineada, vector, automática, auto limitada (solo curvas).</td><td><kbd>V</kbd></td></tr>
+<tr><td>Euler inteligente</td><td>Quita las vueltas de más en las rotaciones seleccionadas.</td><td>Menú Key</td></tr>
+<tr><td>Ocultar una curva</td><td>El ojo de cada fila la oculta.</td><td>Click en el ojo</td></tr>
+<tr><td>Valores exactos</td><td>Frame, valor y manijas del keyframe elegido.</td><td>Propiedades → Animación → Keyframe</td></tr>
+</table></div>
+
+<!-- ======================================================================= -->
+<h2 id="outliner">7. Outliner</h2>
+<p>La lista de todo lo que hay en la escena, y también la biblioteca de recursos del proyecto. En Android no se muestra (se trabaja con la Vista 3D y Propiedades).</p>
+<h3>Menú Vista (ojo)</h3>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Descripción</th></tr>
+<tr><td>Escena / Biblioteca / librerías</td><td>Qué se lista: el árbol de la escena, todos los recursos del proyecto, o los de otro .w3d vinculado (solo lectura).</td></tr>
+<tr><td>Constructor / Rutinas</td><td>Muestran u ocultan la rutina Constructor (lo que corre una sola vez al empezar) y las demás rutinas.</td></tr>
+<tr><td>Íconos de visibilidad / Íconos de render</td><td>Muestran u ocultan las columnas del ojo y de la cámara.</td></tr>
+<tr><td>Cuadrícula</td><td>En Biblioteca: miniaturas en vez de lista.</td></tr>
+<tr><td>Vincular .w3d… / Desvincular</td><td>Usa otro proyecto como librería, o lo suelta.</td></tr>
+</table></div>
+<h3>Vista Escena</h3>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Descripción</th><th>Cómo se usa</th></tr>
+<tr><td>Seleccionar</td><td>Elige el objeto. <kbd>Shift</kbd>+click toma un rango; <kbd>Ctrl</kbd>+click suma o quita.</td><td>Click</td></tr>
+<tr><td>Desplegar / plegar</td><td>Muestra u oculta los hijos.</td><td>Flecha; <kbd>Izquierda</kbd> / <kbd>Derecha</kbd></td></tr>
+<tr><td>Visible / Renderizable</td><td>El ojo oculta el objeto (es animable); la cámara lo excluye del render.</td><td>Click en el ojo / la cámara</td></tr>
+<tr><td>Reordenar y emparentar</td><td>Soltar antes, después o encima de otra fila (como hijo).</td><td>Arrastrar la fila</td></tr>
+<tr><td>Mover (reordenar)</td><td>Con el teclado: arriba/abajo reordena, izquierda saca del padre, derecha mete bajo el anterior, <kbd>Enter</kbd> confirma.</td><td><kbd>G</kbd></td></tr>
+<tr><td>Renombrar</td><td>La fila se vuelve un campo de texto.</td><td>Doble click o <kbd>F2</kbd></td></tr>
+<tr><td>Duplicar / Duplicar vinculado</td><td>Como en la Vista 3D.</td><td><kbd>Shift+D</kbd> / <kbd>Alt+D</kbd></td></tr>
+<tr><td>Ocultar / Mostrar</td><td>Alterna la visibilidad.</td><td><kbd>H</kbd></td></tr>
+<tr><td>Borrar</td><td>Con confirmación.</td><td><kbd>X</kbd> o <kbd>Supr</kbd></td></tr>
+<tr><td>Crear / Desempaquetar prefab</td><td>Desde el menú Objeto.</td><td>Click derecho</td></tr>
+<tr><td>Mostrar el activo</td><td>Desplaza la lista hasta el objeto activo.</td><td><kbd>Num.</kbd></td></tr>
+<tr><td>Desplazar la lista</td><td>Rueda, o arrastrar (también con el dedo).</td><td>Rueda / arrastrar</td></tr>
+</table></div>
+<h3>Vista Biblioteca</h3>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Descripción</th></tr>
+<tr><td>Recursos</td><td>Mallas, materiales, texturas, animaciones, prefabs, escenas, sonidos, scripts, fuentes y videos, en carpetas. Tilde verde = en uso; cruz roja = huérfano; <code>*</code> = sin guardar.</td></tr>
+<tr><td>Filtro / Lista o cuadrícula</td><td>Mostrar un solo tipo; ver miniaturas.</td></tr>
+<tr><td>Arrastrar un recurso</td><td>A una carpeta (lo mueve), a la Vista 3D (malla = objeto nuevo, material o textura = se asigna a lo tocado, prefab = instancia) o a un desplegable de Propiedades.</td></tr>
+<tr><td>Carpeta nueva / Mover a carpeta</td><td>Organizar (las carpetas son solo para ordenar).</td></tr>
+<tr><td>Duplicar recurso / Seleccionar usuarios / Purgar huérfanos</td><td>Copiar, encontrar quién lo usa, borrar lo que nadie usa.</td></tr>
+<tr><td>Dentro del .w3d / Externo</td><td>Desde Propiedades (tarjeta Recurso): mueve el recurso adentro o afuera del proyecto.</td></tr>
+</table></div>
+<h3>Escenas, juegos y prefabs</h3>
+<p>El botón con el nombre de la escena (en el Outliner y en la Vista 3D) lista las escenas, juegos y prefabs del proyecto. Desde ahí se crean nuevos, se elige la escena inicial y se convierte una escena en juego (o al revés).</p>
+
+<!-- ======================================================================= -->
+<h2 id="propiedades">8. Propiedades</h2>
+<p>El panel con todos los datos del objeto activo, organizado en pestañas (iconos). Las pestañas que aparecen dependen del tipo de objeto. Click en el título de una tarjeta la pliega. En los campos numéricos: click para tipear (acepta cuentas), arrastrar para deslizar el valor. El rombo de la derecha pone o quita un keyframe.</p>
+<div class="tabla"><table>
+<tr><th>Pestaña</th><th>Qué tiene</th></tr>
+<tr><td>Archivo / Render (diskette)</td><td><strong>Archivo</strong>: abrir, guardar, guardar como, guardar versión, extraer assets. <strong>Render</strong>: ruta, tamaño, pases extra, fondo, <strong>Trazado de rayos</strong> (rayos, muestras, pases), Renderizar imagen y Renderizar animación. <strong>Juego</strong>: plataforma (Windows, Symbian, Linux .deb, AppImage, WebGL, Android), ventana, orientación, icono, física, sonido y Compilar juego. <strong>Exportar</strong>: OBJ, glTF, GLB. <strong>Ajustes</strong>: idioma, antialiasing, gráficos, skin, logs, escala, <strong>Atajos de teclado…</strong> y Guardar cambios.</td></tr>
+<tr><td>Objeto</td><td>Posición, rotación (Euler, cuaternión o eje-ángulo), escala, nombre, visible, renderizar; animaciones y paleta del objeto.</td></tr>
+<tr><td>Contextual</td><td>Depende del tipo: partes de malla y <strong>material</strong> (textura, iluminación, color de vértice, transparencia, reflejos, normal map, mezcla, profundidad, capas de textura; Rugosidad y Metálico con trazado de rayos), luz, cámara, niebla, partículas, física, hitbox, esqueleto y huesos, elementos 2D, prefabs, rutinas.</td></tr>
+<tr><td>Malla 3D</td><td>La malla usada (y cuántos la comparten), mapas UV, capas de color, grupos de vértices, grupos UV. Con un recurso elegido en la Biblioteca: sus datos y su ubicación (dentro o fuera del .w3d).</td></tr>
+<tr><td>Modificadores</td><td>Ver <a href="#modificadores">Modificadores</a>.</td></tr>
+<tr><td>Transformar</td><td>Solo en Modo Edición: centro de la selección y de sus UV, editables.</td></tr>
+<tr><td>Esqueleto 2D</td><td>Esqueletos y huesos 2D de la malla.</td></tr>
+<tr><td>Restricciones</td><td>Copiar posición, Copiar rotación, Billboard (mirar a la cámara), Child Of.</td></tr>
+<tr><td>Scripts</td><td>Los scripts Lua del objeto y sus propiedades (ver el <a href="lua_es.html">documento de Lua</a>).</td></tr>
+<tr><td>Animación</td><td>La animación activa, capas de mezcla (Mix), valores exactos del keyframe elegido y cortes de cámara.</td></tr>
+</table></div>
+<h3>Rutinas</h3>
+<p>Una rutina es una lista de pasos de dibujo (trasladar, rotar, fijar textura, dibujar una malla, llamar a otra rutina, Llamar Lua…) que se arma en Propiedades. Es la forma más rápida de dibujar en el N95.</p>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Descripción</th><th>Atajo</th></tr>
+<tr><td>Añadir / Quitar paso</td><td>Agrega pasos agrupados por tema, o quita el elegido.</td><td>Botones; <kbd>X</kbd> o <kbd>Supr</kbd> quita</td></tr>
+<tr><td>Agarrar paso</td><td>Reordena el paso con las flechas; <kbd>Enter</kbd> confirma.</td><td><kbd>G</kbd></td></tr>
+<tr><td>Insertar keyframe</td><td>Anima los valores del paso en el frame actual.</td><td><kbd>I</kbd></td></tr>
+<tr><td>Repetir</td><td>Cuántas veces corre la lista seguida (bucle de rutina). 1 = rutina normal.</td><td>Campo Repetir</td></tr>
+<tr><td>Modo de render / Usa</td><td>Una lista distinta por modo de sombreado, o la misma para todos.</td><td>Desplegables</td></tr>
+</table></div>
+
+<!-- ======================================================================= -->
+<h2 id="editor2d">9. Editor 2D</h2>
+<p>Para armar interfaces de juego, HUD y juegos 2D: textos, imágenes, rectángulos, contenedores, slice 9, botones y videos.</p>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Descripción</th><th>Atajo</th></tr>
+<tr><td>Añadir</td><td>Texto, imagen, rectángulo, contenedor, slice 9, botón, expandir, video; Importar w3dui.</td><td>Menú Añadir</td></tr>
+<tr><td>Seleccionar</td><td>Click elige (arrastrar mueve); <kbd>Shift</kbd>+click suma; click en el vacío deselecciona.</td><td>Click; <kbd>A</kbd> / <kbd>Alt+A</kbd> / <kbd>Ctrl+I</kbd></td></tr>
+<tr><td>Mover / Rotar / Escalar</td><td><kbd>X</kbd> / <kbd>Y</kbd> bloquean el eje; se puede tipear el valor.</td><td><kbd>G</kbd> / <kbd>R</kbd> / <kbd>S</kbd></td></tr>
+<tr><td>Redimensionar</td><td>Los puntos de agarre del elemento activo.</td><td>Arrastrar</td></tr>
+<tr><td>Duplicar / Borrar</td><td>Copia desplazada y agarrada / borra con confirmación.</td><td><kbd>Shift+D</kbd> / <kbd>X</kbd></td></tr>
+<tr><td>Emparentar / Desemparentar</td><td>La selección pasa a ser hija del activo, o vuelve a colgar del UI.</td><td>Menú Objeto</td></tr>
+<tr><td>Cursor 2D</td><td>Se coloca con <kbd>Shift</kbd>+click en el vacío.</td><td><kbd>Shift</kbd>+click</td></tr>
+<tr><td>Vista de juego</td><td>El lienzo se ve exactamente como en el dispositivo, sin guías.</td><td><kbd>Num0</kbd> (<kbd>Esc</kbd> sale)</td></tr>
+<tr><td>Encuadrar / Zoom 1:1…4:1</td><td>Encuadra la selección; zoom exacto píxel a píxel.</td><td><kbd>Num.</kbd> / menú Vista</td></tr>
+</table></div>
+
+<!-- ======================================================================= -->
+<h2 id="ide">10. Editor de scripts (IDE)</h2>
+<p>Editor de texto para los scripts Lua, con números de línea y colores de sintaxis. Mientras tiene el foco, las letras escriben (no disparan atajos del editor). En Android, tocar el texto abre el teclado. En el N95 se escribe con T9.</p>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Descripción</th><th>Atajo</th></tr>
+<tr><td>Script</td><td>Elegir qué .lua del proyecto se edita, o Cargar .lua… (un archivo externo).</td><td>Menú Script</td></tr>
+<tr><td>Guardar</td><td>Guarda el script. Si vive dentro del .w3d, guarda también el proyecto.</td><td><kbd>Ctrl+S</kbd> o Archivo → Guardar</td></tr>
+<tr><td>Guardar como…</td><td>Otro nombre, adentro o afuera del proyecto, en una carpeta a elección.</td><td>Archivo</td></tr>
+<tr><td>Guardar en el w3d</td><td>Solo si el script es externo: lo mete en el proyecto.</td><td>Archivo</td></tr>
+<tr><td>Guardar fuera del w3d…</td><td>Solo si el script es interno: lo saca a un archivo; los objetos pasan a usar ese archivo.</td><td>Archivo</td></tr>
+<tr><td>Refresh</td><td>Guarda y, si el juego está corriendo, recarga el script en vivo.</td><td>Botón</td></tr>
+<tr><td>Copiar / Cortar / Pegar</td><td>Con el portapapeles del sistema.</td><td><kbd>Ctrl+C</kbd> / <kbd>Ctrl+X</kbd> / <kbd>Ctrl+V</kbd></td></tr>
+<tr><td>Seleccionar todo / Deshacer</td><td>Deshacer afecta el texto, no la escena.</td><td><kbd>Ctrl+A</kbd> / <kbd>Ctrl+Z</kbd></td></tr>
+<tr><td>Moverse por el texto</td><td>Flechas, Inicio, Fin, RePág, AvPág (con <kbd>Shift</kbd> seleccionan); <kbd>Ctrl+Inicio</kbd> / <kbd>Ctrl+Fin</kbd> van al principio o al final.</td><td>Teclado</td></tr>
+</table></div>
+
+<!-- ======================================================================= -->
+<h2 id="consola">11. Consola</h2>
+<p>Muestra el registro del motor: errores en rojo, avisos en amarillo, información en gris. Arriba queda a la vista el último error de Lua. Se desplaza con la rueda o arrastrando, y sigue pegada al final mientras no se suba.</p>
+
+<!-- ======================================================================= -->
+<h2 id="proyecto">12. El proyecto (.w3d) y los archivos</h2>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Descripción</th><th>Dónde</th></tr>
+<tr><td>Abrir proyecto</td><td>Abre un .w3d (también con doble click desde el sistema).</td><td>Propiedades → Archivo/Render → Archivo</td></tr>
+<tr><td>Guardar / Guardar como</td><td>Guarda en la carpeta y con el nombre de la tarjeta; Guardar como pide otro. Si falta el nombre, el campo se pone rojo.</td><td>Tarjeta Archivo, <kbd>Ctrl+S</kbd></td></tr>
+<tr><td>Guardar versión</td><td>Guarda y además deja una copia numerada (<code>proyecto_v03.w3d</code>).</td><td>Tarjeta Archivo</td></tr>
+<tr><td>Extraer assets</td><td>Copia todo lo de adentro a una carpeta (las copias no cambian el proyecto).</td><td>Tarjeta Archivo</td></tr>
+<tr><td>Mallas en texto</td><td>Guarda las mallas como texto legible en vez de binario.</td><td>Tarjeta Archivo</td></tr>
+<tr><td>Importar</td><td>OBJ, FBX, glTF, GLB e interfaces .w3dui. Lo importado se copia adentro del proyecto (sin duplicados).</td><td>Vista 3D → Añadir → Importar</td></tr>
+<tr><td>Exportar</td><td>OBJ, glTF o GLB del objeto seleccionado (con o sin modificadores y transformaciones).</td><td>Propiedades → Exportar</td></tr>
+<tr><td>Cambios sin guardar</td><td>Lo editado y no guardado (scripts, texturas pintadas) se marca con <code>*</code>. Al cerrar o abrir otro proyecto, un aviso lista lo que se perdería.</td><td>Automático</td></tr>
+<tr><td>Recurso adentro o afuera</td><td>Un recurso externo no se copia: se guarda su ruta y se avisa si falta.</td><td>Tarjeta Recurso; "Guardar en / fuera del w3d" en IDE y Editor UV</td></tr>
+</table></div>
+<p>El guardado nunca deja el archivo a medias: primero escribe una copia temporal y después la renombra.</p>
+
+<!-- ======================================================================= -->
+<h2 id="atajos">13. Atajos de teclado</h2>
+<p>Todas las funciones de las tablas de abajo se pueden reasignar, y cada una puede tener <strong>una o varias</strong> combinaciones (o ninguna). Funciona en PC, Android (con teclado físico) y Web. En el N95 la ventana no puede capturar teclas: ahí el archivo <code>atajos.ini</code> se edita a mano.</p>
+<h3>Cómo cambiar un atajo</h3>
+<ol>
+  <li>Abrir <strong>Propiedades → pestaña Archivo/Render → tarjeta Ajustes → Atajos de teclado…</strong></li>
+  <li>Elegir el <strong>Contexto</strong> (General, Vista 3D, Durante una transformación, Editor UV, Línea de tiempo, Outliner, Editor 2D, Propiedades, Editor de scripts). Las flechas izquierda/derecha también lo cambian.</li>
+  <li>Elegir la función en la lista y tocar <strong>Agregar atajo</strong> (o tocar otra vez la fila elegida). Aparece "Apretá una tecla…".</li>
+  <li>Apretar la combinación nueva (por ejemplo <kbd>Ctrl+M</kbd>). <kbd>Esc</kbd> cancela sin cambiar nada.</li>
+</ol>
+<div class="tabla"><table>
+<tr><th>Botón</th><th>Qué hace</th></tr>
+<tr><td>Agregar atajo</td><td>Suma una combinación a la función. Si otra función del mismo contexto la tenía, se la saca y avisa.</td></tr>
+<tr><td>Limpiar</td><td>Deja la función sin atajo.</td></tr>
+<tr><td>Restablecer</td><td>Vuelve la función a su atajo de fábrica.</td></tr>
+<tr><td>Restablecer todo</td><td>Todas las funciones vuelven a fábrica.</td></tr>
+</table></div>
+<p>Los menús muestran al lado de cada opción el atajo <strong>configurado</strong>: si reasignás una función, el menú muestra la combinación nueva. En el N95 los menús muestran la tecla del teléfono (por ejemplo <kbd>1</kbd> para Mover o <kbd>C</kbd> para Borrar); si hay un teclado Bluetooth conectado, muestran la tecla de ese teclado cuando la entiende.</p>
+<p>Las combinaciones cambiadas se ven en verde. Cuando un atajo de fábrica se le saca a su función, esa tecla queda libre: ya no hace nada en ese contexto.</p>
+<p>Los atajos de cada contexto valen cuando el puntero está sobre ese panel; los de <strong>General</strong> valen en todos. Los de <strong>Durante una transformación</strong> valen mientras se mueve, rota o escala algo, y tienen prioridad. En el editor de scripts, las letras siempre escriben: ahí solo se pueden reasignar combinaciones con <kbd>Ctrl</kbd>, <kbd>Alt</kbd> o teclas F.</p>
+<h3>El archivo atajos.ini</h3>
+<p>Los cambios se guardan solos en <code>res/atajos.ini</code>, al lado de <code>config.ini</code>. Solo figuran las funciones cambiadas, y se puede editar a mano:</p>
+<pre><code># funcion = combinacion, otra combinacion   (vacio = sin atajo)
+3d.mover = G, Ctrl+M
+3d.ocultar = Ctrl+Q
+xf.cancelar = Esc, Q
+3d.overlays =</code></pre>
+<p>Nombres de teclas: letras y números tal cual, <code>Enter</code>, <code>Esc</code>, <code>Tab</code>, <code>Space</code>, <code>Backspace</code>, <code>Delete</code>, <code>Home</code>, <code>End</code>, <code>PageUp</code>, <code>PageDown</code>, <code>Left</code>, <code>Right</code>, <code>Up</code>, <code>Down</code>, <code>F1</code>…<code>F12</code>, <code>Num0</code>…<code>Num9</code>, <code>Num.</code>, <code>NumEnter</code>, <code>Comma</code>, <code>Plus</code>. Modificadores: <code>Ctrl+</code>, <code>Shift+</code>, <code>Alt+</code>.</p>
+<h3>Atajos de fábrica</h3>
+<!--ATAJOS-INICIO-->
+<h4>General (cualquier panel)</h4>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Atajo de fábrica</th><th>Nokia N95 (teclado del teléfono)</th><th>Nombre en atajos.ini</th></tr>
+<tr><td>Guardar proyecto</td><td><kbd>Ctrl+S</kbd></td><td>—</td><td><code>global.guardar</code></td></tr>
+<tr><td>Deshacer</td><td><kbd>Ctrl+Z</kbd></td><td><kbd>C+Izq</kbd></td><td><code>global.deshacer</code></td></tr>
+<tr><td>Rehacer</td><td><kbd>Ctrl+Y</kbd>, <kbd>Ctrl+Shift+Z</kbd></td><td><kbd>C+Der</kbd></td><td><code>global.rehacer</code></td></tr>
+<tr><td>Modo Objeto / Edición</td><td><kbd>Tab</kbd></td><td><kbd>OK</kbd></td><td><code>global.modo</code></td></tr>
+<tr><td>Activar/desactivar imán</td><td><kbd>Shift+Tab</kbd></td><td>—</td><td><code>global.snap</code></td></tr>
+<tr><td>Menú de imán (Snap)</td><td><kbd>Shift+S</kbd></td><td>—</td><td><code>global.menuSnap</code></td></tr>
+<tr><td>Reproducir / Pausa</td><td><kbd>Space</kbd></td><td><kbd>Verde+Soft izq</kbd></td><td><code>global.play</code></td></tr>
+<tr><td>Barra de menú</td><td><kbd>M</kbd></td><td><kbd>Soft izq</kbd></td><td><code>global.barraMenu</code></td></tr>
+<tr><td>Padre</td><td><kbd>Ctrl+P</kbd></td><td>—</td><td><code>global.emparentar</code></td></tr>
+<tr><td>Desemparentar</td><td><kbd>Alt+P</kbd></td><td>—</td><td><code>global.desemparentar</code></td></tr>
+<tr><td>Pantalla completa</td><td><kbd>F11</kbd></td><td>—</td><td><code>global.pantalla</code></td></tr>
+</table></div>
+<h4>Vista 3D</h4>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Atajo de fábrica</th><th>Nokia N95 (teclado del teléfono)</th><th>Nombre en atajos.ini</th></tr>
+<tr><td>Seleccionar todo</td><td><kbd>A</kbd></td><td><kbd>Lápiz+Arriba</kbd></td><td><code>3d.seleccionarTodo</code></td></tr>
+<tr><td>Deseleccionar todo</td><td><kbd>Alt+A</kbd></td><td><kbd>Lápiz+Arriba</kbd></td><td><code>3d.deseleccionar</code></td></tr>
+<tr><td>Invertir selección</td><td><kbd>Ctrl+I</kbd></td><td>—</td><td><code>3d.invertir</code></td></tr>
+<tr><td>Selección por caja</td><td><kbd>B</kbd></td><td>—</td><td><code>3d.caja</code></td></tr>
+<tr><td>Seleccionar Vinculado</td><td><kbd>L</kbd></td><td>—</td><td><code>3d.vinculado</code></td></tr>
+<tr><td>Añadir</td><td><kbd>Shift+A</kbd></td><td>—</td><td><code>3d.agregar</code></td></tr>
+<tr><td>Aplicar</td><td><kbd>Ctrl+A</kbd></td><td>—</td><td><code>3d.aplicar</code></td></tr>
+<tr><td>Mover</td><td><kbd>G</kbd></td><td><kbd>1</kbd></td><td><code>3d.mover</code></td></tr>
+<tr><td>Rotar</td><td><kbd>R</kbd></td><td><kbd>2</kbd></td><td><code>3d.rotar</code></td></tr>
+<tr><td>Escalar</td><td><kbd>S</kbd></td><td><kbd>3</kbd></td><td><code>3d.escalar</code></td></tr>
+<tr><td>Limpiar posición (Pose)</td><td><kbd>Alt+G</kbd></td><td>—</td><td><code>3d.limpiarPos</code></td></tr>
+<tr><td>Limpiar rotación (Pose)</td><td><kbd>Alt+R</kbd></td><td>—</td><td><code>3d.limpiarRot</code></td></tr>
+<tr><td>Engordar / Limpiar escala</td><td><kbd>Alt+S</kbd></td><td>—</td><td><code>3d.limpiarEsc</code></td></tr>
+<tr><td>Duplicar</td><td><kbd>Shift+D</kbd></td><td>—</td><td><code>3d.duplicar</code></td></tr>
+<tr><td>Duplicar Vinculado</td><td><kbd>Alt+D</kbd></td><td>—</td><td><code>3d.instancia</code></td></tr>
+<tr><td>Borrar</td><td><kbd>X</kbd>, <kbd>Delete</kbd></td><td><kbd>C</kbd></td><td><code>3d.borrar</code></td></tr>
+<tr><td>Ocultar / Mostrar</td><td><kbd>H</kbd></td><td>—</td><td><code>3d.ocultar</code></td></tr>
+<tr><td>Unir</td><td><kbd>Ctrl+J</kbd></td><td>—</td><td><code>3d.unir</code></td></tr>
+<tr><td>Insertar Keyframe</td><td><kbd>I</kbd></td><td>—</td><td><code>3d.keyframe</code></td></tr>
+<tr><td>Insertar keyframe (todo)</td><td><kbd>Shift+I</kbd></td><td>—</td><td><code>3d.keyframeTodo</code></td></tr>
+<tr><td>Edición Proporcional</td><td><kbd>O</kbd></td><td>—</td><td><code>3d.proporcional</code></td></tr>
+<tr><td>Superposiciones</td><td><kbd>K</kbd></td><td>—</td><td><code>3d.overlays</code></td></tr>
+<tr><td>Vista local</td><td><kbd>/</kbd></td><td>—</td><td><code>3d.vistaLocal</code></td></tr>
+<tr><td>Encuadrar Selección</td><td><kbd>Num.</kbd></td><td><kbd>0</kbd></td><td><code>3d.encuadrar</code></td></tr>
+<tr><td>Vista frontal</td><td><kbd>Num1</kbd></td><td><kbd>#+Izq/Der</kbd></td><td><code>3d.vistaFrente</code></td></tr>
+<tr><td>Vista trasera</td><td><kbd>Ctrl+Num1</kbd></td><td><kbd>#+Izq/Der</kbd></td><td><code>3d.vistaAtras</code></td></tr>
+<tr><td>Vista derecha</td><td><kbd>Num3</kbd></td><td><kbd>#+Izq/Der</kbd></td><td><code>3d.vistaDerecha</code></td></tr>
+<tr><td>Vista izquierda</td><td><kbd>Ctrl+Num3</kbd></td><td><kbd>#+Izq/Der</kbd></td><td><code>3d.vistaIzquierda</code></td></tr>
+<tr><td>Vista superior</td><td><kbd>Num7</kbd></td><td><kbd>#+Arriba</kbd></td><td><code>3d.vistaArriba</code></td></tr>
+<tr><td>Vista inferior</td><td><kbd>Ctrl+Num7</kbd></td><td><kbd>#+Abajo</kbd></td><td><code>3d.vistaAbajo</code></td></tr>
+<tr><td>Perspectiva / Ortográfica</td><td><kbd>Num5</kbd></td><td><kbd>#</kbd></td><td><code>3d.perspectiva</code></td></tr>
+<tr><td>Girar vista a la izquierda</td><td><kbd>Num4</kbd></td><td>—</td><td><code>3d.rodarIzq</code></td></tr>
+<tr><td>Girar vista a la derecha</td><td><kbd>Num6</kbd></td><td>—</td><td><code>3d.rodarDer</code></td></tr>
+<tr><td>Vista de cámara</td><td><kbd>Num0</kbd></td><td><kbd>8</kbd></td><td><code>3d.vistaCamara</code></td></tr>
+<tr><td>Hacer cámara activa</td><td><kbd>Ctrl+Num0</kbd></td><td>—</td><td><code>3d.camaraActiva</code></td></tr>
+<tr><td>Extruir</td><td><kbd>E</kbd></td><td><kbd>7</kbd></td><td><code>3d.extruir</code></td></tr>
+<tr><td>Nueva cara desde vértices</td><td><kbd>F</kbd></td><td>—</td><td><code>3d.cara</code></td></tr>
+<tr><td>Recalcular Normales</td><td><kbd>Shift+N</kbd></td><td>—</td><td><code>3d.normales</code></td></tr>
+<tr><td>Loop Cut y Deslizar</td><td><kbd>Ctrl+R</kbd></td><td><kbd>8</kbd></td><td><code>3d.loopcut</code></td></tr>
+<tr><td>Conectar camino de vértices</td><td><kbd>J</kbd></td><td>—</td><td><code>3d.conectar</code></td></tr>
+<tr><td>Rasgar</td><td><kbd>V</kbd></td><td>—</td><td><code>3d.rip</code></td></tr>
+<tr><td>Deslizar vértices</td><td><kbd>Shift+V</kbd></td><td>—</td><td><code>3d.slide</code></td></tr>
+<tr><td>Separar</td><td><kbd>P</kbd></td><td>—</td><td><code>3d.separar</code></td></tr>
+<tr><td>Fusionar</td><td><kbd>M</kbd></td><td>—</td><td><code>3d.merge</code></td></tr>
+<tr><td>Menú contextual</td><td><kbd>W</kbd></td><td>—</td><td><code>3d.menuContexto</code></td></tr>
+<tr><td>Triangular</td><td><kbd>Ctrl+T</kbd></td><td>—</td><td><code>3d.triangular</code></td></tr>
+<tr><td>Menú UV</td><td><kbd>U</kbd></td><td>—</td><td><code>3d.menuUV</code></td></tr>
+</table></div>
+<h4>Durante una transformación (mover / rotar / escalar)</h4>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Atajo de fábrica</th><th>Nokia N95 (teclado del teléfono)</th><th>Nombre en atajos.ini</th></tr>
+<tr><td>Confirmar</td><td><kbd>Enter</kbd>, <kbd>NumEnter</kbd></td><td><kbd>OK</kbd></td><td><code>xf.confirmar</code></td></tr>
+<tr><td>Cancelar</td><td><kbd>Esc</kbd></td><td><kbd>C</kbd></td><td><code>xf.cancelar</code></td></tr>
+<tr><td>Eje X</td><td><kbd>X</kbd></td><td><kbd>1</kbd></td><td><code>xf.ejeX</code></td></tr>
+<tr><td>Eje Y</td><td><kbd>Y</kbd></td><td><kbd>2</kbd></td><td><code>xf.ejeY</code></td></tr>
+<tr><td>Eje Z</td><td><kbd>Z</kbd></td><td><kbd>3</kbd></td><td><code>xf.ejeZ</code></td></tr>
+<tr><td>Excluir X (plano)</td><td><kbd>Shift+X</kbd></td><td>—</td><td><code>xf.planoX</code></td></tr>
+<tr><td>Excluir Y (plano)</td><td><kbd>Shift+Y</kbd></td><td>—</td><td><code>xf.planoY</code></td></tr>
+<tr><td>Excluir Z (plano)</td><td><kbd>Shift+Z</kbd></td><td>—</td><td><code>xf.planoZ</code></td></tr>
+<tr><td>Radio proporcional +</td><td><kbd>PageUp</kbd></td><td>—</td><td><code>xf.radioMas</code></td></tr>
+<tr><td>Radio proporcional -</td><td><kbd>PageDown</kbd></td><td>—</td><td><code>xf.radioMenos</code></td></tr>
+</table></div>
+<h4>Editor UV</h4>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Atajo de fábrica</th><th>Nokia N95 (teclado del teléfono)</th><th>Nombre en atajos.ini</th></tr>
+<tr><td>Seleccionar todo</td><td><kbd>A</kbd></td><td>—</td><td><code>uv.seleccionarTodo</code></td></tr>
+<tr><td>Deseleccionar todo</td><td><kbd>Alt+A</kbd></td><td>—</td><td><code>uv.deseleccionar</code></td></tr>
+<tr><td>Invertir selección</td><td><kbd>Ctrl+I</kbd></td><td>—</td><td><code>uv.invertir</code></td></tr>
+<tr><td>Seleccionar Vinculado</td><td><kbd>L</kbd></td><td>—</td><td><code>uv.vinculado</code></td></tr>
+<tr><td>Selección por caja</td><td><kbd>B</kbd></td><td>—</td><td><code>uv.caja</code></td></tr>
+<tr><td>Mover</td><td><kbd>G</kbd></td><td><kbd>1</kbd></td><td><code>uv.mover</code></td></tr>
+<tr><td>Rotar</td><td><kbd>R</kbd></td><td><kbd>2</kbd></td><td><code>uv.rotar</code></td></tr>
+<tr><td>Escalar</td><td><kbd>S</kbd></td><td><kbd>3</kbd></td><td><code>uv.escalar</code></td></tr>
+<tr><td>Insertar Keyframe</td><td><kbd>I</kbd></td><td>—</td><td><code>uv.keyframe</code></td></tr>
+<tr><td>Insertar keyframe (todo)</td><td><kbd>Shift+I</kbd></td><td>—</td><td><code>uv.keyframeTodo</code></td></tr>
+<tr><td>Extruir</td><td><kbd>E</kbd></td><td>—</td><td><code>uv.extruir</code></td></tr>
+<tr><td>Duplicar</td><td><kbd>Shift+D</kbd></td><td>—</td><td><code>uv.duplicar</code></td></tr>
+<tr><td>Borrar</td><td><kbd>X</kbd>, <kbd>Delete</kbd></td><td>—</td><td><code>uv.borrar</code></td></tr>
+<tr><td>Encuadrar Selección</td><td><kbd>Num.</kbd></td><td>—</td><td><code>uv.encuadrar</code></td></tr>
+</table></div>
+<h4>Línea de tiempo</h4>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Atajo de fábrica</th><th>Nokia N95 (teclado del teléfono)</th><th>Nombre en atajos.ini</th></tr>
+<tr><td>Seleccionar todo</td><td><kbd>A</kbd></td><td>—</td><td><code>tl.seleccionarTodo</code></td></tr>
+<tr><td>Deseleccionar todo</td><td><kbd>Alt+A</kbd></td><td>—</td><td><code>tl.deseleccionar</code></td></tr>
+<tr><td>Invertir selección</td><td><kbd>Ctrl+I</kbd></td><td>—</td><td><code>tl.invertir</code></td></tr>
+<tr><td>Mover</td><td><kbd>G</kbd></td><td><kbd>1</kbd></td><td><code>tl.mover</code></td></tr>
+<tr><td>Escalar</td><td><kbd>S</kbd></td><td><kbd>3</kbd></td><td><code>tl.escalar</code></td></tr>
+<tr><td>Rotar manijas</td><td><kbd>R</kbd></td><td><kbd>2</kbd></td><td><code>tl.rotar</code></td></tr>
+<tr><td>Duplicar</td><td><kbd>Shift+D</kbd></td><td>—</td><td><code>tl.duplicar</code></td></tr>
+<tr><td>Borrar</td><td><kbd>X</kbd></td><td>—</td><td><code>tl.borrar</code></td></tr>
+<tr><td>Interpolación</td><td><kbd>T</kbd></td><td>—</td><td><code>tl.interp</code></td></tr>
+<tr><td>Tipo de manija</td><td><kbd>V</kbd></td><td>—</td><td><code>tl.handle</code></td></tr>
+<tr><td>Encuadrar Selección</td><td><kbd>Num.</kbd></td><td><kbd>0</kbd></td><td><code>tl.encuadrar</code></td></tr>
+<tr><td>Fotograma anterior</td><td><kbd>Left</kbd></td><td>—</td><td><code>tl.frameAnt</code></td></tr>
+<tr><td>Fotograma siguiente</td><td><kbd>Right</kbd></td><td>—</td><td><code>tl.frameSig</code></td></tr>
+<tr><td>Keyframe anterior</td><td><kbd>Down</kbd></td><td>—</td><td><code>tl.keyAnt</code></td></tr>
+<tr><td>Keyframe siguiente</td><td><kbd>Up</kbd></td><td>—</td><td><code>tl.keySig</code></td></tr>
+<tr><td>Ir al inicio</td><td><kbd>Home</kbd></td><td>—</td><td><code>tl.inicio</code></td></tr>
+<tr><td>Ir al final</td><td><kbd>End</kbd></td><td>—</td><td><code>tl.fin</code></td></tr>
+</table></div>
+<h4>Outliner</h4>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Atajo de fábrica</th><th>Nokia N95 (teclado del teléfono)</th><th>Nombre en atajos.ini</th></tr>
+<tr><td>Seleccionar todo</td><td><kbd>A</kbd></td><td>—</td><td><code>out.seleccionarTodo</code></td></tr>
+<tr><td>Deseleccionar todo</td><td><kbd>Alt+A</kbd></td><td>—</td><td><code>out.deseleccionar</code></td></tr>
+<tr><td>Invertir selección</td><td><kbd>Ctrl+I</kbd></td><td>—</td><td><code>out.invertir</code></td></tr>
+<tr><td>Mover (reordenar)</td><td><kbd>G</kbd></td><td><kbd>1</kbd></td><td><code>out.mover</code></td></tr>
+<tr><td>Renombrar</td><td><kbd>F2</kbd></td><td>—</td><td><code>out.renombrar</code></td></tr>
+<tr><td>Duplicar</td><td><kbd>Shift+D</kbd></td><td>—</td><td><code>out.duplicar</code></td></tr>
+<tr><td>Duplicar Vinculado</td><td><kbd>Alt+D</kbd></td><td>—</td><td><code>out.instancia</code></td></tr>
+<tr><td>Ocultar / Mostrar</td><td><kbd>H</kbd></td><td><kbd>2</kbd></td><td><code>out.ocultar</code></td></tr>
+<tr><td>Borrar</td><td><kbd>X</kbd>, <kbd>Delete</kbd></td><td><kbd>C</kbd></td><td><code>out.borrar</code></td></tr>
+<tr><td>Mostrar el activo</td><td><kbd>Num.</kbd></td><td>—</td><td><code>out.encuadrar</code></td></tr>
+</table></div>
+<h4>Editor 2D</h4>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Atajo de fábrica</th><th>Nokia N95 (teclado del teléfono)</th><th>Nombre en atajos.ini</th></tr>
+<tr><td>Seleccionar todo</td><td><kbd>A</kbd></td><td>—</td><td><code>2d.seleccionarTodo</code></td></tr>
+<tr><td>Deseleccionar todo</td><td><kbd>Alt+A</kbd></td><td>—</td><td><code>2d.deseleccionar</code></td></tr>
+<tr><td>Invertir selección</td><td><kbd>Ctrl+I</kbd></td><td>—</td><td><code>2d.invertir</code></td></tr>
+<tr><td>Mover</td><td><kbd>G</kbd></td><td><kbd>1</kbd></td><td><code>2d.mover</code></td></tr>
+<tr><td>Rotar</td><td><kbd>R</kbd></td><td><kbd>2</kbd></td><td><code>2d.rotar</code></td></tr>
+<tr><td>Escalar</td><td><kbd>S</kbd></td><td><kbd>3</kbd></td><td><code>2d.escalar</code></td></tr>
+<tr><td>Duplicar</td><td><kbd>Shift+D</kbd></td><td>—</td><td><code>2d.duplicar</code></td></tr>
+<tr><td>Borrar</td><td><kbd>X</kbd>, <kbd>Delete</kbd></td><td>—</td><td><code>2d.borrar</code></td></tr>
+<tr><td>Encuadrar Selección</td><td><kbd>Num.</kbd></td><td>—</td><td><code>2d.encuadrar</code></td></tr>
+<tr><td>Vista de juego</td><td><kbd>Num0</kbd></td><td>—</td><td><code>2d.vistaJuego</code></td></tr>
+</table></div>
+<h4>Propiedades (pasos de una rutina)</h4>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Atajo de fábrica</th><th>Nokia N95 (teclado del teléfono)</th><th>Nombre en atajos.ini</th></tr>
+<tr><td>Agarrar paso</td><td><kbd>G</kbd></td><td>—</td><td><code>props.agarrar</code></td></tr>
+<tr><td>Borrar paso</td><td><kbd>X</kbd>, <kbd>Delete</kbd></td><td>—</td><td><code>props.borrar</code></td></tr>
+<tr><td>Insertar Keyframe</td><td><kbd>I</kbd></td><td>—</td><td><code>props.keyframe</code></td></tr>
+</table></div>
+<h4>Editor de scripts</h4>
+<div class="tabla"><table>
+<tr><th>Función</th><th>Atajo de fábrica</th><th>Nokia N95 (teclado del teléfono)</th><th>Nombre en atajos.ini</th></tr>
+<tr><td>Guardar script</td><td><kbd>Ctrl+S</kbd></td><td>—</td><td><code>ide.guardar</code></td></tr>
+<tr><td>Deshacer</td><td><kbd>Ctrl+Z</kbd></td><td>—</td><td><code>ide.deshacer</code></td></tr>
+<tr><td>Copiar</td><td><kbd>Ctrl+C</kbd></td><td>—</td><td><code>ide.copiar</code></td></tr>
+<tr><td>Cortar</td><td><kbd>Ctrl+X</kbd></td><td>—</td><td><code>ide.cortar</code></td></tr>
+<tr><td>Pegar</td><td><kbd>Ctrl+V</kbd></td><td>—</td><td><code>ide.pegar</code></td></tr>
+<tr><td>Seleccionar todo</td><td><kbd>Ctrl+A</kbd></td><td>—</td><td><code>ide.todo</code></td></tr>
+</table></div>
+<!--ATAJOS-FIN-->
+<h3>Teclas fijas (no reasignables)</h3>
+<p>Algunas teclas no están en la lista porque dependen de lo que se está haciendo: las flechas al navegar menús y paneles, <kbd>Enter</kbd> y <kbd>Esc</kbd> en menús y ventanas, las flechas del outliner mientras se mueve una fila, el teclado del IDE al escribir, y el teclado del teléfono en el N95 (ver <a href="#navegacion">Navegación</a>).</p>
+
+<p class="pie">Whisk3D · Manual del editor (octubre 2026). Las tablas de atajos se generan desde <code>main/app/W3dAtajos.cpp</code> con <code>tools/genmanual_atajos.py</code>.</p>
+</div>
+</body>
+</html>

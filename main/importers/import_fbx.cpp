@@ -1,3 +1,4 @@
+#include "W3dLang.h"   // T(): los avisos salen en el idioma del editor
 #include "import_fbx.h"
 #include "import_obj.h"          // Wavefront / Face / FaceCorner / ExtractBaseName / EncolarTextura
 #include "objects/Mesh.h"
@@ -967,6 +968,6 @@ bool ImportFBX(const std::string& filepath) {
     if (importadas == 0) { w3dLogfE("ImportFBX: no se pudo armar ninguna malla"); ProgresoFin(); return false; }
     w3dLogf("ImportFBX: %d malla(s) importada(s) de %s", importadas, filepath.c_str());
     ProgresoFin();
-    Notificar("FBX imported successfully!", false); // toast verde de exito (igual que el OBJ)
+    Notificar(T("FBX imported successfully!"), false); // toast verde de exito (igual que el OBJ)
     return true;
 }

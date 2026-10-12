@@ -414,6 +414,7 @@ class Properties : public ViewportBase, public WithBorder, public Scrollable {
         // tarjeta RUTINA (objects/Rutina.h): PropsRutinaConstruir / PropsRutinaActualizar (ViewPorts/PropsRutina.cpp)
         GroupPropertie* propRutina;
         PropButton* propRuLista;            // "Render mode": la lista que se edita (All / Solid / ...)
+        PropFloat*  propRuRepetir;          // BUCLE DE RUTINA: cuantas veces corre la lista (1 = una rutina comun)
         PropButton* propRuUsar;             // que lista usa ese modo (desplegable)
         PropListMeshParts* propRuPasos;     // los pasos (modo 14)
         PropButtonRow* propRuFilaAdd;       // Add (desplegable agrupado) | Remove
@@ -650,6 +651,12 @@ class Properties : public ViewportBase, public WithBorder, public Scrollable {
         PropLabel* propModVacio;   // "(no properties yet)" para tipos sin params todavia
         PropBool*  propMirX; PropBool* propMirY; PropBool* propMirZ; // ejes
         PropButton* propMirTarget; // "Mirror Object" (dropdown: cualquier objeto)
+        // ARRAY: copias, desplazamiento relativo / constante (X/Y/Z de la UI), objeto de desplazamiento y soldar
+        PropFloat* propArrCount;
+        PropBool*  propArrRelOn; PropFloat* propArrRelX; PropFloat* propArrRelY; PropFloat* propArrRelZ;
+        PropBool*  propArrConstOn; PropFloat* propArrConstX; PropFloat* propArrConstY; PropFloat* propArrConstZ;
+        PropButton* propArrTarget;
+        PropBool*  propArrMerge; PropFloat* propArrMergeDist;
         // Boolean: la operacion (fila Intersect | Union | Difference, la activa en verde) + el objeto
         PropButtonRow* propBoolOp;
         PropButton*    propBoolTarget;

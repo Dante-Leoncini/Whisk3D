@@ -515,6 +515,9 @@ static bool gGanchoOk = ViewportOlvidarRegistrar(OlvidarOutliner);
 
 // ---- VISTA: Escena / Biblioteca / cada libreria + vincular / desvincular ----
 enum { VIS_VINCULAR = 900, VIS_CUADRICULA = 901, VIS_DESVINCULAR = 950 };
+// filtros de la vista Escena (checks: el menu queda abierto; la accion solo redibuja)
+enum { VIS_VER_CONSTRUCTOR = 880, VIS_VER_RUTINAS, VIS_VER_OJOS, VIS_VER_RENDER };
+extern bool g_outVerConstructor, g_outVerRutinas, g_outVerOjos, g_outVerRender;
 static void LibreriaElegida(const std::string& ruta) {
     std::string motivo;
     if (!W3dLibreriaVincular(ruta, &motivo)) { Notificar(std::string(T("Not linked")) + ": " + T(motivo.c_str()), true); return; }
@@ -552,6 +555,7 @@ static void AccionVistaElegida(int id) {
         return;
     }
     if (id == VIS_CUADRICULA) { o->CambiarCuadricula(!o->cuadricula); return; }   // (el teclado del N95)
+    if (id >= VIS_VER_CONSTRUCTOR && id <= VIS_VER_RENDER) { g_redraw = true; return; }   // (el check ya cambio el filtro)
     if (id >= VIS_DESVINCULAR) {
         const int i = id - VIS_DESVINCULAR;
         // el PROYECTO usa mallas suyas (soltadas desde su vista): se avisa ANTES y se ofrece (Si = cada una pasa a
@@ -589,6 +593,13 @@ static void ArmarMenuVista(Outliner* o) {
     if (o->EnBiblioteca()) {
         it = gMenuVista->Agregar(T("Grid"), VIS_CUADRICULA, IconType::cuadricula);
         if (it) it->verde = o->cuadricula;
+    }
+    // vista ESCENA: que se muestra en el arbol (el Constructor, las demas rutinas, las columnas de ojo y camara)
+    if (o->vista == OUT_VISTA_ESCENA) {
+        gMenuVista->AgregarCheck(T("Constructor"), VIS_VER_CONSTRUCTOR, &g_outVerConstructor);
+        gMenuVista->AgregarCheck(T("Routines"), VIS_VER_RUTINAS, &g_outVerRutinas);
+        gMenuVista->AgregarCheck(T("Visibility icons"), VIS_VER_OJOS, &g_outVerOjos, (int)IconType::visible);
+        gMenuVista->AgregarCheck(T("Render icons"), VIS_VER_RENDER, &g_outVerRender, (int)IconType::camera);
     }
     gMenuVista->Agregar(T("Link .w3d..."), VIS_VINCULAR, IconType::mas);
     if (W3dLibreriasCantidad() > 0) gMenuVista->Agregar(T("Unlink"), 0, IconType::borrar, gMenuDesvincular);
@@ -707,17 +718,17 @@ static void ArmarMenuObjeto(Outliner* o) {
     if (o->vista == OUT_VISTA_ESCENA) {
         const bool hay = (ObjActivo != NULL) || !ObjSelects.empty();
         MenuItem* it;
-        it = ConAtajo(gMenuObjeto->Agregar(T("Delete"), OBJ_BORRAR, IconType::borrar), "X");
+        it = ConAtajo(gMenuObjeto->Agregar(T("Delete"), OBJ_BORRAR, IconType::borrar), "@out.borrar");
         Gris(it, !hay);
-        it = ConAtajo(gMenuObjeto->Agregar(T("Rename"), OBJ_RENOMBRAR, IconType::lista), "F2");
+        it = ConAtajo(gMenuObjeto->Agregar(T("Rename"), OBJ_RENOMBRAR, IconType::lista), "@out.renombrar");
         Gris(it, (ObjActivo == NULL));
-        it = ConAtajo(gMenuObjeto->Agregar(T("Move"), OBJ_MOVER, IconType::arrowRight), "G");
+        it = ConAtajo(gMenuObjeto->Agregar(T("Move"), OBJ_MOVER, IconType::arrowRight), "@out.mover");
         Gris(it, (ObjActivo == NULL));
-        it = ConAtajo(gMenuObjeto->Agregar(T("Hide/Show"), OBJ_OCULTAR, IconType::visible), "H");
+        it = ConAtajo(gMenuObjeto->Agregar(T("Hide/Show"), OBJ_OCULTAR, IconType::visible), "@out.ocultar");
         Gris(it, !hay);
-        it = ConAtajo(gMenuObjeto->Agregar(T("Duplicate"), OBJ_DUPLICAR, IconType::object), "Shift+D");
+        it = ConAtajo(gMenuObjeto->Agregar(T("Duplicate"), OBJ_DUPLICAR, IconType::object), "@out.duplicar");
         Gris(it, !hay);
-        it = ConAtajo(gMenuObjeto->Agregar(T("Duplicate Linked"), OBJ_DUPLICAR_VINC, IconType::instance), "Alt+D");
+        it = ConAtajo(gMenuObjeto->Agregar(T("Duplicate Linked"), OBJ_DUPLICAR_VINC, IconType::instance), "@out.instancia");
         Gris(it, !hay);
         // PREFABS: lo elegido pasa a un prefab nuevo / la instancia activa se desempaqueta
         it = gMenuObjeto->Agregar(T("Create Prefab"), OBJ_CREAR_PREFAB, IconType::prefab);
@@ -735,15 +746,15 @@ static void ArmarMenuObjeto(Outliner* o) {
     o->Objetivo(rec, car, false);
     const bool ro = o->VistaSoloLectura();
     MenuItem* it;
-    it = ConAtajo(gMenuObjeto->Agregar(T("Delete"), REC_BORRAR, IconType::borrar), "X");
+    it = ConAtajo(gMenuObjeto->Agregar(T("Delete"), REC_BORRAR, IconType::borrar), "@out.borrar");
     Gris(it, ro || (rec.empty() && car.empty()));
-    it = ConAtajo(gMenuObjeto->Agregar(T("Rename"), REC_RENOMBRAR, IconType::lista), "F2");
+    it = ConAtajo(gMenuObjeto->Agregar(T("Rename"), REC_RENOMBRAR, IconType::lista), "@out.renombrar");
     Gris(it, ro || !f || (!f->carpeta && !f->renombrable));
     if (!ro && (!recM.empty() || !carM.empty())) {
         ArmarMenuMover(gMenuMover, CarpetaDeOrigen(recM, carM), carM);
-        ConAtajo(gMenuObjeto->Agregar(T("Move to Folder"), 0, IconType::carpeta, gMenuMover), "G");
+        ConAtajo(gMenuObjeto->Agregar(T("Move to Folder"), 0, IconType::carpeta, gMenuMover), "@out.mover");
     } else {
-        it = ConAtajo(gMenuObjeto->Agregar(T("Move to Folder"), 0, IconType::carpeta), "G");
+        it = ConAtajo(gMenuObjeto->Agregar(T("Move to Folder"), 0, IconType::carpeta), "@out.mover");
         Gris(it, true);
     }
     it = gMenuObjeto->Agregar(T("Duplicate Resource"), REC_DUPLICAR, IconType::object);
@@ -802,9 +813,9 @@ static void ArmarMenuSeleccion(Outliner* o) {
     (void)o;
     if (!gMenuSeleccion) { gMenuSeleccion = new PopupMenu(); gMenuSeleccion->action = AccionSeleccionElegida; }
     gMenuSeleccion->Limpiar();
-    ConAtajo(gMenuSeleccion->Agregar(T("Select All"), SEL_TODO, IconType::seleccion), "A");
-    ConAtajo(gMenuSeleccion->Agregar(T("Deselect All"), SEL_NADA, IconType::seleccion), "Alt+A");
-    ConAtajo(gMenuSeleccion->Agregar(T("Invert Selection"), SEL_INVERTIR, IconType::seleccion), "Ctrl+I");
+    ConAtajo(gMenuSeleccion->Agregar(T("Select All"), SEL_TODO, IconType::seleccion), "@out.seleccionarTodo");
+    ConAtajo(gMenuSeleccion->Agregar(T("Deselect All"), SEL_NADA, IconType::seleccion), "@out.deseleccionar");
+    ConAtajo(gMenuSeleccion->Agregar(T("Invert Selection"), SEL_INVERTIR, IconType::seleccion), "@out.invertir");
 }
 
 // ---- "+": las raices nuevas (RaicesEditor) + carpeta y material de la biblioteca ----
@@ -2126,13 +2137,13 @@ bool Outliner::AccionBorrar(bool confirmar) {
         // BORRAN (con Ctrl+Z), y el cartel lo dice
         if (gBorrarClaves.size() == 1 && mallasEnUso == 1) {
             snprintf(b, sizeof(b), T("\"%s\" is used by %d object(s). Delete it anyway?"), nombre.c_str(), usuariosEnUso);
-            snprintf(b + strlen(b), sizeof(b) - strlen(b), " %s", T("Its objects will be deleted too (Ctrl+Z brings them back)."));
+            snprintf(b + strlen(b), sizeof(b) - strlen(b), " %s", T("Its objects will be deleted too (Undo brings them back)."));
         } else if (gBorrarClaves.size() == 1)
             snprintf(b, sizeof(b), T("\"%s\" is in use by %d user(s). Delete it anyway? Its users will be left without it."), nombre.c_str(), usuariosEnUso);
         else {
             snprintf(b, sizeof(b), T("%d resources are in use (%d users). Delete them anyway? Their users will be left without them."), enUso, usuariosEnUso);
             if (mallasEnUso > 0)
-                snprintf(b + strlen(b), sizeof(b) - strlen(b), " %s", T("The objects of the 3D meshes will be deleted too (Ctrl+Z brings them back)."));
+                snprintf(b + strlen(b), sizeof(b) - strlen(b), " %s", T("The objects of the 3D meshes will be deleted too (Undo brings them back)."));
         }
     } else if (raices) {
         // una ESCENA, un JUEGO o un PREFAB entero se borra con todos sus objetos (con Ctrl+Z)

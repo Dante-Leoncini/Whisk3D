@@ -1590,6 +1590,15 @@ float ViejoBezier(const std::vector<keyFrame>& kf, size_t i, float frame) {
         float x = u*u*u*x0 + 3.0f*u*u*t*x1 + 3.0f*u*t*t*x2 + t*t*t*x3;
         if (x < frame) lo = t; else hi = t;
     }
+    // (2026-10: con los handles a un tercio del tramo en x -automaticos y vector- x(t) es una recta y EvalBezier
+    //  despeja t directo, sin biseccion. La referencia hace lo mismo; la biseccion de arriba queda de control: las
+    //  dos tienen que dar casi lo mismo, si no el atajo esta mal)
+    if (aDF == span / 3.0f && bDF == -span / 3.0f) {
+        float td = (frame - x0) / span;
+        if (td < 0.0f) td = 0.0f; else if (td > 1.0f) td = 1.0f;
+        if (fabsf(td - t) > 1e-5f) { float nan; unsigned un = 0x7FC00001u; memcpy(&nan, &un, 4); return nan; }
+        t = td;
+    }
     float u = 1.0f - t;
     return u*u*u*y0 + 3.0f*u*u*t*y1 + 3.0f*u*t*t*y2 + t*t*t*y3;
 }

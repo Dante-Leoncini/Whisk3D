@@ -2715,6 +2715,51 @@ static void ScrewPoly(PolyMesh& W, int axis, float angleDeg, float height, int s
     if (merge) SoldarPolyPorPos(W); // suelda polos + costura del torno 360
 }
 
+// SOLDAR por distancia: verts que caen en la misma celda de lado 'dist' pasan a ser uno (el Array, para unir copias)
+static void SoldarPolyDist(PolyMesh& W, float dist) {
+    if (dist <= 0.0f) dist = 1e-4f;
+    const float inv = 1.0f / dist;
+    const int nP = (int)W.P.size(); if (nP == 0) return;
+    std::map<std::string,int> mp; std::vector<int> remap(nP); std::vector<Vector3> np;
+    for (int i = 0; i < nP; i++) {
+        int q[3] = { (int)floorf(W.P[i].x * inv + 0.5f), (int)floorf(W.P[i].y * inv + 0.5f), (int)floorf(W.P[i].z * inv + 0.5f) };
+        std::string k((const char*)q, sizeof(q)); std::map<std::string,int>::iterator it = mp.find(k);
+        if (it != mp.end()) remap[i] = it->second; else { remap[i] = (int)np.size(); mp[k] = remap[i]; np.push_back(W.P[i]); }
+    }
+    for (int i = 0; i < nP; i++) np[(size_t)remap[i]] = W.P[i];   // (cualquiera de los del grupo: estan a menos de 'dist')
+    std::vector<std::vector<int> > nf; std::vector<int> nfm, nfs; std::vector<std::vector<float> > nfu; std::vector<std::vector<unsigned char> > nfc;
+    for (size_t f = 0; f < W.F.size(); f++) { const int m = (int)W.F[f].size();
+        std::vector<int> r; std::vector<float> ru; std::vector<unsigned char> rc;
+        for (int c = 0; c < m; c++) { const int v = remap[W.F[f][c]]; if (!r.empty() && r.back() == v) continue;
+            r.push_back(v); ru.push_back(W.Fuv[f][c*2]); ru.push_back(W.Fuv[f][c*2+1]);
+            for (int k = 0; k < 4; k++) rc.push_back(W.Fcol[f][c*4+k]); }
+        if (r.size() >= 2 && r.front() == r.back()) { r.pop_back(); ru.pop_back(); ru.pop_back(); for (int k = 0; k < 4; k++) rc.pop_back(); }
+        if (r.size() < 3) continue;
+        nf.push_back(r); nfm.push_back(W.Fmat[f]); nfs.push_back(PolySmoothDe(W, f)); nfu.push_back(ru); nfc.push_back(rc); }
+    std::vector<std::pair<int,int> > ne;
+    for (size_t e = 0; e < W.E.size(); e++) { const int a = remap[W.E[e].first], b = remap[W.E[e].second]; if (a != b) ne.push_back(std::make_pair(a, b)); }
+    W.P.swap(np); W.F.swap(nf); W.Fmat.swap(nfm); W.Fsmooth.swap(nfs); W.Fuv.swap(nfu); W.Fcol.swap(nfc); W.E.swap(ne);
+}
+// ARRAY: 'count' copias; la copia k es C^k aplicada a la original (C = el desplazamiento de UNA copia)
+static void ArrayPoly(PolyMesh& W, int count, const Matrix4& C, bool merge, float mergeDist) {
+    if (count < 2 || W.P.empty()) return;
+    const int nP = (int)W.P.size(); const size_t nF = W.F.size(), nE = W.E.size();
+    W.P.reserve((size_t)nP * count);
+    Matrix4 cur = C;
+    for (int k = 1; k < count; k++) {
+        const int base = k * nP;
+        for (int i = 0; i < nP; i++) W.P.push_back(cur * W.P[(size_t)i]);
+        for (size_t f = 0; f < nF; f++) {
+            std::vector<int> nf(W.F[f].size()); for (size_t c = 0; c < nf.size(); c++) nf[c] = base + W.F[f][c];
+            W.F.push_back(nf); W.Fmat.push_back(W.Fmat[f]); W.Fsmooth.push_back(PolySmoothDe(W, f));
+            W.Fuv.push_back(W.Fuv[f]); W.Fcol.push_back(W.Fcol[f]);
+        }
+        for (size_t e = 0; e < nE; e++) W.E.push_back(std::make_pair(base + W.E[e].first, base + W.E[e].second));
+        cur = C * cur;
+    }
+    if (merge) SoldarPolyDist(W, mergeDist);
+}
+
 // el modificador CORRE en el stack (arma poligonos y genera malla)? enEdit = la malla esta en Edit Mode.
 static bool ModificadorGeneraMalla(const Modifier* md, bool enEdit) {
     if (!md) return false;
@@ -2769,6 +2814,23 @@ static bool Mesh_AplicarStack(Mesh* m, bool render, PolyMesh& W, bool& outSmooth
             if (mod->ejeX) MirrorPoly(W, c, axX, mod->merge, mod->mergeDist);
             if (mod->ejeY) MirrorPoly(W, c, axY, mod->merge, mod->mergeDist);
             if (mod->ejeZ) MirrorPoly(W, c, axZ, mod->merge, mod->mergeDist);
+        } else if (mod->tipo == ModifierType::Array){
+            int n = (int)(mod->arrCount + 0.5f); if (n < 1) n = 1; if (n > 10000) n = 10000;
+            // el tamano de la malla (lo que va del modificador anterior) para el desplazamiento RELATIVO
+            Vector3 mn(1e30f,1e30f,1e30f), mx(-1e30f,-1e30f,-1e30f);
+            for (size_t i = 0; i < W.P.size(); i++) { const Vector3& p = W.P[i];
+                if (p.x < mn.x) mn.x = p.x; if (p.y < mn.y) mn.y = p.y; if (p.z < mn.z) mn.z = p.z;
+                if (p.x > mx.x) mx.x = p.x; if (p.y > mx.y) mx.y = p.y; if (p.z > mx.z) mx.z = p.z; }
+            const Vector3 tam = W.P.empty() ? Vector3(0,0,0) : (mx - mn);
+            // ejes de la UI -> internos: X = x, Y (profundidad) = z, Z (arriba) = y
+            Vector3 paso(0,0,0);
+            if (mod->arrRelOn)   paso = paso + Vector3(mod->arrRelX * tam.x, mod->arrRelZ * tam.y, mod->arrRelY * tam.z);
+            if (mod->arrConstOn) paso = paso + Vector3(mod->arrConstX, mod->arrConstZ, mod->arrConstY);
+            Matrix4 C; C.Identity(); C.m[12] = paso.x; C.m[13] = paso.y; C.m[14] = paso.z;   // (Matrix4 no se inicializa sola)
+            // OBJETO de desplazamiento: su transformacion respecto de este objeto se acumula en cada copia
+            if (mod->target && mod->target != (Object*)m){ Matrix4 Wo, Wt; m->GetWorldMatrixBase(Wo); mod->target->GetWorldMatrixBase(Wt);
+                Matrix4 iWo; InvAffineMod(Wo, iWo); C = C * (iWo * Wt); }
+            ArrayPoly(W, n, C, mod->arrMerge, mod->arrMergeDist);
         } else if (mod->tipo == ModifierType::Boolean){
             // BOOLEAN: la otra malla (target) se trae al espacio LOCAL de esta (base, sin constraints ni
             // anim: misma regla que el Mirror) y se opera sobre poligonos. Sin target valido, no hace nada.

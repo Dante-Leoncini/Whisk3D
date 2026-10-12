@@ -118,12 +118,21 @@ struct OutFila {
 static bool EsConstructor(Object* o) {
     return o && o->getType() == ObjectType::rutina && ((Rutina*)o)->constructor;
 }
-// cuantos hijos de la raiz son constructor (los primeros); el separador va despues del ultimo
-static size_t ConstructorTope() {
-    if (!SceneCollection) return 0;
-    size_t n = 0;
-    while (n < SceneCollection->Childrens.size() && EsConstructor(SceneCollection->Childrens[n])) n++;
-    return n;
+// el SEPARADOR (la fila "Arriba: una vez al empezar. Abajo: cada cuadro." con su linea) se SACO: el Constructor ya es
+// una fila desplegable con adentro lo que corre una sola vez. Devolver 0 apaga el separador en TODOS los recorridos
+// (medir, dibujar, fila -> objeto, clicks) a la vez. (Ademas la medida lo SUMABA al alto en vez de restarlo: la lista
+// quedaba dos renglones mas corta y el scroll no llegaba al final.)
+static size_t ConstructorTope() { return 0; }
+
+// FILTROS de la vista Escena (menu del OJO de la barra): ocultar el Constructor, las demas rutinas, y las columnas de
+// iconos de visibilidad (ojo) y de render (camara)
+bool g_outVerConstructor = true;
+bool g_outVerRutinas = true;
+bool g_outVerOjos = true;
+bool g_outVerRender = true;
+static bool OutOculto(Object* o) {
+    if (!o || o->getType() != ObjectType::rutina) return false;
+    return EsConstructor(o) ? !g_outVerConstructor : !g_outVerRutinas;
 }
 
 // Constructor
@@ -209,6 +218,7 @@ Outliner::Outliner() : ViewportBase() {
 
 //para hacer el calculo si o si hay que hacerlo de forma recursiva
 void Outliner::CalcularRenglon(Object* obj, int* MaxPosXtemp, int* MaxPosYtemp){
+    if (OutOculto(obj)) return;   // filtrado por el menu del ojo: no ocupa fila
     int rowWidth = marginGS + IconSizeGS + gapGS + IconSizeGS + gapGS + IconSizeGS + marginGS;
     *MaxPosYtemp -= RenglonHeightGS;
     int textWidth = obj->name.size() * LetterWidthGS;
@@ -301,7 +311,7 @@ void Outliner::Render(){
         }
     }
     else if (SceneCollection){
-        struct C { static int rec(Object* o){ int n = 1;
+        struct C { static int rec(Object* o){ if (OutOculto(o)) return 0; int n = 1;
             if (OutTieneHijos(o) && o->desplegado){
                 n += Arm2DCant(o);                        // una fila virtual por armature 2D
                 for (size_t i = 0; i < o->Childrens.size(); i++) n += rec(o->Childrens[i]);
@@ -531,6 +541,7 @@ bool Outliner::FilaEnVista(unsigned fila) const {
 }
 
 void Outliner::DibujarRenglon(Object* obj, bool hidden, int prof){
+    if (OutOculto(obj)) return;
     // CULLING: solo se dibuja la fila que cae en el area visible, ubicada por su numero y su profundidad (sin recorrer
     // la matriz por las demas: una coleccion desplegada con 900 hijos eran 12 mil llamadas por cuadro)
     const unsigned fila = filaDFS++;
@@ -658,6 +669,7 @@ void Outliner::DibujarArm2D(Mesh* m, int idx, bool hidden, int prof){
 }
 
 void Outliner::DibujarOjos(Object* obj, bool hidden, bool noRender){
+    if (OutOculto(obj)) return;
     // CULLING: mismo criterio que DibujarRenglon (solo las filas que se ven, ubicadas por su numero)
     const unsigned fila = filaDFS++;
     if (FilaEnVista(fila)) {
@@ -665,12 +677,12 @@ void Outliner::DibujarOjos(Object* obj, bool hidden, bool noRender){
         w3dEngine::Translatef(0, (GLfloat)((int)fila * (int)RenglonHeightGS), 0);
         // OJO (visible): ocultado por si mismo o por un PADRE oculto -> tenue
         SetColorID(ColorID::grisUI, hidden ? 0.5f : 1.0f);
-        W3dDrawStrip4(IconMesh, IconsUV[static_cast<size_t>(obj->visible ? IconType::visible : IconType::hidden)]->uvs);
+        if (g_outVerOjos) W3dDrawStrip4(IconMesh, IconsUV[static_cast<size_t>(obj->visible ? IconType::visible : IconType::hidden)]->uvs);
         // CAMARA (renderizar) a la DERECHA del ojo: si el objeto NO se renderiza -> camara_off;
         // si SI pero un PADRE no se renderiza -> camara encendida pero SEMI-TRANSPARENTE (igual que el ojo)
         w3dEngine::Translatef((GLfloat)(IconSizeGS + gapGS), 0, 0);
         SetColorID(ColorID::grisUI, noRender ? 0.5f : 1.0f);
-        W3dDrawStrip4(IconMesh, IconsUV[static_cast<size_t>(obj->renderizable ? IconType::camera : IconType::camera_off)]->uvs);
+        if (g_outVerRender) W3dDrawStrip4(IconMesh, IconsUV[static_cast<size_t>(obj->renderizable ? IconType::camera : IconType::camera_off)]->uvs);
         w3dEngine::PopMatrix();
     }
 
@@ -862,6 +874,7 @@ void Outliner::event_key_up(int tecla){
 // fila visible N (respetando desplegado) -> objeto REAL o fila VIRTUAL del armature 2D.
 // Devuelve true si la fila cayo en este subarbol (out queda cargado).
 static bool W3dFilaVisibleRec(Object* obj, int& fila, int prof, OutFila& out) {
+    if (OutOculto(obj)) return false;   // filtrado: no ocupa fila
     if (fila == 0) { out.obj = obj; out.arm2d = NULL; out.prof = prof; return true; }
     fila--;
     if (obj->desplegado) {
@@ -902,6 +915,7 @@ static Object* W3dObjetoEnFila(int fila, int* profOut) {
 
 // numero de fila visible de un objeto (-1 si no esta a la vista)
 static bool W3dBuscarFila(Object* obj, Object* objetivo, int* fila) {
+    if (OutOculto(obj)) return false;
     if (obj == objetivo) return true;
     (*fila)++;
     if (obj->desplegado) {
@@ -1244,6 +1258,9 @@ void Outliner::ClickSeleccionar(int mx, int my) {
                     (mx - x) <  (width - marginGS - borderGS - reservaBarra);
     bool enOjo = !enCamara && (mx - x) >= (width - 2*IconSizeGS - gapGS - marginGS - borderGS - reservaBarra) &&
                  (mx - x) < (width - IconSizeGS - gapGS - marginGS - borderGS - reservaBarra);
+    // columnas ocultas por el menu del ojo: no se tocan (el click cae en la fila)
+    if (!g_outVerRender) enCamara = false;
+    if (!g_outVerOjos) enOjo = false;
     // ---- fila VIRTUAL del armature 2D: INERTE. No se selecciona, no se arrastra, no se empareja,
     // no tiene ojo/camara y no se despliega (los huesos se listan y se editan en la pestania
     // "Armature 2D" del panel Properties). El click se COME aca para que no caiga en la malla.

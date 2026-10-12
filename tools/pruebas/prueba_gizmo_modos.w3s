@@ -1,0 +1,10 @@
+# Gizmo con tres modos (eventos de mouse y de dedo REALES): un click rapido sobre el gizmo pasa al modo siguiente
+# (mover -> rotar -> escalar) sin cambiar nada ni dejar paso de undo; el semicirculo de un eje rota y el punto agarrado
+# sigue al puntero; la punta cuadrada escala solo ese eje; un toque con el dedo tambien cambia de modo.
+# REGRESION: el toggle "vista" (que solo existe en Edit Mode / pintura) prendido NO esconde el gizmo en Object Mode
+# (antes desaparecia y no habia boton para recuperarlo).
+add cube
+selobj Cubo.001
+vistatactil 1
+gizmomodos
+vistatactil 0

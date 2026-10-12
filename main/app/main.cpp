@@ -1,3 +1,7 @@
+#ifndef _WIN32
+#include <sys/stat.h>   // mkdir (la carpeta temporal del usuario en --script)
+#endif
+#include "app/W3dTeclado.h"   // teclado en pantalla de Android + pantalla completa automatica
 #include "audio/W3dAudio.h"   // pausa del mixer con el juego en pausa
 #include "w3dGraphics.h" // abstraccion de graficos (independencia de OpenGL)
 #include "render/OpcionesRender.h"   // RenderType / g_redraw: son del editor
@@ -316,6 +320,46 @@ EM_JS(void, WebDescargarArchivo, (const char* pathPtr, const char* namePtr), {
 // (el respaldo del Core usa clock(), que mide CPU). Se registra en el arranque, ver W3dSetReloj.
 static unsigned int RelojSDL() { return SDL_GetTicks(); }
 
+// ---------------------------------------------------------------------------------------------------------------
+//  VENTANA + CONTEXTO GL, CON INTENTOS DE RESPALDO.
+//  No todos los drivers tienen una ventana con multisampling o con estencil: maquinas virtuales, GPUs viejas,
+//  algunos XWayland, Mesa por software... Pedir una sola combinacion fija y salir si no estaba dejaba al editor sin
+//  abrir ("Error SDL_CreateWindow: Couldn't find matching GLX visual", reporte de un usuario del AppImage). Ahora se
+//  prueba de lo mas lindo a lo mas basico y se queda con lo primero que abra; lo que se resigna va al log.
+//  W3D_GL_PRUEBA_RESPALDO=1 hace fallar el primer intento a proposito (para probar el respaldo sin ese driver).
+// ---------------------------------------------------------------------------------------------------------------
+struct W3dIntentoGL { int msaa, estencil, z; const char* que; };
+static bool g_glSinMsaa = false;   // se pidio antialiasing y el driver no lo dio (se avisa al abrir)
+static SDL_Window* CrearVentanaGL(const char* titulo, int w, int h, Uint32 flags, bool antialias, SDL_GLContext* ctxOut) {
+    static const W3dIntentoGL kIntentos[] = {
+        { 4, 8, 24, "antialiasing 4x, estencil 8, profundidad 24" },
+        { 2, 8, 24, "antialiasing 2x, estencil 8, profundidad 24" },
+        { 0, 8, 24, "sin antialiasing, estencil 8, profundidad 24" },
+        { 0, 0, 24, "sin antialiasing ni estencil, profundidad 24" },
+        { 0, 0, 16, "sin antialiasing ni estencil, profundidad 16" },
+    };
+    const int n = (int)(sizeof(kIntentos) / sizeof(kIntentos[0]));
+    const bool forzarFallo = std::getenv("W3D_GL_PRUEBA_RESPALDO") != NULL;
+    for (int i = antialias ? 0 : 2; i < n; i++) {
+        const W3dIntentoGL& t = kIntentos[i];
+        SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, t.msaa ? 1 : 0);
+        SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, t.msaa);
+        SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, t.estencil);
+        SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, t.z);
+        if (forzarFallo && i == (antialias ? 0 : 2)) { w3dLogfW("Ventana GL (%s): fallo forzado por W3D_GL_PRUEBA_RESPALDO", t.que); continue; }
+        SDL_Window* win = SDL_CreateWindow(titulo, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, w, h, flags);
+        if (!win) { w3dLogfW("Ventana GL (%s): %s", t.que, SDL_GetError()); continue; }
+        SDL_GLContext ctx = SDL_GL_CreateContext(win);
+        if (!ctx) { w3dLogfW("Contexto GL (%s): %s", t.que, SDL_GetError()); SDL_DestroyWindow(win); continue; }
+        if (antialias && t.msaa == 0) g_glSinMsaa = true;
+        if (i > (antialias ? 0 : 2)) w3dLogf("Ventana GL abierta con respaldo: %s", t.que);
+        *ctxOut = ctx;
+        return win;
+    }
+    *ctxOut = NULL;
+    return NULL;
+}
+
 // Función simple para leer el ini
 Config loadConfig(const std::string& filename) {
     Config cfg;
@@ -578,6 +622,7 @@ static void ProcesarEvento(SDL_Event& e) {
     if (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_RESIZED) {
         winW = e.window.data1;
         winH = e.window.data2;
+        W3dTecladoRedimension(winW, winH);   // Android: el teclado achica la ventana -> maximizar el viewport que lo pidio
         W3dPantallaAlto = winH;
         MenuPantallaW = winW;
         MenuPantallaH = winH;
@@ -1038,14 +1083,22 @@ int main(int argc, char* argv[]) {
 
     // OJO: asignar el cfg GLOBAL (no declarar uno local que lo tape) -> asi ConstructUniversal
     // y todo lo demas ven los valores cargados (ej. scale para SetGlobalScale).
+    // El config del USUARIO vive en la carpeta escribible (SDL_GetPrefPath): res/ puede ser de solo lectura (el
+    // AppImage, el .deb instalado en /usr/share, el APK). Si todavia no guardo nada, vale el de fabrica de res/.
+    {
+        const std::string cfgUsuario = w3dFileSystem::GetUserDataDir() + "/config.ini";
+        FILE* fu = fopen(cfgUsuario.c_str(), "rb");
+        const bool hayUsuario = (fu != NULL);
+        if (fu) fclose(fu);
     #ifdef __ANDROID__
-        cfg = loadConfig("res/config.ini");
-        // Android es de alta densidad y se usa con el dedo -> forzamos escala 3
-        // (el config compartido viene en 2 para PC). Asi la UI queda comoda al tacto.
-        cfg.scale = 3;
+        cfg = loadConfig(hayUsuario ? cfgUsuario : std::string("res/config.ini"));
+        // Android es de alta densidad y se usa con el dedo -> escala 3 de fabrica (el config compartido viene en 2
+        // para PC). Si el usuario ya eligio una escala en Ajustes, se respeta la suya.
+        if (!hayUsuario) cfg.scale = 3;
     #else
-        cfg = loadConfig(w3dFileSystem::GetResDir() + "/config.ini");
+        cfg = loadConfig(hayUsuario ? cfgUsuario : w3dFileSystem::GetResDir() + "/config.ini");
     #endif
+    }
     winW = cfg.width;  winH = cfg.height;  // aplicar el tamano del config a la ventana
                                         // (antes quedaba el default 640x480: el config no se usaba)
     // AUTO KEY: el config MANDA sobre el global de animacion (que arranca apagado). Reporte del
@@ -1055,22 +1108,34 @@ int main(int argc, char* argv[]) {
     g_w3dLogNivel = cfg.logs;
 
     //TODO: Esto muy probablemente de problemas en gama baja? no se si deba configurable
-    if (cfg.enableAntialiasing) {
-        SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
-        SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 4);
-    }
-
+    // (multisample / estencil / profundidad: los prueba CrearVentanaGL, de lo mas completo a lo mas basico)
     #ifdef __ANDROID__
-        window = SDL_CreateWindow("Whisk3D Pre-Alpha",
-                                SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                                winW, winH,
-                                SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
+        window = CrearVentanaGL("Whisk3D Pre-Alpha", winW, winH,
+                                SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE,
+                                cfg.enableAntialiasing, &glContext);
+        if (window) W3dPantallaCompletaAuto(window);   // sin notch: pantalla completa (la barra de arriba ocupa espacio valioso)
     #else
         // fullscreen -> maximizada; sino respeta width/height del config (util para
         // probar tamanos chicos, ej. 240x320 estilo N95 con scale=1)
         Uint32 windowFlags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE;
         if (cfg.fullscreen) windowFlags |= SDL_WINDOW_MAXIMIZED;
-        window = SDL_CreateWindow("Whisk3D Pre-Alpha", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, winW, winH, windowFlags);
+        window = CrearVentanaGL("Whisk3D Pre-Alpha", winW, winH, windowFlags, cfg.enableAntialiasing, &glContext);
+        #if !defined(__EMSCRIPTEN__) && !defined(_WIN32)
+        // ULTIMO RESPALDO: en una sesion Wayland, SDL abre por X11 (XWayland) y ahi puede no haber GLX usable.
+        // Si nada abrio, se reintenta con el driver Wayland, que crea el contexto por EGL y no necesita GLX.
+        if (!window && std::getenv("WAYLAND_DISPLAY")) {
+            const char* drv = SDL_GetCurrentVideoDriver();
+            if (drv && std::string(drv) != "wayland") {
+                w3dLogfW("Sin ventana GL por %s: se prueba con Wayland (EGL)", drv);
+                SDL_QuitSubSystem(SDL_INIT_VIDEO);
+                SDL_setenv("SDL_VIDEODRIVER", "wayland", 1);
+                if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0)
+                    window = CrearVentanaGL("Whisk3D Pre-Alpha", winW, winH, windowFlags, cfg.enableAntialiasing, &glContext);
+                else
+                    w3dLogfW("Wayland no inicio: %s", SDL_GetError());
+            }
+        }
+        #endif
     #endif
 
     if (window) { // titulo con la VERSION (fecha de build): asi una captura de pantalla dice de que version es
@@ -1080,20 +1145,14 @@ int main(int argc, char* argv[]) {
     }
 
     if (!window) {
-        std::cerr << "Error SDL_CreateWindow: " << SDL_GetError() << std::endl;
+        std::cerr << "Error: no se pudo abrir una ventana OpenGL con ninguna configuracion (ver whisk3d.log)." << std::endl;
+        w3dLogfE("Error SDL_CreateWindow / SDL_GL_CreateContext: ningun intento anduvo (ultimo: %s)", SDL_GetError());
         SDL_Quit();
         return -1;
     }
+    if (g_glSinMsaa) w3dLogfW("Antialiasing pedido pero el driver no lo ofrece: se abre sin multisampling");
 
     SDL_GetWindowSize(window, &winW, &winH);
-
-    glContext = SDL_GL_CreateContext(window);
-    if (!glContext) {
-        std::cerr << "Error SDL_GL_CreateContext: " << SDL_GetError() << std::endl;
-        SDL_DestroyWindow(window);
-        SDL_Quit();
-        return -1;
-    }
 
 #ifdef W3D_WEBGL
     // backend ES2/WebGL: carga GL2.0 + compila los shaders. TIENE que ir antes de initGL
@@ -1174,6 +1233,11 @@ int main(int argc, char* argv[]) {
     for (int ai = 1; ai < argc; ai++) {
         if (std::string(argv[ai]) == "--script" && ai + 1 < argc) {
             g_w3dCambiosSinCartel = true;   // (el harness no muestra el cartel: el comando 'cambios' lo consulta)
+            { extern bool g_transformRedoAuto; g_transformRedoAuto = false; }   // (el panel de la ultima operacion: solo si la prueba lo pide)
+            #ifndef _WIN32
+            { const char* tmp = "/tmp/w3d_prueba_usuario"; mkdir(tmp, 0755); w3dFileSystem::SetUserDataDir(tmp); }   // (config.ini y demas del usuario: no se tocan)
+            #endif
+            { extern void W3dAtajosRutaFijar(const std::string&); W3dAtajosRutaFijar("/tmp/w3d_prueba_atajos.ini"); }   // (los atajos de fabrica; el atajos.ini del usuario no se toca)
             { extern void W3dScriptSemillaFija(bool); W3dScriptSemillaFija(true); }   // (el mismo script juega siempre igual: las capturas se comparan)
             bool ok = W3dRunScript(argv[ai + 1]);
             SDL_Quit();

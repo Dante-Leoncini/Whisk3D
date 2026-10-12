@@ -7,7 +7,11 @@
 #include "edit/MeshEdit.h"   // W3dRenderCornersSeparados
 #include "ui/ViewPorts/Gizmo.h"   // gizmo de mover
 #include "edit/Proporcional.h"   // proportional editing: tecla O, rueda = radio, circulo de influencia
-#include "io/TexturaEditada.h"    // TEXTURE PAINT: los pixeles de la textura de la parte activa
+#include "io/TexturaEditada.h"
+#include "io/UVExportar.h"        // pintura de textura: si las UV se pisan, se despliegan antes de pintar
+#include "edit/UVUnwrap.h"         // W3dSmartUVProjectTodas
+#include "io/TexturaGenerada.h"   // la textura para pintar (del color del material)
+#include "objects/Materials.h"     // MaterialDefecto    // TEXTURE PAINT: los pixeles de la textura de la parte activa
 #include "ui/ViewPorts/UVEditor.h"  // UVParteMostrada: que parte (material) se pinta
 #include "W3dAviso.h"
 #include <stdlib.h>   // getenv (debug de oclusion)
@@ -26,7 +30,8 @@
 #include "WhiskUI/draw/glesdraw.h"
 #include "ui/W3dColors.h" // W3dColores: colores del editor (piso, ejes de transformacion)
 #include "render/OpcionesRender.h" // flags del overlay de normales
-#include "render/RayTracer.h"      // vista Rendered + "Ray Tracing": la imagen trazada por CPU encima de la escena GL
+#include "render/RayTracer.h"
+#include "ViewPorts/PopUp/TransformRedoPanel.h"   // ajustar la ultima operacion (mover/rotar/escalar)      // vista Rendered + "Ray Tracing": la imagen trazada por CPU encima de la escena GL
 #include "render/EscenaRender.h"   // EL pase 3D COMPARTIDO con el runtime del juego compilado
 #include "objects/Mesh.h"          // overlay de estadisticas (vertsAgrupados, faces3d)
 #include "objects/EditMesh.h"      // foco al centro de la seleccion en edit mode
@@ -141,6 +146,8 @@ Viewport3D::Viewport3D(Vector3 pos){
     b = new Button("", IconType::mas); b->rol = BR_Add; b->desplegable = true; BarButtons.push_back(b);
     b = new Button(T("Mesh")); b->rol = BR_Mesh;                               // Transform/Snap/Delete comun
         b->desplegable = true; b->visible = false; BarButtons.push_back(b); // SOLO en edit mode
+    b = new Button("", (int)IconType::guardar); b->rol = BR_TexGuardar;   // pintura de textura: guardar lo pintado
+        b->desplegable = true; b->visible = false; BarButtons.push_back(b);
     b = new Button("", IconType::keyframe); b->rol = BR_Animation;   // icono rombo (keyframe)
     b->desplegable = true;
     BarButtons.push_back(b);
@@ -181,7 +188,7 @@ Viewport3D::Viewport3D(Vector3 pos){
     // "View" (toggle): en Edit Mode, con 1 dedo orbitar/panear/zoom aunque haya una operacion en curso.
     b = new Button("", (int)IconType::monitor); b->rol = TBR_View; b->centrado = true; b->cuadrado = true; ToolButtons.push_back(b); // "vista": el mismo monitor del menu View de arriba
     b = new Button("", (int)IconType::curve); b->rol = TBR_Proporcional; b->centrado = true; b->cuadrado = true; ToolButtons.push_back(b); // proportional editing: toggle de un click
-    b = new Button("Global"); b->rol = TBR_Orient; b->desplegable = true; ToolButtons.push_back(b);
+    b = new Button(T("Global")); b->rol = TBR_Orient; b->desplegable = true; ToolButtons.push_back(b);
     b = new Button("X"); b->rol = TBR_EjeX; b->centrado = true; b->cuadrado = true; ToolButtons.push_back(b);
     b = new Button("Y"); b->rol = TBR_EjeY; b->centrado = true; b->cuadrado = true; ToolButtons.push_back(b);
     b = new Button("Z"); b->rol = TBR_EjeZ; b->centrado = true; b->cuadrado = true; ToolButtons.push_back(b);
@@ -191,14 +198,14 @@ Viewport3D::Viewport3D(Vector3 pos){
     // El RADIO y el VALOR no tienen boton: son la fila de barras deslizables de arriba de la
     // toolbar (ViewportBase::RenderBrushBar), que se arrastran sin abrir ningun desplegable.
     b = new Button("+");     b->rol = TBR_PincelModo;   b->centrado = true; b->cuadrado = true; b->visible = false; ToolButtons.push_back(b);
-    b = new Button("Group"); b->rol = TBR_Grupo;        b->desplegable = true; b->visible = false; ToolButtons.push_back(b);
+    b = new Button(T("Group")); b->rol = TBR_Grupo;        b->desplegable = true; b->visible = false; ToolButtons.push_back(b);
     // MARCAS: icono de malla. Prendido = se ven los cuadraditos pintables y el pincel trabaja
     // sobre ELLOS (al valor de la barra, sin falloff), no sobre la superficie.
     b = new Button("", (int)IconType::mesh); b->rol = TBR_Marcas; b->centrado = true; b->cuadrado = true; b->visible = false; ToolButtons.push_back(b);
     b = new Button("", (int)IconType::selVertex); b->rol = TBR_PorVertice; b->centrado = true; b->cuadrado = true; b->visible = false; ToolButtons.push_back(b); // vertex color: por vertice / por corner
     // FALLOFF: abre el editor (lista de presets + curva custom). El texto/icono del boton
     // muestran el falloff ACTIVO, asi se ve cual esta puesto sin abrir nada.
-    b = new Button("Smooth"); b->rol = TBR_Falloff; b->desplegable = true; b->visible = false; ToolButtons.push_back(b);
+    b = new Button(T("Smooth")); b->rol = TBR_Falloff; b->desplegable = true; b->visible = false; ToolButtons.push_back(b);
     // VERTEX PAINT: el color del pincel, como cuadradito relleno (el boton se tinta con el color
     // vivo). Lo abre el ColorPicker de siempre -> color libre o color de PALETA por indice.
     b = new Button(""); b->rol = TBR_ColorPincel; b->centrado = true; b->cuadrado = true; b->visible = false; ToolButtons.push_back(b);
@@ -224,16 +231,16 @@ Viewport3D::Viewport3D(Vector3 pos){
     if (!MenuSelect){
         MenuSelect = new PopupMenu();
         MenuSelect->titulo = T("Select");   // el boton es un icono sin texto -> el menu lleva titulo
-        MenuSelect->Agregar(T("All"), 0)->atajo = "A";
-        MenuSelect->Agregar(T("None"), 1)->atajo = "Alt A";
-        MenuSelect->Agregar(T("Invert"), 2)->atajo = "Ctrl I";
+        MenuSelect->Agregar(T("All"), 0)->atajo = "@3d.seleccionarTodo";
+        MenuSelect->Agregar(T("None"), 1)->atajo = "@3d.deseleccionar";
+        MenuSelect->Agregar(T("Invert"), 2)->atajo = "@3d.invertir";
     }
     if (!MenuObject){
         // submenu Transform (Move/Rotate/Scale = G/R/S)
         MenuTransform = new PopupMenu();
-        MenuTransform->Agregar(T("Move"), 100)->atajo = "G";
-        MenuTransform->Agregar(T("Rotate"), 101)->atajo = "R";
-        MenuTransform->Agregar(T("Scale"), 102)->atajo = "S";
+        MenuTransform->Agregar(T("Move"), 100)->atajo = "@3d.mover";
+        MenuTransform->Agregar(T("Rotate"), 101)->atajo = "@3d.rotar";
+        MenuTransform->Agregar(T("Scale"), 102)->atajo = "@3d.escalar";
         // submenu Set Origin (mueve el origen y/o la geometria)
         MenuSetOrigin = new PopupMenu();
         MenuSetOrigin->Agregar(T("Geometry to Origin"), 200);
@@ -257,15 +264,15 @@ Viewport3D::Viewport3D(Vector3 pos){
         MenuObject = new PopupMenu(); MenuObject->titulo = T("Object");
         MenuObject->Agregar(T("Transform"), 0, -1, MenuTransform);    // abre submenu
         MenuObject->Agregar(T("Set Origin"), 4, -1, MenuSetOrigin);  // abre submenu
-        MenuObject->Agregar(T("Apply"), 6, -1, MenuApply)->atajo = "Ctrl A"; // submenu Location/Rotation/Scale/All
-        MenuObject->Agregar(T("Duplicate Objects"), 1)->atajo = "Shift D";
-        MenuObject->Agregar(T("Duplicate Linked"), 2)->atajo = "Alt D";
-        MenuObject->Agregar(T("Join"), 5)->atajo = "Ctrl J"; // une las mallas seleccionadas en el objeto activo
-        // Set/Clear Parent (Ctrl P / Ctrl Alt P): submenus construidos en LayoutInput.cpp (reusan los mismos que
+        MenuObject->Agregar(T("Apply"), 6, -1, MenuApply)->atajo = "@3d.aplicar"; // submenu Location/Rotation/Scale/All
+        MenuObject->Agregar(T("Duplicate Objects"), 1)->atajo = "@3d.duplicar";
+        MenuObject->Agregar(T("Duplicate Linked"), 2)->atajo = "@3d.instancia";
+        MenuObject->Agregar(T("Join"), 5)->atajo = "@3d.unir"; // une las mallas seleccionadas en el objeto activo
+        // Set/Clear Parent (Ctrl P / Alt P): submenus construidos en LayoutInput.cpp (reusan los mismos que
         // los atajos). Solo aparecen aca -> solo en Object Mode (MenuObject no se muestra en Edit).
-        MenuObject->Agregar(T("Set Parent"),   0, -1, LayoutSubmenuSetParent())->atajo = "Ctrl P";
-        MenuObject->Agregar(T("Clear Parent"), 0, -1, LayoutSubmenuClearParent())->atajo = "Ctrl Alt P";
-        MenuObject->Agregar(T("Delete"), 3)->atajo = "X";
+        MenuObject->Agregar(T("Set Parent"),   0, -1, LayoutSubmenuSetParent())->atajo = "@global.emparentar";
+        MenuObject->Agregar(T("Clear Parent"), 0, -1, LayoutSubmenuClearParent())->atajo = "@global.desemparentar";
+        MenuObject->Agregar(T("Delete"), 3)->atajo = "@3d.borrar";
         // PREFABS (io/PrefabsEditor.h): lo elegido pasa a un prefab nuevo (queda una instancia) / la instancia
         // activa se desempaqueta en objetos comunes
         MenuObject->Agregar(T("Create Prefab"), 700, IconType::prefab);
@@ -284,7 +291,7 @@ Viewport3D::Viewport3D(Vector3 pos){
         MenuInsertKey->Agregar(T("Scale Only"), 533);
         MenuAnimation = new PopupMenu();
         MenuAnimation->titulo = T("Animation");   // el boton es un icono sin texto -> el menu lleva titulo
-        MenuAnimation->Agregar(T("Insert Keyframe"), 510, IconType::keyframe, MenuInsertKey)->atajo = "I";
+        MenuAnimation->Agregar(T("Insert Keyframe"), 510, IconType::keyframe, MenuInsertKey)->atajo = "@3d.keyframe";
         // CAPAS de la animacion del objeto: "vertex animation", "normal animation" y "animar los UV"
         // son la MISMA animacion con capas distintas. Este submenu deja elegir cual capturar en vez de
         // dejar que la decida el editor desde el que insertaste (que es el default y sigue estando).
@@ -303,76 +310,77 @@ Viewport3D::Viewport3D(Vector3 pos){
         // menu "Pose" (Pose Mode): Insert Keyframe + submenu Transform (Move/Rotate/Scale). Reusa MenuTransform.
         extern PopupMenu* MenuPose;
         // (regla de los titulos: el boton de contexto es un icono sin texto -> su menu lleva titulo)
-        MenuPose = new PopupMenu(); MenuPose->titulo = "Pose";
-        MenuPose->Agregar(T("Insert Keyframe"), 500, IconType::armature, MenuInsertKey)->atajo = "I"; // submenu de canales
+        MenuPose = new PopupMenu(); MenuPose->titulo = T("Pose");
+        MenuPose->Agregar(T("Insert Keyframe"), 500, IconType::armature, MenuInsertKey)->atajo = "@3d.keyframe"; // submenu de canales
         MenuPose->Agregar(T("Transform"), 0, -1, MenuTransform); // Move(G)/Rotate(R)/Scale(S) -> ids 100/101/102
         // Clear Transform: resetea la pose de los huesos SELECCIONADOS a rest. All (T+R+S) / Translation / Rotation / Scale.
         static PopupMenu* MenuClearPose = NULL;
         MenuClearPose = new PopupMenu();
         MenuClearPose->Agregar(T("All"), 520, IconType::armature);          // T+R+S -> PoseClearTransform(0)
-        MenuClearPose->Agregar(T("Translation"), 521)->atajo = "Alt G";     // PoseClearTransform(1)
-        MenuClearPose->Agregar(T("Rotation"), 522)->atajo = "Alt R";        // PoseClearTransform(2)
-        MenuClearPose->Agregar(T("Scale"), 523)->atajo = "Alt S";           // PoseClearTransform(3)
+        MenuClearPose->Agregar(T("Translation"), 521)->atajo = "@3d.limpiarPos";     // PoseClearTransform(1)
+        MenuClearPose->Agregar(T("Rotation"), 522)->atajo = "@3d.limpiarRot";        // PoseClearTransform(2)
+        MenuClearPose->Agregar(T("Scale"), 523)->atajo = "@3d.limpiarEsc";           // PoseClearTransform(3)
         MenuPose->Agregar(T("Clear Transform"), 0, -1, MenuClearPose);
         // menu "Mesh" (Edit Mode): comun a vertice/borde/cara. Transform (arriba), Snap y Delete (abajo). Los
         // submenus Snap/Delete se reusan de LayoutInput.cpp. La accion (LayoutAccionMesh) se asigna al abrirlo.
         // submenu Transform de EDIT (como el de objeto pero + Shrink/Fatten, que solo tiene sentido en malla)
         static PopupMenu* MenuTransformEdit = NULL;
         MenuTransformEdit = new PopupMenu();
-        MenuTransformEdit->Agregar(T("Move"), 100)->atajo = "G";
-        MenuTransformEdit->Agregar(T("Rotate"), 101)->atajo = "R";
-        MenuTransformEdit->Agregar(T("Scale"), 102)->atajo = "S";
-        MenuTransformEdit->Agregar(T("Shrink/Fatten"), 103)->atajo = "Alt S"; // cada vert por su normal
+        MenuTransformEdit->Agregar(T("Move"), 100)->atajo = "@3d.mover";
+        MenuTransformEdit->Agregar(T("Rotate"), 101)->atajo = "@3d.rotar";
+        MenuTransformEdit->Agregar(T("Scale"), 102)->atajo = "@3d.escalar";
+        MenuTransformEdit->Agregar(T("Shrink/Fatten"), 103)->atajo = "@3d.limpiarEsc"; // cada vert por su normal
         MenuMesh = new PopupMenu();
         MenuMesh->titulo = T("Mesh");
         MenuMesh->Agregar(T("Transform"), 0, -1, MenuTransformEdit);        // arriba de todo (Move/Rotate/Scale/Shrink)
-        MenuMesh->Agregar(T("Duplicate"), 314)->atajo = "Shift D";          // comun a vertice/borde/cara
-        MenuMesh->Agregar(T("Separate"), 316)->atajo = "P";                 // caras selec -> mesh NUEVO
-        MenuMesh->Agregar(T("Merge"), 0, -1, LayoutSubmenuMerge())->atajo = "M"; // suelda verts (limpia duplicados)
+        MenuMesh->Agregar(T("Duplicate"), 314)->atajo = "@3d.duplicar";          // comun a vertice/borde/cara
+        MenuMesh->Agregar(T("Separate"), 316)->atajo = "@3d.separar";                 // caras selec -> mesh NUEVO
+        MenuMesh->Agregar(T("Merge"), 0, -1, LayoutSubmenuMerge())->atajo = "@3d.merge"; // suelda verts (limpia duplicados)
         // Auto Merge (opt-in, OFF por defecto): al confirmar un move suelda los verts movidos con los que queden
         // a <= Threshold. Con el auto merge apagado, "Threshold" se ve en gris (->gris = &g_autoMerge).
         // ids 390/391: fuera del rango 0-7 (que LayoutAccionMesh rutea a Snap) y sin caso en LayoutAccionObject
         // (no-op). El toggle del check y el set del slider los hace el propio item; la accion no tiene que hacer nada.
         MenuMesh->AgregarCheck(T("Auto Merge"), 390, &g_autoMerge);
-        MenuMesh->AgregarFloat("Threshold", 391, &g_autoMergeThreshold, 0.0f, 0.1f)->gris = &g_autoMerge;
+        MenuMesh->AgregarFloat(T("Threshold"), 391, &g_autoMergeThreshold, 0.0f, 0.1f)->gris = &g_autoMerge;
         MenuMesh->Agregar(T("Normals"), 0, -1, LayoutSubmenuNormals()); // Recalculate Normals + Flip
-        MenuMesh->Agregar("Snap", 0, -1, LayoutSubmenuSnap())->atajo = "Shift S";
-        MenuMesh->Agregar(T("Delete"), 360, -1, LayoutSubmenuDelete())->atajo = "X"; // abajo de todo
+        MenuMesh->Agregar(T("Snap"), 0, -1, LayoutSubmenuSnap())->atajo = "@global.menuSnap";
+        MenuMesh->Agregar(T("Delete"), 360, -1, LayoutSubmenuDelete())->atajo = "@3d.borrar"; // abajo de todo
     }
     if (!MenuView){
         // boton "View" (antes de Select): submenu Viewpoint con los 7 puntos de vista (mismos atajos del numpad).
         // ids 400-406 -> LayoutAccionView -> Viewport3DActive->SetViewpoint(...). Antes eran atajos "ocultos".
         MenuViewpoint = new PopupMenu();
-        MenuViewpoint->Agregar(T("Camera"), 400)->atajo = "Num 0";
-        MenuViewpoint->Agregar(T("Top"),    401)->atajo = "Num 7";
-        MenuViewpoint->Agregar(T("Bottom"), 402)->atajo = "Ctrl Num 7";
-        MenuViewpoint->Agregar(T("Front"),  403)->atajo = "Num 1";
-        MenuViewpoint->Agregar(T("Back"),   404)->atajo = "Ctrl Num 1";
-        MenuViewpoint->Agregar(T("Right"),  405)->atajo = "Num 3";
-        MenuViewpoint->Agregar(T("Left"),   406)->atajo = "Ctrl Num 3";
+        MenuViewpoint->Agregar(T("Camera"), 400)->atajo = "@3d.vistaCamara";
+        MenuViewpoint->Agregar(T("Top"),    401)->atajo = "@3d.vistaArriba";
+        MenuViewpoint->Agregar(T("Bottom"), 402)->atajo = "@3d.vistaAbajo";
+        MenuViewpoint->Agregar(T("Front"),  403)->atajo = "@3d.vistaFrente";
+        MenuViewpoint->Agregar(T("Back"),   404)->atajo = "@3d.vistaAtras";
+        MenuViewpoint->Agregar(T("Right"),  405)->atajo = "@3d.vistaDerecha";
+        MenuViewpoint->Agregar(T("Left"),   406)->atajo = "@3d.vistaIzquierda";
         // submenu Cameras: setear el objeto activo como camara / ver desde la camara activa
         MenuCameras = new PopupMenu();
-        MenuCameras->Agregar(T("Set Active Object as Camera"), 410)->atajo = "Ctrl Num 0";
-        MenuCameras->Agregar(T("Active Camera"),               411)->atajo = "Num 0";
+        MenuCameras->Agregar(T("Set Active Object as Camera"), 410)->atajo = "@3d.camaraActiva";
+        MenuCameras->Agregar(T("Active Camera"),               411)->atajo = "@3d.vistaCamara";
         // REGLA DE DISENO de los titulos: un menu que se abre desde algo SIN TEXTO (un icono, o un atajo de
         // teclado) lleva titulo -- es lo unico que te dice que estas mirando. Si lo abre un boton/item que YA
         // decia el texto, NO lleva: repetirlo es ruido. El boton View ahora es un icono -> titulo.
         MenuView = new PopupMenu(); MenuView->titulo = T("View");
         MenuView->Agregar(T("Cameras"),   0, -1, MenuCameras);   // abre submenu (antes de Viewpoint)
         MenuView->Agregar(T("Viewpoint"), 0, -1, MenuViewpoint); // abre submenu
-        MenuView->Agregar(T("Frame Selected"), 420)->atajo = "Numpad ."; // enfocar la seleccion (EnfocarObject)
+        MenuView->Agregar(T("Frame Selected"), 420)->atajo = "@3d.encuadrar"; // enfocar la seleccion (EnfocarObject)
         MenuItemLocalView = MenuView->Agregar(T("Local View"), 422); // aisla la seleccion en ESTE viewport (tilde = activo)
-        MenuItemLocalView->atajo = "/";
-        MenuView->Agregar(T("Perspective/Ortho"), 407)->atajo = "Num 5"; // alterna perspectiva/ortografica
+        MenuItemLocalView->atajo = "@3d.vistaLocal";
+        MenuView->Agregar(T("Perspective/Ortho"), 407)->atajo = "@3d.perspectiva"; // alterna perspectiva/ortografica
         // Lock Orbit: item REGULAR (no checkbox) -> al tocarlo togglea Y CIERRA el menu. El
         // tilde (verde) se refresca al abrir el menu, con el estado del viewport activo (LayoutInput).
         MenuItemLockOrbit = MenuView->Agregar(T("Lock Orbit"), 421);
+        MenuItemLockOrbit->atajo = "@tel:9";   // solo el keypad del N95 tiene tecla para esto
     }
     if (!MenuRender){
         // REGLA DE DISENO de los titulos: un menu que se abre desde algo SIN TEXTO (un icono, o un atajo de
         // teclado) lleva titulo -- es lo unico que te dice que estas mirando. Si lo abre un boton/item que YA
         // decia el texto, NO lleva: repetirlo es ruido.
-        MenuRender = new PopupMenu(); MenuRender->titulo = "Render";
+        MenuRender = new PopupMenu(); MenuRender->titulo = T("Render");
         MenuRender->Agregar(T("Render Preview"), 0);
         MenuRender->Agregar(T("Material Preview"), 1);
         MenuRender->Agregar(T("Solid Preview"), 2);
@@ -390,9 +398,9 @@ Viewport3D::Viewport3D(Vector3 pos){
         // orientacion usada al constrenir a un eje (X/Y/Z) y por el extrude. Default Global.
         MenuOrient = new PopupMenu();
         MenuOrient->titulo = T("Transform Orientations");
-        MenuOrient->Agregar("Global", 0);
-        MenuOrient->Agregar("Local", 1);
-        MenuOrient->Agregar("Normal", 3); // = la direccion de la normal (lo que hace el extrude)
+        MenuOrient->Agregar(T("Global"), 0);
+        MenuOrient->Agregar(T("Local"), 1);
+        MenuOrient->Agregar(T("Normal"), 3); // = la direccion de la normal (lo que hace el extrude)
         MenuOrient->Agregar(T("View"), 2);
     }
     if (!MenuMode){
@@ -504,13 +512,13 @@ void Viewport3D::AbrirMenuOverlays(int x, int y){
     MenuOverlayNormals->AgregarCheck(T("Vertex Normal"), 7, &OverlayVertexNormal, IconType::normalVertex);
     MenuOverlayNormals->AgregarCheck(T("Custom Normal"), 8, &OverlayCustomNormal, IconType::normalCustom);
     MenuOverlayNormals->AgregarCheck(T("Face Normal"),   9, &OverlayFaceNormal,   IconType::normalFace);
-    MenuOverlayNormals->AgregarFloat("Normal Size",  10, &OverlayNormalSize, 0.0f, 1.0f);
+    MenuOverlayNormals->AgregarFloat(T("Normal Size"),  10, &OverlayNormalSize, 0.0f, 1.0f);
     MenuOverlays->Agregar(T("Normals"), 7, IconType::normalVertex, MenuOverlayNormals)->gris = &showOverlays;
     // submenu "Statistics": texto blanco arriba a la derecha del viewport. Cada linea es un toggle independiente. Sin titulo.
     static PopupMenu* MenuOverlayStats = NULL;
     if (!MenuOverlayStats) MenuOverlayStats = new PopupMenu();
     MenuOverlayStats->Limpiar();
-    MenuOverlayStats->AgregarCheck("FPS",      12, &OverlayFps);
+    MenuOverlayStats->AgregarCheck(T("FPS"),      12, &OverlayFps);
     MenuOverlayStats->AgregarCheck(T("Vertices"), 17, &OverlayStatVertices);
     MenuOverlayStats->AgregarCheck(T("Faces"),    18, &OverlayStatFaces);
     MenuOverlayStats->AgregarCheck("GL Calls", 21, &OverlayStatGL); // llamadas GL por frame (draw/bind/estado)
@@ -528,7 +536,7 @@ void Viewport3D::AbrirMenuOverlays(int x, int y){
     // del marco se pintan OPACAS como en el dispositivo. OFF (default) = atenuadas,
     // para ver que hay afuera y auditar el culling. NO se grisa con Show Overlays
     // (es parte de la vista de juego, no un overlay de edicion).
-    MenuOverlays->AgregarCheck(T("Letterbox Negro"), 15, &letterboxNegro);
+    MenuOverlays->AgregarCheck(T("Black Letterbox"), 15, &letterboxNegro);
     MenuOverlays->action = NULL; // el toggle lo hace el propio item (checkbox)
     MenuOverlays->Abrir(x, y, MenuPantallaW, MenuPantallaH);
     MenuAbierto = MenuOverlays;
@@ -1314,9 +1322,45 @@ static Texture* WP3DTexturaActiva(Mesh* m, int& parte) {
     Material* mt = m->materialsGroup[(size_t)parte].material;
     return (mt && mt->texture && mt->texture->iID) ? mt->texture : NULL;
 }
+// PINTAR SOBRE EL OBJETO aunque todavia no tenga textura (el cubo por defecto): al primer trazo se arma lo que hace falta
+//  - un material PROPIO para la parte (el por defecto es compartido: pintarlo pintaria todos los objetos)
+//  - UV que no se pisen (sin UV, o todas las caras en el mismo lugar como el cubo por defecto): Smart UV de todas
+//  - una textura EN MEMORIA del color del material (con "*": no se guarda hasta "Guardar" desde la barra o el editor UV)
+static bool WP3DCrearTexturaPintura(Mesh* m) {
+    if (!m || m->materialsGroup.empty()) return false;
+    int parte = UVParteMostrada(m);
+    if (parte < 0 || parte >= (int)m->materialsGroup.size()) parte = 0;
+    Material* mt = m->materialsGroup[(size_t)parte].material;
+    if (!mt || mt == MaterialDefecto) { extern Material* NuevoMaterialEnMeshPart(Mesh*, int); mt = NuevoMaterialEnMeshPart(m, parte); }
+    if (!mt) return false;
+    if (!m->uv || UVFraccionSolapada(m) > 0.05f) {
+        std::string msg;
+        if (W3dSmartUVProjectTodas(m, 66.0f, 0.02f, msg)) Notificar(T("Automatic UVs were generated to paint"), false);
+    }
+    if (!m->uv) return false;
+    // 256x256 en todas las plataformas: alcanza para pintar y en el telefono/Android una mas grande era lentisima
+    // (pedido del dueno). El que quiera mas definicion crea la textura a mano en el editor UV (Nueva Textura).
+    const int lado = 256;
+    // la textura arranca con el color del material, y el material pasa a blanco: el color queda en la textura (sino
+    // se multiplicaria dos veces y lo pintado se veria oscuro)
+    const float col[4] = { mt->diffuse[0], mt->diffuse[1], mt->diffuse[2], 1.0f };
+    std::vector<unsigned char> px; W3dGenerarTextura(TexGenBlank, lado, lado, col, false, px);
+    Texture* tex = TexEditCrear(m->name + "_pintura", px, lado, lado, false);
+    if (!tex) return false;
+    mt->texture = tex; mt->textureOn = true;
+    mt->diffuse[0] = mt->diffuse[1] = mt->diffuse[2] = 1.0f;
+    { extern void RebindMaterialMeshPart(); RebindMaterialMeshPart(); }
+    Notificar(std::string(T("New paint texture")) + ": " + TexEditEtiqueta(tex), false);
+    return true;
+}
+Texture* WP3DTexturaPintada() {
+    Mesh* m = (ObjActivo && ObjActivo->getType() == ObjectType::mesh) ? (Mesh*)ObjActivo : NULL;
+    int parte = -1; return m ? WP3DTexturaActiva(m, parte) : NULL;
+}
 static bool WP3DTexTrazoIniciar(Mesh* m) {
     int parte = -1;
     Texture* t = WP3DTexturaActiva(m, parte);
+    if (!t && WP3DCrearTexturaPintura(m)) t = WP3DTexturaActiva(m, parte);
     if (!t || !m->uv) { Notificar(T("Texture Paint: the active part has no texture"), true); return false; }
     g_wpTexEd = TexEditObtener(t);
     if (!g_wpTexEd) return false;
@@ -1330,18 +1374,18 @@ static void WP3DDabTextura(Viewport3D* vp, Mesh* m, const Matrix4& W, const GLfl
     const int tw = te->w, th = te->h;
     const float r2 = radioPx * radioPx;
     const bool oclusion = WPOclusionActiva(m);
-    std::vector<Vector3> wp; std::vector<float> sx, sy;
+    std::vector<Vector3> wp; std::vector<float> sx, sy, sw;
     for (size_t f = 0; f < m->faces3d.size(); f++) {
         const MeshFace& F = m->faces3d[f];
         const int n = (int)F.idx.size();
         if (F.mat != parte || n < 3) continue;
-        wp.resize((size_t)n); sx.resize((size_t)n); sy.resize((size_t)n);
+        wp.resize((size_t)n); sx.resize((size_t)n); sy.resize((size_t)n); sw.resize((size_t)n);
         bool ok = true; float mnx = 1e30f, mny = 1e30f, mxx = -1e30f, mxy = -1e30f;
         for (int c = 0; c < n && ok; c++) {
             const int rv = F.idx[(size_t)c];
             if (rv < 0 || rv >= m->vertexSize) { ok = false; break; }
             wp[(size_t)c] = W * Vector3(pos[rv*3], pos[rv*3+1], pos[rv*3+2]);
-            if (!vp->ProyectarPunto(wp[(size_t)c], sx[(size_t)c], sy[(size_t)c])) { ok = false; break; }
+            if (!vp->ProyectarPunto(wp[(size_t)c], sx[(size_t)c], sy[(size_t)c], &sw[(size_t)c])) { ok = false; break; }
             if (sx[(size_t)c] < mnx) mnx = sx[(size_t)c]; if (sx[(size_t)c] > mxx) mxx = sx[(size_t)c];
             if (sy[(size_t)c] < mny) mny = sy[(size_t)c]; if (sy[(size_t)c] > mxy) mxy = sy[(size_t)c];
         }
@@ -1363,13 +1407,51 @@ static void WP3DDabTextura(Viewport3D* vp, Mesh* m, const Matrix4& W, const GLfl
             int x0 = (int)floorf(u0 < u1 ? (u0 < u2 ? u0 : u2) : (u1 < u2 ? u1 : u2)), x1 = (int)ceilf(u0 > u1 ? (u0 > u2 ? u0 : u2) : (u1 > u2 ? u1 : u2));
             int y0 = (int)floorf(v0 < v1 ? (v0 < v2 ? v0 : v2) : (v1 < v2 ? v1 : v2)), y1 = (int)ceilf(v0 > v1 ? (v0 > v2 ? v0 : v2) : (v1 > v2 ? v1 : v2));
             if (x0 < 0) x0 = 0; if (y0 < 0) y0 = 0; if (x1 > tw - 1) x1 = tw - 1; if (y1 > th - 1) y1 = th - 1;
-            const Vector3& P0 = wp[0]; const Vector3& P1 = wp[(size_t)t]; const Vector3& P2 = wp[(size_t)t + 1];
+            const float S0x = sx[0], S0y = sy[0], S1x = sx[(size_t)t], S1y = sy[(size_t)t], S2x = sx[(size_t)t + 1], S2y = sy[(size_t)t + 1];
+            const float w0 = sw[0], w1 = sw[(size_t)t], w2 = sw[(size_t)t + 1];
+            // SOLO LO QUE CAE BAJO EL PINCEL. Antes se recorria el triangulo ENTERO en la textura (con un cubo y una
+            // textura grande, cientos de miles de texels por toque, y un trazo rapido son decenas de toques): en
+            // Android pintar era lentisimo. El circulo del pincel se lleva al espacio UV (con perspectiva: pesos l/w)
+            // y el recorrido se recorta a su caja. El test exacto de abajo sigue igual.
+            {
+                const float ax = S1x - S0x, ay = S1y - S0y, cx = S2x - S0x, cy = S2y - S0y;
+                const float dets = ax * cy - cx * ay;
+                if (fabsf(dets) > 1e-6f) {
+                    const float invs = 1.0f / dets;
+                    float umin = 1e30f, umax = -1e30f, vmin = 1e30f, vmax = -1e30f;
+                    bool caja = true;
+                    for (int k = 0; k <= 16 && caja; k++) {
+                        const float ang = (float)k * (6.2831853f / 16.0f);
+                        const float px = (k == 16) ? bx : bx + cosf(ang) * radioPx, py = (k == 16) ? by : by + sinf(ang) * radioPx;
+                        const float qx = px - S0x, qy = py - S0y;
+                        const float l1 = (qx * cy - cx * qy) * invs, l2 = (ax * qy - qx * ay) * invs, l0 = 1.0f - l1 - l2;
+                        const float q0 = l0 / w0, q1 = l1 / w1, q2 = l2 / w2, den = q0 + q1 + q2;
+                        if (den <= 1e-12f) { caja = false; break; }   // detras del horizonte: sin recorte (todo el triangulo)
+                        const float g0 = q0 / den, g1 = q1 / den, g2 = q2 / den;
+                        const float uu = g0 * u0 + g1 * u1 + g2 * u2, vv = g0 * v0 + g1 * v1 + g2 * v2;
+                        if (uu < umin) umin = uu; if (uu > umax) umax = uu;
+                        if (vv < vmin) vmin = vv; if (vv > vmax) vmax = vv;
+                    }
+                    if (caja) {
+                        const float lado = (umax - umin > vmax - vmin) ? umax - umin : vmax - vmin;
+                        const float mg = 2.0f + 0.05f * lado;   // margen: el circulo se muestreo en 16 puntos
+                        const int cx0 = (int)floorf(umin - mg), cx1 = (int)ceilf(umax + mg);
+                        const int cy0 = (int)floorf(vmin - mg), cy1 = (int)ceilf(vmax + mg);
+                        if (cx0 > x0) x0 = cx0; if (cx1 < x1) x1 = cx1;
+                        if (cy0 > y0) y0 = cy0; if (cy1 < y1) y1 = cy1;
+                        if (x0 > x1 || y0 > y1) continue;   // el pincel no toca este triangulo
+                    }
+                }
+            }
             for (int y = y0; y <= y1; y++) for (int x = x0; x <= x1; x++) {
                 const float dx = x + 0.5f - u0, dy = y + 0.5f - v0;
                 const float b1 = (dx * e2y - e2x * dy) * inv, b2 = (e1x * dy - dx * e1y) * inv, b0 = 1.0f - b1 - b2;
                 if (b0 < -0.02f || b1 < -0.02f || b2 < -0.02f) continue;   // (un poquito afuera tambien: sin huecos en los bordes)
-                const Vector3 p = P0 * b0 + P1 * b1 + P2 * b2;
-                float ssx, ssy; if (!vp->ProyectarPunto(p, ssx, ssy)) continue;
+                // donde cae en pantalla: el promedio de las esquinas pesado por b*w es EXACTAMENTE la proyeccion del
+                // punto (numerador y profundidad son lineales en el triangulo), sin proyectar texel por texel
+                const float pw0 = b0 * w0, pw1 = b1 * w1, pw2 = b2 * w2, pw = pw0 + pw1 + pw2;
+                if (pw <= 1e-9f) continue;
+                const float ssx = (pw0 * S0x + pw1 * S1x + pw2 * S2x) / pw, ssy = (pw0 * S0y + pw1 * S1y + pw2 * S2y) / pw;
                 const float ddx = ssx - bx, ddy = ssy - by, d2 = ddx * ddx + ddy * ddy;
                 if (d2 > r2) continue;
                 if (oclusion) { const int fv = WPOclusionCaraEn(ssx, ssy); if (fv >= 0 && fv != (int)f) continue; }   // tapado
@@ -1402,7 +1484,7 @@ static void WP3DPintarTextura(Viewport3D* vp, int mx, int my) {
         for (int i = 1; i <= n; i++) { const float f = (float)i / (float)n; WP3DDabTextura(vp, m, W, pos, parte, g_wpTexPrevX + dx * f, g_wpTexPrevY + dy * f, br.radioPx, rgba, br.fuerza, fo, rect); }
     } else WP3DDabTextura(vp, m, W, pos, parte, bx, by, br.radioPx, rgba, br.fuerza, fo, rect);
     g_wpTexPrevX = bx; g_wpTexPrevY = by;
-    if (rect[0] >= 0) { TexEditSubir(g_wpTexEd, rect[0], rect[1], rect[2], rect[3]); g_wpTexCambio = true; }
+    if (rect[0] >= 0) { TexEditSubir(g_wpTexEd, rect[0], rect[1], rect[2], rect[3], true); g_wpTexCambio = true; }
     g_redraw = true;
 }
 // (prueba del harness) un toque de pintura de textura en (mx,my) de pantalla, con su trazo completo
@@ -1411,8 +1493,23 @@ bool W3dTexPaint3DHarness(Viewport3D* vp, int mx, int my) {
     if (!vp || !m || !WP3DTexTrazoIniciar(m)) return false;
     WP3DPintarTextura(vp, mx, my);
     const bool cambio = g_wpTexCambio;
-    UndoTexturaConfirmar(g_wpTexCambio); g_wpTexEd = NULL; g_wpTexCambio = false;
+    TexEditFinTrazo(g_wpTexEd); UndoTexturaConfirmar(g_wpTexCambio); g_wpTexEd = NULL; g_wpTexCambio = false;
     return cambio;
+}
+// (prueba del harness) un TRAZO de n toques seguidos sin soltar, como el dedo arrastrando en circulo alrededor del
+// centro (radio en px). Devuelve los ms que tardo la pintura (sin el deshacer del final), o -1.
+double W3dTexPaint3DTrazoMs(Viewport3D* vp, int n, float radio) {
+    Mesh* m = (ObjActivo && ObjActivo->getType() == ObjectType::mesh) ? (Mesh*)ObjActivo : NULL;
+    if (!vp || !m || n < 1 || !WP3DTexTrazoIniciar(m)) return -1.0;
+    const float cx = (float)(vp->x + vp->width / 2), cy = (float)(vp->y + vp->height / 2);
+    const Uint32 t0 = SDL_GetTicks();
+    for (int i = 0; i < n; i++) {
+        const float a = (float)i * 0.15f;
+        WP3DPintarTextura(vp, (int)(cx + cosf(a) * radio), (int)(cy + sinf(a) * radio));
+    }
+    const double ms = (double)(SDL_GetTicks() - t0);
+    TexEditFinTrazo(g_wpTexEd); UndoTexturaConfirmar(g_wpTexCambio); g_wpTexEd = NULL; g_wpTexCambio = false;
+    return ms;
 }
 static void WP3DPasada(Viewport3D* vp, int mx, int my) {
     if (InteractionMode == VertexPaint)       WP3DPintarColor(vp, mx, my);
@@ -1451,7 +1548,7 @@ static void WP3DPendienteResolver(Viewport3D* vp, int mx, int my, bool forzar) {
     if (movio) WP3DPasada(vp, mx, my);
 }
 static void WP3DTrazoFin() {
-    if (InteractionMode == TexturePaint) { UndoTexturaConfirmar(g_wpTexCambio); g_wpTexEd = NULL; g_wpTexCambio = false; return; }
+    if (InteractionMode == TexturePaint) { TexEditFinTrazo(g_wpTexEd); UndoTexturaConfirmar(g_wpTexCambio); g_wpTexEd = NULL; g_wpTexCambio = false; return; }
     if (InteractionMode == VertexPaint) { UndoColorConfirmar(g_wpColorCambio); g_wpColorCambio = false; }
     else                                  WeightPaintTrazoFin();
 }
@@ -1562,9 +1659,61 @@ void WP3DPinturaTick(Viewport3D* vp) {   // por frame (lo llama el render): la e
     WP3DPendienteResolver(vp, g_wpCursorX, g_wpCursorY, false);
     g_redraw = true;   // seguir redibujando hasta resolver
 }
+// VISTA PREVIA DEL RADIO: al cambiar el radio del pincel (arrastrando la barra, con las flechas o tipeando el valor)
+// se ve en el CENTRO del viewport el area que va a tener, en su tamano real; se desvanece un rato despues. Detecta el
+// cambio comparando contra el ultimo radio visto: cualquier camino que lo cambie la dispara.
+static float  g_wpRadioVisto = -1.0f;
+static double g_wpRadioCambioMs = -1.0e9;
+static int    g_wpRadioCuadros = 0;   // sin reloj (N95: W3dNowMs = 0) se cuenta en cuadros
+static float WP3DPreviaRadioAlfa() {
+    const float r = BrushGet().radioPx;
+    const double ahora = W3dNowMs();
+    if (g_wpRadioVisto < 0.0f) g_wpRadioVisto = r;   // la primera vez no es un cambio
+    const bool cambio = (r != g_wpRadioVisto) || BrushBarArrastrandoRadio();
+    if (cambio) { g_wpRadioVisto = r; g_wpRadioCambioMs = ahora; g_wpRadioCuadros = 40; }
+    float alfa = 0.0f;
+    if (ahora > 0.0) {
+        const double t = ahora - g_wpRadioCambioMs;
+        alfa = (t < 900.0) ? 1.0f : (t < 1300.0) ? (float)(1.0 - (t - 900.0) / 400.0) : 0.0f;
+    } else if (g_wpRadioCuadros > 0) {
+        alfa = (g_wpRadioCuadros > 10) ? 1.0f : (float)g_wpRadioCuadros / 10.0f;
+        g_wpRadioCuadros--;
+    }
+    if (alfa > 0.0f) g_redraw = true;   // el desvanecido necesita los cuadros siguientes
+    return alfa;
+}
+static void WP3DDibujarPreviaRadio(Viewport3D* vp, float alfa) {
+    namespace gfx = w3dEngine;
+    const float r = BrushGet().radioPx;
+    if (r <= 0.0f || alfa <= 0.0f) return;
+    const float cx = vp->width * 0.5f, cy = vp->height * 0.5f;
+    const int N = 64;
+    static float tri[N * 6], aro[N * 4];
+    for (int i = 0; i < N; i++) {
+        const float a0 = 6.2831853f * (float)i / (float)N, a1 = 6.2831853f * (float)(i + 1) / (float)N;
+        const float x0 = cx + cosf(a0) * r, y0 = cy + sinf(a0) * r, x1 = cx + cosf(a1) * r, y1 = cy + sinf(a1) * r;
+        tri[i*6] = cx; tri[i*6+1] = cy; tri[i*6+2] = x0; tri[i*6+3] = y0; tri[i*6+4] = x1; tri[i*6+5] = y1;
+        aro[i*4] = x0; aro[i*4+1] = y0; aro[i*4+2] = x1; aro[i*4+3] = y1;
+    }
+    gfx::Disable(gfx::Texture2D); gfx::DisableArray(gfx::TexCoordArray); gfx::DisableArray(gfx::ColorArray);
+    gfx::DisableArray(gfx::NormalArray); gfx::EnableArray(gfx::VertexArray);
+    gfx::Enable(gfx::Blend); gfx::BlendAlpha();
+    // el AREA (relleno tenue) y su borde: halo oscuro + linea blanca, como el circulo del cursor
+    const float* acc = ListaColores[static_cast<int>(ColorID::accent)];
+    gfx::Color4f(acc[0], acc[1], acc[2], 0.18f * alfa);
+    gfx::VertexPointer2f(0, tri);
+    gfx::DrawTrianglesArray(N * 3);
+    gfx::VertexPointer2f(0, aro);
+    gfx::LineWidth(3.0f * GlobalScale); gfx::Color4f(0.0f, 0.0f, 0.0f, 0.8f * alfa); gfx::DrawLines(N * 2);
+    gfx::LineWidth(1.5f * GlobalScale); gfx::Color4f(1.0f, 1.0f, 1.0f, alfa); gfx::DrawLines(N * 2);
+    gfx::LineWidth(1.0f);
+    gfx::Disable(gfx::Blend);
+}
+
 static void WP3DRenderPincel(Viewport3D* vp) {
     WP3DPinturaTick(vp);
     if (!WP3DModoPintura()) return;
+    const float alfaPrevia = WP3DPreviaRadioAlfa();
     namespace gfx = w3dEngine;
     // DOS COSAS DISTINTAS, con reglas distintas:
     //  - el CIRCULO es el cursor del pincel: sigue al mouse y solo se ve con el mouse sobre el
@@ -1578,7 +1727,7 @@ static void WP3DRenderPincel(Viewport3D* vp) {
         !PopUpActive && !LayoutMenuAbierto() &&
         mx >= vp->x && mx < vp->x + vp->width && my >= vp->y && my < vp->y + vp->height &&
         !vp->OnBar(mx, my) && !vp->OnToolbar(mx, my) && !vp->OnBrushBar(mx, my);
-    if (!cursorAdentro && BrushGet().marcas == MarcasOff && !WeightPaintSoloSel()) return; // nada que dibujar
+    if (!cursorAdentro && BrushGet().marcas == MarcasOff && !WeightPaintSoloSel() && alfaPrevia <= 0.0f) return; // nada que dibujar
     // el contexto del proyector se arma ANTES del ortho 2D: GetWorldMatrix es la matriz
     // EFECTIVA (billboards/constraints miran a la camara), asi que necesita ESTA vista
     // bindeada -- y bindearla despues pisaria el ortho con el que se dibuja.
@@ -1622,6 +1771,7 @@ static void WP3DRenderPincel(Viewport3D* vp) {
         BrushDibujarMarcas(mm, modoMarcas, 7.0f * (float)GlobalScale, colorRV, WP3DProyectar, &c);
     }
     if (cursorAdentro) BrushDibujarCirculo((float)(mx - vp->x), (float)(my - vp->y), BrushGet().radioPx);
+    if (alfaPrevia > 0.0f) WP3DDibujarPreviaRadio(vp, alfaPrevia);   // el radio que se esta ajustando, en el centro
     gfx::Enable(gfx::Texture2D); gfx::EnableArray(gfx::TexCoordArray); // restaurar para la UI que sigue
     gfx::Invalidate();
 }
@@ -2954,6 +3104,18 @@ void Viewport3D::RenderUI() {
                 bSnap->tinte = g_snap.enabled ? snapVerde : NULL;
                 bSnap->colorTexto = g_snap.enabled ? acc : NULL;
             }
+            // PINTURA DE TEXTURA: el diskette (la textura pintada vive en RAM hasta guardarla); con "*" pendiente, verde
+            { Button* bTG = BarRolBtn(BarButtons, BR_TexGuardar);
+              if (bTG) {
+                  bTG->visible = (InteractionMode == TexturePaint);
+                  Mesh* mT = (ObjActivo && ObjActivo->getType() == ObjectType::mesh) ? (Mesh*)ObjActivo : NULL;
+                  int pT = -1; Texture* tT = mT ? WP3DTexturaActiva(mT, pT) : NULL;
+                  const bool pend = tT && TexEditSinGuardar(tT);
+                  static float tgVerde[3]; const float* accT = ListaColores[static_cast<int>(ColorID::accent)];
+                  for (int i=0;i<3;i++) tgVerde[i]=accT[i]*0.4f;
+                  bTG->tinte = pend ? tgVerde : NULL;
+                  bTG->colorTexto = pend ? accT : NULL;
+              } }
             // PROPORTIONAL EDITING: el icono de la curva de caida elegida, VERDE cuando esta ON (tecla O)
             Button* bProp = BarRolBtn(BarButtons, BR_Proporcional);
             if (bProp){
@@ -3222,6 +3384,9 @@ void Viewport3D::Aceptar() {
         ViewPortClickDown = false;
         return;
     }
+    // AJUSTAR LA ULTIMA OPERACION: lo que se hizo se lee ANTES de confirmar (hace falta el snapshot) y el panel se abre
+    // DESPUES (cuando ya esta su paso de undo)
+    TransformRedoCapturar(this);
     if ( InteractionMode == ObjectMode ){
         if (estado != editNavegacion){
             // AUTO KEY: va ANTES de UndoTransformConfirmar, que es lo que puede limpiar estadoObjetos (el
@@ -3239,6 +3404,7 @@ void Viewport3D::Aceptar() {
     }
     NumInputReset(); // termina el transform -> limpia el valor numerico tipeado
     ViewPortClickDown = false;
+    TransformRedoTrasConfirmar();
 }
 #endif
 
@@ -3291,6 +3457,7 @@ void Viewport3D::mouse_button_up(int boton){
 }
 #endif
 
+extern bool g_altNavActivo;   // controles.cpp: arrastre izquierdo con Alt = navegar (orbitar / con Shift desplazar)
 void Viewport3D::event_mouse_motion(int mx, int my){
     // el viewport 3D bajo el mouse pasa a ser el ACTIVO (multi-viewport)
     Viewport3DActive = this;
@@ -3337,9 +3504,10 @@ void Viewport3D::event_mouse_motion(int mx, int my){
     // extrude/strip) -> se puede mirar desde otro angulo sin cancelar; se apaga View y sigue editando.
     #if defined(__ANDROID__) || defined(__EMSCRIPTEN__)
         bool viewOrbita = (g_viewEditMode && (InteractionMode == EditMode || WP3DModoPintura()));   // pintura: vista ON = el dedo orbita
-        if (middleMouseDown || (leftMouseDown && (estado == editNavegacion || viewOrbita))) {
+        if (middleMouseDown || (leftMouseDown && (estado == editNavegacion || viewOrbita || g_altNavActivo))) {
     #else
-        if (middleMouseDown) {
+        // Alt + arrastre izquierdo = lo mismo que el boton del medio (controles.cpp decide click / arrastre)
+        if (middleMouseDown || (leftMouseDown && g_altNavActivo)) {
     #endif
         ViewPortClickDown = true;
         // Chequear si Shift está presionado
@@ -3348,7 +3516,7 @@ void Viewport3D::event_mouse_motion(int mx, int my){
         #elif SDL_MAJOR_VERSION == 3
             const bool* state = SDL_GetKeyboardState(NULL);
         #endif
-        bool shiftHeld = state[SDL_SCANCODE_LSHIFT] || state[SDL_SCANCODE_RSHIFT];
+        bool shiftHeld = state[SDL_SCANCODE_LSHIFT] || state[SDL_SCANCODE_RSHIFT] || (SDL_GetModState() & KMOD_SHIFT) != 0;
 
         if (shiftHeld) {
             /*float radY = rotY * M_PI / 180.0f; // Yaw
@@ -3401,6 +3569,8 @@ void Viewport3D::event_mouse_motion(int mx, int my){
                 else      SetTranslacionObjetos(dx, dy, VelocidadArrastreMundo());
                 break;
             case rotacion:
+                // GIZMO de rotar: el semicirculo de un eje gira por el angulo alrededor del centro (absoluto)
+                if (GizmoArrastrando() && GizmoMotion(this, mx, my)) break;
                 if (axisSelect == ViewAxis) {
                     RotarDesdeVista(mx, my); // trackball (ramifica a edit adentro)
                 } else if (axisSelect == OrbitalAxis) {
@@ -3414,6 +3584,8 @@ void Viewport3D::event_mouse_motion(int mx, int my){
                 }
                 break;
             case EditScale:
+                // GIZMO de escalar: la manija agarrada sigue al puntero (proporcion de distancias desde el centro)
+                if (GizmoArrastrando() && GizmoMotion(this, mx, my)) break;
                 // Shrink/Fatten (edit): la distancia por la normal es en MUNDO -> velocidad tipo "mover"
                 // para que se sienta pegado al dedo/mouse. Escala normal: factor chico de siempre.
                 if (edit) EditXformScale(dx, dy, EditShrinkActivo() ? VelocidadArrastreMundo() : 0.001f);

@@ -1057,7 +1057,7 @@ bool W3dPrefabCrearDesdeSeleccion(std::string* nombreOut, std::string* motivo) {
     }
     if (curvasFuera > 0) {
         char b[300];
-        snprintf(b, sizeof(b), T("%d animation curve(s) of the selection no longer animate anything (Ctrl+Z brings them back)"), curvasFuera);
+        snprintf(b, sizeof(b), T("%d animation curve(s) of the selection no longer animate anything (Undo brings them back)"), curvasFuera);
         Notificar(std::string(b), true);
         w3dLogfW("[prefabs] Create Prefab: %d curva(s) de las animaciones de escena quedan en el paso de undo", curvasFuera);
     }

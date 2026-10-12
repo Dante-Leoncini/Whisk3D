@@ -185,6 +185,11 @@ public:
     bool conHijos[ModoN];  // la lista tiene "Dibujar hijos" (Resolver): sus hijos los dibuja ella
     bool ejecutada;        // este frame corrio su lista (el editor no corre una invalida)
     bool constructor;      // la seccion CONSTRUCTOR (arriba en el outliner): en solo-juego corre UNA vez
+    // BUCLE DE RUTINA: la lista corre 'repetir' veces seguidas, sin reponer nada entre vuelta y vuelta ("trasladar,
+    // dibujar" x 20 = 20 copias corridas: un array mas barato que 20 objetos). La vuelta actual queda en la memoria
+    // "@bucle[0]" (y el total en "@bucle[1]") para que los pasos varien. Al terminar la corrida la matriz se repone
+    // como siempre. float para el PropFloat entero del panel. 1 = una rutina comun.
+    float repetir;
     unsigned genHecha;     // (constructor) la generacion en la que ya corrio (g_w3dConstructorGen)
     std::vector<MallaRecurso*> retenidas;   // las mallas que dibuja (cargadas mientras la rutina las nombre)
     // (editor) como estaban los arrays (vertices, normales, uv, colores: 1/0/-1) cuando EMPEZO a dibujarse en el ultimo

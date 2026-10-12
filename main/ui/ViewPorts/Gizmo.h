@@ -1,7 +1,7 @@
 #ifndef GIZMO_H
 #define GIZMO_H
 // ============================================================================
-//  GIZMO DE TRANSFORMACION (mover) del viewport 3D. Para PC y pantallas tactiles; en
+//  GIZMO DE TRANSFORMACION (mover / rotar / escalar) del viewport 3D. Para PC y pantallas tactiles; en
 //  Symbian arranca apagado (Overlays > Gizmo).
 //
 //  Se dibuja sobre el pivote de la seleccion (objetos en Object Mode, verts en Edit Mode)
@@ -21,7 +21,16 @@ class Viewport3D;
 
 extern bool g_gizmoOn;   // Overlays > Gizmo. PC/tactil: ON; Symbian: OFF
 
-enum GizmoManija { GizmoNinguna = -1, GizmoEjeX = 0, GizmoEjeY, GizmoEjeZ, GizmoPlanoX, GizmoPlanoY, GizmoPlanoZ, GizmoCentro };
+enum GizmoManija { GizmoNinguna = -1, GizmoEjeX = 0, GizmoEjeY, GizmoEjeZ, GizmoPlanoX, GizmoPlanoY, GizmoPlanoZ, GizmoCentro,
+                   GizmoAnilloVista, GizmoLibre };   // (rotar) el anillo blanco = girar sobre la vista; el interior = giro libre
+// MODOS: un click / toque RAPIDO sobre el gizmo (sin arrastrar) pasa al siguiente.
+//   mover   : flechas con punta de piramide + cuadrados de plano + circulo central (libre)
+//   rotar   : un semicirculo de color por eje (girar en ese eje), anillo blanco (girar sobre la vista), interior (libre)
+//   escalar : como mover pero con puntas CUADRADAS; el circulo central escala parejo
+enum GizmoModoTipo { GizmoModoMover = 0, GizmoModoRotar, GizmoModoEscalar };
+int  GizmoModo();
+void GizmoSetModo(int m);
+bool GizmoTocar(ViewportBase* vp, int mx, int my);   // toque tactil sin arrastre sobre una manija: cambia de modo. true = consumido
 
 void GizmoRender(Viewport3D* vp);                  // overlay (sin z), con las matrices de la vista cargadas
 bool GizmoDown(ViewportBase* vp, int mx, int my);  // click/tap (coords de PANTALLA) sobre una manija: arranca. true = consumido

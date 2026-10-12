@@ -1,0 +1,4 @@
+# Navegacion con Alt en el viewport 3D (ademas del boton del medio): Alt + arrastre izquierdo ORBITA y Alt + Shift +
+# arrastre izquierdo DESPLAZA. Sin Alt el arrastre izquierdo sigue siendo la caja de seleccion, y un Alt + click QUIETO
+# sigue siendo un click (pickea; en Edit Mode Shift+Alt+click es el loop select). Eventos de mouse REALES.
+altnavtest

@@ -2,6 +2,7 @@
 #include "w3dGraphics.h" // abstraccion de graficos (independencia de OpenGL)
 #include "W3dLang.h"   // T(): los textos salen en el idioma del sistema
 #include "Undo.h" // Ctrl+Z: capturar modo / seleccion
+#include "app/W3dAtajos.h" // atajos reasignados: la tecla apretada -> la de la funcion
 #include "ViewPorts/PopUp/ConfirmarPopup.h" // AbrirConfirmarBorrado (popup de confirmar borrado)
 #include "ViewPorts/LayoutInput.h"
 #include "ViewPorts/LayoutArbol.h" // aviso de destruccion de viewports + borrar un arbol entero
@@ -9,6 +10,7 @@
 #include "edit/UVUnwrap.h"
 #include "edit/Proporcional.h"
 #include "PopUp/NuevaTexturaPopup.h"
+#include "ViewPorts/PopUp/ExportarUVPopup.h"   // Export UV Layout (menu guardar del editor UV)
 #include "io/TexturaEditada.h"          // Save Texture / Make External / Make Internal + el "*" de las sin guardar // "New Texture..." del dropdown Texture del UV editor    // proportional editing: pesos de los vertices no seleccionados
 #include <queue>
 #include <functional>      // menu U: unwrap / smart project / lightmap / follow quads / reset   // W3dTriangularCara
@@ -67,6 +69,10 @@
 #include "io/UI2DFormato.h"     // cargar interfaces .w3dui
 #include "W3dPaletas.h"         // paletas del proyecto (AddUI adopta la default)
 #include "PopUp/FileBrowser.h"  // AbrirFileBrowser (elegir el archivo)
+#include "io/W3dContenedor.h"     // W3dImportarAsset ("Load .lua..." del IDE copia el script adentro del proyecto)
+#include "io/RecursosProyecto.h"   // menu Archivo: carpeta de la biblioteca / dentro o fuera del .w3d (W3dVistaRec*)
+#include "io/GuardarW3D.h"         // GuardarW3D: "Guardar" de un archivo INTERNO guarda tambien el .w3d
+#include "ViewPorts/PopUp/GuardarComoPopup.h"   // "Guardar como..." (scripts del IDE y texturas del editor UV)
 #include "io/Textura2D.h"       // tamano real de la imagen elegida al crearla
 #include "io/Video2DCache.h"    // tamano real del video elegido al crearlo
 #include "objects/Armature.h"
@@ -152,6 +158,18 @@ ViewportBase* LayoutPorDefecto(int w, int h, Viewport3D** vp3dOut) {
         // vertical (N95 240x320): 3D arriba / Propiedades abajo
         return new ViewportColumn(vp3d, new Properties(), 0.7f);
     }
+#ifdef __ANDROID__
+    // ANDROID: el espacio del telefono es oro. Sin outliner (la biblioteca/escena se abre cambiando el tipo de un
+    // viewport cuando hace falta) y, parado, sin timeline: solo el visor 3D arriba y las propiedades abajo.
+    //     vertical               horizontal
+    //     +-------------+        +-------------------+---------+
+    //     |  3D         |        |  3D               | Props   |
+    //     +-------------+        +-------------------+         |
+    //     | Propiedades |        |  Timeline (chico) |         |
+    //     +-------------+        +-------------------+---------+
+    if (h > w) return new ViewportColumn(vp3d, new Properties(), 0.58f);
+    return new ViewportRow(new ViewportColumn(vp3d, new Timeline(), 0.86f), new Properties(), 0.68f);
+#endif
     if (h > w) {
         // VERTICAL con pantalla grande (un telefono parado): el mismo reparto pero apilado. El layout
         // apaisado (columna a la derecha) en vertical dejaba outliner y propiedades aplastados y sin texto.
@@ -714,6 +732,12 @@ static void AddRutinaCon(int tipo) {
     const bool vacia = (tipo < 0 || tipo >= PasoN);   // "Empty routine" (id PasoN)
     Rutina* r = new Rutina(NULL, vacia ? T("Routine") : T(W3dPasoEtiqueta(tipo)));
     if (!vacia) { r->listas[Rutina::ModoDefecto].push_back(W3dPasoNuevo(tipo)); r->pasoActivo = 0; }
+    if (tipo == PasoN + 1) {
+        // BUCLE DE RUTINA: 20 vueltas y un "Trasladar" para empezar (se le agregan los pasos que dibujan)
+        r->name = T("Routine loop"); r->repetir = 20.0f;
+        W3dPaso t = W3dPasoNuevo(PasoTrasladar); t.n[0].v = 2.0f;
+        r->listas[Rutina::ModoDefecto].push_back(t); r->pasoActivo = 0;
+    }
     if (activo && activo->getType() == ObjectType::rutina && activo->Parent) {
         Object* viejo = r->Parent;
         if (viejo) {
@@ -932,9 +956,8 @@ static void UIImportElegido(const std::string& ruta){
     W3dNombresRepararEscena(true);
     if (u->name != nomAntes) {
         // sin sprintf: los nombres son texto del usuario y no tienen cota de largo
-        Notificar("la escena '" + nomAntes + "' ya existia -> '" + u->name +
-                  "': los cambiarEscena(\"" + nomAntes + "\") de SU .lua siguen apuntando "
-                  "a la primera. Editalos a mano.", true);
+        Notificar(std::string(T("A scene with that name already existed, renamed:")) + " '" + nomAntes + "' -> '" + u->name + "'. " +
+                  T("The cambiarEscena() calls in its .lua still point to the first one: edit them by hand."), true);
     }
     DeseleccionarTodo();
     u->Seleccionar();
@@ -1036,18 +1059,18 @@ static void LayoutAccionSelect(int aId) {
 static void LayoutRebuildMenuSelect() {
     if (!MenuSelect) return;
     MenuSelect->Limpiar();
-    MenuSelect->Agregar(T("All"), 0)->atajo = "A";
-    MenuSelect->Agregar(T("None"), 1)->atajo = "Alt A";
-    MenuSelect->Agregar(T("Invert"), 2)->atajo = "Ctrl I";
+    MenuSelect->Agregar(T("All"), 0)->atajo = "@3d.seleccionarTodo";
+    MenuSelect->Agregar(T("None"), 1)->atajo = "@3d.deseleccionar";
+    MenuSelect->Agregar(T("Invert"), 2)->atajo = "@3d.invertir";
     // BOX SELECT: arma la caja (igual que la tecla). El atajo va en el item para que se
     // aprenda solo -- desde el menu hace exactamente lo mismo que apretar B.
-    MenuSelect->Agregar(T("Box Select"), 30)->atajo = "B";
+    MenuSelect->Agregar(T("Box Select"), 30)->atajo = "@3d.caja";
     // "Ver seleccion" (pedido del dueno): OFF = ni contorno verde ni tinte de malla no
     // editable -- para mirar el escenario seleccionado tal como se ve de verdad.
-    MenuSelect->Agregar(T("Ver seleccion"), 20)->verde = w3dVerSeleccion;
+    MenuSelect->Agregar(T("Show selection"), 20)->verde = w3dVerSeleccion;
     if (InteractionMode == EditMode) {
         // Select Linked (L): selecciona la ISLA conexa. Desde el menu = guiado (pide click sobre el elemento).
-        MenuSelect->Agregar(T("Select Linked"), 15)->atajo = "L";
+        MenuSelect->Agregar(T("Select Linked"), 15)->atajo = "@3d.vinculado";
         if (EditSelectMode == SelEdge) {
             MenuSelect->Agregar(T("Loop Select (Edge Loop)"), 11)->atajo = "Shift Alt Click";
             MenuSelect->Agregar(T("Loop Select (Edge Ring)"), 12);
@@ -1648,7 +1671,7 @@ void LayoutAccionObject(int aId) {
         case 201: SetOriginOriginToGeometry(); break; // Set Origin > Origin to Geometry
         case 202: SetOriginToCursor();         break; // Set Origin > Origin to 3D Cursor
         case 203: OlvidarOrigenSeleccionadas(); break; // Set Origin > Clear Original File (borra Mesh::origen)
-        // Set Parent (Ctrl P) / Clear Parent (Ctrl Alt P): submenus de Object + standalone. Ids unicos ->
+        // Set Parent (Ctrl P) / Clear Parent (Alt P): submenus de Object + standalone. Ids unicos ->
         // despachan por ESTA accion sea como submenu (menu top = Object) o standalone (menu top = el propio).
         case 230: case 231: case 232: case 233: AccionSetParent(aId - 230); break; // Object / Keep T. / Without Inv. / Keep T. Without Inv.
         case 240: case 241: case 242:           AccionClearParent(aId - 240); break; // Clear / Clear+Keep T. / Clear Inverse
@@ -1787,7 +1810,7 @@ void ActualizarEditMeshActivo() {
                 Mesh* m = (Mesh*)mallas[i];
                 for (size_t k = 0; k < m->modificadores.size(); k++) {
                     const int t = m->modificadores[k]->tipo;
-                    if ((t == ModifierType::Mirror || t == ModifierType::Boolean) && m->modificadores[k]->target) {
+                    if ((t == ModifierType::Mirror || t == ModifierType::Boolean || t == ModifierType::Array) && m->modificadores[k]->target) {
                         if (W3dColgadoDe(m, SceneCollection)) m->GenerarMallaModificada();
                         break;
                     }
@@ -1858,7 +1881,7 @@ static void LayoutAccionMode(int aId) {
     if (aId != ObjectMode && aId != PoseMode && InteractionMode == ObjectMode && EsDeLibreriaAviso(ObjActivo)) return;
     if (ObjActivo && ObjActivo->getType() == ObjectType::mesh) {
         if (aId == EditMode && ((Mesh*)ObjActivo)->noEditable) {   // escenario cerrado a edicion
-            Notificar(T("Malla no editable (Convertir en mesh editable, card Mesh)"), true);
+            Notificar(T("Mesh not editable (Convert to editable mesh, Mesh card)"), true);
             return;
         }
         InteractionMode = aId;
@@ -1933,12 +1956,12 @@ void LayoutAbrirMenuTipo(ViewportBase* aVp) {
         gMenuTipo->Agregar(T("Minimize"), 23);
     } else {
         gMenuTipo->Agregar(T("3D Viewport"), 0);
-        gMenuTipo->Agregar("Outliner", 1);
+        gMenuTipo->Agregar(T("Outliner"), 1);
         gMenuTipo->Agregar(T("Properties"), 2);
         gMenuTipo->Agregar(T("UV Editor"), 3);
         gMenuTipo->Agregar(T("Timeline"), 4);
         gMenuTipo->Agregar(T("2D Editor"), 5);
-        gMenuTipo->Agregar("Console", 6);
+        gMenuTipo->Agregar(T("Console"), 6);
         gMenuTipo->Agregar("IDE", 7);
         if (aVp != rootViewport) gMenuTipo->Agregar(T("Expand"), 20);
         // OJO nombres: dividir "en columnas" = 2 paneles LADO A LADO (ViewportRow);
@@ -1994,7 +2017,7 @@ static void LayoutAbrirMenuUV(UVEditor* uv, int x, int y) {
     gMenuUV->AgregarCheck(T("Repeat Texture"), 1, &uv->repeatTexture);
     gMenuUV->AgregarCheck(T("Show Chrome UV"), 2, &uv->mostrarChromeUV); // overlay LIVE del reflejo equirect (demo)
     // ENCUADRAR (el UV era el UNICO viewport sin esto): la seleccion, o todo el mapa visible.
-    gMenuUV->Agregar(T("Frame Selected"), 10)->atajo = "Num .";
+    gMenuUV->Agregar(T("Frame Selected"), 10)->atajo = "@uv.encuadrar";
     gMenuUV->Agregar(T("Frame All"), 11);
     gMenuUV->action = LayoutAccionUVView;
     if (MenuAbierto && MenuAbierto != gMenuUV) MenuAbierto->Cerrar();
@@ -2084,10 +2107,10 @@ static void LayoutAbrirMenuUVSelect(UVEditor* uv, int x, int y) {
         gMenuUVSelect = new PopupMenu();
         gMenuUVSelect->titulo = T("Select");
         gMenuUVSelect->action = LayoutAccionUVSelect;
-        gMenuUVSelect->Agregar(T("All"), 0)->atajo = "A";
-        gMenuUVSelect->Agregar(T("None"), 1)->atajo = "Alt A";
-        gMenuUVSelect->Agregar(T("Invert"), 2)->atajo = "Ctrl I";
-        gMenuUVSelect->Agregar(T("Select Linked"), 15)->atajo = "L";
+        gMenuUVSelect->Agregar(T("All"), 0)->atajo = "@uv.seleccionarTodo";
+        gMenuUVSelect->Agregar(T("None"), 1)->atajo = "@uv.deseleccionar";
+        gMenuUVSelect->Agregar(T("Invert"), 2)->atajo = "@uv.invertir";
+        gMenuUVSelect->Agregar(T("Select Linked"), 15)->atajo = "@uv.vinculado";
     }
     if (MenuAbierto && MenuAbierto != gMenuUVSelect) MenuAbierto->Cerrar();
     gMenuUVSelect->Abrir(x, y, MenuPantallaW, MenuPantallaH);
@@ -2147,10 +2170,16 @@ static void LayoutAccionUVTex(int id) {
 }
 // ---- menu GUARDAR del UV editor (icono diskette): la textura mostrada, que vive en memoria hasta guardarse ----
 static PopupMenu* gMenuUVGuardar = NULL;
+// el menu de guardar se abrio desde la barra del 3D (pintura de textura): trabaja con la textura PINTADA (la de la parte
+// activa), no con la que muestre el editor UV
+static bool gGuardarDesde3D = false;
 static Texture* UVGuardarTextura() {
+    if (gGuardarDesde3D) { extern Texture* WP3DTexturaPintada(); return WP3DTexturaPintada(); }
     Mesh* m = (ObjActivo && ObjActivo->getType() == ObjectType::mesh) ? (Mesh*)ObjActivo : NULL;
     return UVTexturaMostrada(m);
 }
+static bool GuardarProyectoAlDisco();                               // (definidas con el menu Archivo del IDE)
+static std::string CarpetaBibliotecaDe(int vista, const std::string& id);
 static void UVGuardarExternaElegida(const std::string& elegido) {
     Texture* t = UVGuardarTextura(); TexturaEditable* te = t ? TexEditObtener(t) : NULL;
     if (!te) return;
@@ -2159,29 +2188,78 @@ static void UVGuardarExternaElegida(const std::string& elegido) {
     const size_t pt = nombre.rfind('.'); if (pt != std::string::npos) nombre = nombre.substr(0, pt);
     const std::string ruta = W3dRutaDeSalida(elegido, nombre, ".png");
     std::string msg;
-    if (TexEditHacerExterna(te, ruta, msg)) Notificar(std::string(T("Texture saved")) + ": " + ruta, false);
+    if (TexEditHacerExterna(te, ruta, msg)) {
+        GuardarProyectoAlDisco();   // el proyecto recuerda que ahora la textura esta afuera
+        Notificar(std::string(T("Texture saved")) + ": " + ruta, false);
+    }
     else Notificar(T(msg.c_str()), true);
     g_redraw = true;
 }
+// "Guardar como..." de la textura mostrada: adentro (texturas/<nombre>.png, en una carpeta de la biblioteca) o afuera
+static bool UVGuardarComoAccion(const GuardarComoDestino& d, bool forzar, bool* existe, std::string& msg) {
+    Texture* t = UVGuardarTextura(); TexturaEditable* te = t ? TexEditObtener(t) : NULL;
+    if (!te) { msg = "Save Texture: no texture"; return false; }
+    if (d.interno) {
+        if (!W3dContenedorHayMontado()) { msg = "Save the project first"; return false; }
+        if (!TexEditGuardarComoInterna(te, d.nombre, forzar, existe, msg)) return false;
+        W3dRecursosVistaInvalidar();
+        W3dVistaRecMover(W3D_VISTA_TEXTURAS, te->tex->path, d.carpetaProyecto);
+    } else {
+        const std::string ruta = W3dRutaEnCarpeta(d.carpetaDisco, d.nombre, "");
+        if (ruta != te->tex->path && w3dFileSystem::FileExists(ruta) && !forzar) { if (existe) *existe = true; return false; }
+        if (!TexEditHacerExterna(te, ruta, msg)) return false;
+    }
+    GuardarProyectoAlDisco();
+    Notificar(std::string(T("Texture saved")) + ": " + TexEditEtiqueta(te->tex), false);
+    g_redraw = true;
+    return true;
+}
 static void LayoutAccionUVGuardar(int id) {
+    if (id == 4) { AbrirExportarUVPopup(); return; }   // el mapa UV a un PNG con transparencia (no hace falta textura)
     Texture* t = UVGuardarTextura(); TexturaEditable* te = t ? TexEditObtener(t) : NULL;
     if (!te) { Notificar(T("Save Texture: no texture"), true); return; }
     std::string msg;
-    if (id == 1) { if (TexEditGuardar(te, msg)) Notificar(std::string(T("Texture saved")) + ": " + TexEditEtiqueta(t), false); else Notificar(T(msg.c_str()), true); }
-    else if (id == 2) { AbrirFileBrowser(T("Make External..."), T("Save"), ".png", UVGuardarExternaElegida, true); return; }
-    else if (id == 3) { if (TexEditHacerInterna(te, msg)) Notificar(std::string(T("Texture saved")) + ": " + TexEditEtiqueta(t), false); else Notificar(T(msg.c_str()), true); }
+    if (id == 1) {   // Guardar: la de adentro queda en el .w3d del disco (se guarda el proyecto)
+        if (TexEditGuardar(te, msg)) {
+            const bool alW3d = !TexEditEsExterna(t) && GuardarProyectoAlDisco();
+            Notificar(std::string(T("Texture saved")) + ": " + TexEditEtiqueta(t) + (alW3d ? std::string(" (") + T("saved inside the .w3d") + ")" : std::string()), false);
+        } else Notificar(T(msg.c_str()), true);
+    }
+    else if (id == 2) { AbrirFileBrowser(T("Save outside the .w3d..."), T("Use this folder"), ".png", UVGuardarExternaElegida, true); return; }
+    else if (id == 3) {
+        if (!W3dContenedorHayMontado()) { Notificar(T("Save the project first"), true); return; }
+        if (TexEditHacerInterna(te, msg)) { GuardarProyectoAlDisco(); Notificar(std::string(T("Texture saved")) + ": " + TexEditEtiqueta(t) + " (" + T("saved inside the .w3d") + ")", false); }
+        else Notificar(T(msg.c_str()), true);
+    }
+    else if (id == 5) {
+        std::string nombre = t->path;
+        const size_t sl = nombre.find_last_of("/\\"); if (sl != std::string::npos) nombre = nombre.substr(sl + 1);
+        const size_t pt = nombre.rfind('.'); if (pt != std::string::npos) nombre = nombre.substr(0, pt);
+        AbrirGuardarComoPopup(T("Save As..."), nombre + ".png", ".png", !TexEditEsExterna(t),
+                              CarpetaBibliotecaDe(W3D_VISTA_TEXTURAS, t->path), UVGuardarComoAccion);
+        return;
+    }
     g_redraw = true;
 }
+// (harness) acciones del menu guardar del editor UV sin abrirlo; "fuera del w3d" con la carpeta ya elegida
+void LayoutUVGuardarAccion(int id) { gGuardarDesde3D = false; LayoutAccionUVGuardar(id); }
+void LayoutUVGuardarAccion3D(int id) { gGuardarDesde3D = true; LayoutAccionUVGuardar(id); }
+void LayoutUVFueraDelW3d(const std::string& carpeta) { UVGuardarExternaElegida(carpeta); }
 static void LayoutAbrirMenuUVGuardar(UVEditor* uv, int x, int y) {
-    (void)uv;
+    gGuardarDesde3D = (uv == NULL);   // NULL = la barra del 3D en pintura de textura
     Texture* t = UVGuardarTextura();
-    if (!t) return;
     if (!gMenuUVGuardar) { gMenuUVGuardar = new PopupMenu(); gMenuUVGuardar->action = LayoutAccionUVGuardar; }
     gMenuUVGuardar->Limpiar();
-    gMenuUVGuardar->titulo = TexEditEtiqueta(t);
-    gMenuUVGuardar->Agregar(T("Save Texture"), 1);
-    if (TexEditEsExterna(t)) gMenuUVGuardar->Agregar(T("Make Internal"), 3);   // vuelve al .w3d
-    else                     gMenuUVGuardar->Agregar(T("Make External..."), 2); // un PNG afuera (se referencia por ruta)
+    gMenuUVGuardar->titulo = t ? TexEditEtiqueta(t) : std::string("UV");
+    // la TEXTURA mostrada (mismo menu que el Archivo del IDE): Guardar solo las que se editaron (en memoria);
+    // Guardar como... y dentro / fuera del .w3d, cualquiera
+    if (t) {
+        if (TexEditBuscar(t)) gMenuUVGuardar->Agregar(T("Save"), 1, (int)IconType::guardar);
+        gMenuUVGuardar->Agregar(T("Save As..."), 5);
+        if (TexEditEsExterna(t)) gMenuUVGuardar->Agregar(T("Save inside the .w3d"), 3);        // vuelve al .w3d
+        else                     gMenuUVGuardar->Agregar(T("Save outside the .w3d..."), 2);    // un PNG afuera (se referencia por ruta)
+    }
+    if (!gGuardarDesde3D) gMenuUVGuardar->Agregar(T("Export UV Layout..."), 4);   // siempre (en el editor UV): el mapa de las UV
     if (MenuAbierto && MenuAbierto != gMenuUVGuardar) MenuAbierto->Cerrar();
     gMenuUVGuardar->Abrir(x, y, MenuPantallaW, MenuPantallaH);
     MenuAbierto = gMenuUVGuardar;
@@ -2269,8 +2347,8 @@ static void LayoutAbrirMenuUVMip(UVEditor* uv, int x, int y) {
     if (!tid) return;
     if (!gMenuUVMip) gMenuUVMip = new PopupMenu();
     gMenuUVMip->Limpiar();
-    gMenuUVMip->titulo = "Mipmap";
-    gMenuUVMip->Agregar("Auto", 9000)->verde = (UVMipNivel() < 0);
+    gMenuUVMip->titulo = T("Mipmap");
+    gMenuUVMip->Agregar(T("Auto"), 9000)->verde = (UVMipNivel() < 0);
     if (w3dEngine::TexTieneMips(tid) && w3dEngine::MipmapsGlobal()) {
         int tw = 0, th = 0;
         w3dEngine::TextureSize(tid, tw, th);
@@ -2365,8 +2443,8 @@ static void LayoutAbrirMenu2DAdd(int x, int y) {
     gMenu2DAdd->Agregar("Slice 9", 4, (int)IconType::cuadricula);
     gMenu2DAdd->Agregar(T("Button"), 5, (int)IconType::object);
     gMenu2DAdd->Agregar(T("Expand"), 6, (int)IconType::arrowRight);
-    gMenu2DAdd->Agregar("Video", 8, (int)IconType::camera);
-    gMenu2DAdd->Agregar("Importar w3dui", 7, (int)IconType::archive);
+    gMenu2DAdd->Agregar(T("Video"), 8, (int)IconType::camera);
+    gMenu2DAdd->Agregar(T("Import w3dui"), 7, (int)IconType::archive);
     gMenu2DAdd->action = LayoutAccion2DAdd;
     if (MenuAbierto && MenuAbierto != gMenu2DAdd) MenuAbierto->Cerrar();
     gMenu2DAdd->Abrir(x, y, MenuPantallaW, MenuPantallaH);
@@ -2400,9 +2478,9 @@ static void LayoutAbrirMenu2DSelect(int x, int y) {
         gMenu2DSelect = new PopupMenu();
         gMenu2DSelect->titulo = T("Select");
         gMenu2DSelect->action = LayoutAccion2DSelect;
-        gMenu2DSelect->Agregar(T("All"), 0)->atajo = "A";
-        gMenu2DSelect->Agregar(T("None"), 1)->atajo = "Alt A";
-        gMenu2DSelect->Agregar(T("Invert"), 2)->atajo = "Ctrl I";
+        gMenu2DSelect->Agregar(T("All"), 0)->atajo = "@2d.seleccionarTodo";
+        gMenu2DSelect->Agregar(T("None"), 1)->atajo = "@2d.deseleccionar";
+        gMenu2DSelect->Agregar(T("Invert"), 2)->atajo = "@2d.invertir";
     }
     if (MenuAbierto && MenuAbierto != gMenu2DSelect) MenuAbierto->Cerrar();
     gMenu2DSelect->Abrir(x, y, MenuPantallaW, MenuPantallaH);
@@ -2451,17 +2529,17 @@ static void LayoutAbrirMenu2DObj(Editor2D* ed, int x, int y) {
     if (!gMenu2DObj) {
         gMenu2DXform = new PopupMenu();
         gMenu2DXform->action = LayoutAccion2DObject;
-        gMenu2DXform->Agregar(T("Move"), 100)->atajo = "G";
-        gMenu2DXform->Agregar(T("Rotate"), 101)->atajo = "R";
-        gMenu2DXform->Agregar(T("Scale"), 102)->atajo = "S";
+        gMenu2DXform->Agregar(T("Move"), 100)->atajo = "@2d.mover";
+        gMenu2DXform->Agregar(T("Rotate"), 101)->atajo = "@2d.rotar";
+        gMenu2DXform->Agregar(T("Scale"), 102)->atajo = "@2d.escalar";
         gMenu2DObj = new PopupMenu();
         gMenu2DObj->titulo = T("Object");
         gMenu2DObj->action = LayoutAccion2DObject;
         gMenu2DObj->Agregar(T("Transform"), 0, -1, gMenu2DXform);
-        gMenu2DObj->Agregar(T("Duplicate Objects"), 1)->atajo = "Shift D";
+        gMenu2DObj->Agregar(T("Duplicate Objects"), 1)->atajo = "@2d.duplicar";
         gMenu2DObj->Agregar(T("Set Parent"), 40);
         gMenu2DObj->Agregar(T("Clear Parent"), 41);
-        gMenu2DObj->Agregar(T("Delete"), 3)->atajo = "X";
+        gMenu2DObj->Agregar(T("Delete"), 3)->atajo = "@2d.borrar";
     }
     if (MenuAbierto && MenuAbierto != gMenu2DObj) MenuAbierto->Cerrar();
     gMenu2DObj->Abrir(x, y, MenuPantallaW, MenuPantallaH);
@@ -2489,12 +2567,12 @@ static void LayoutAbrirMenu2DView(Editor2D* ed, int x, int y) {
         // todos los Editor2D -> el checkbox se RE-APUNTA abajo, en cada apertura.
         gItem2DVistaJuego = gMenu2DView->AgregarCheck(T("Game View"), 11,
                                                       ed ? &ed->vistaJuego : NULL);
-        gItem2DVistaJuego->atajo = "Num 0";
-        gMenu2DView->Agregar(T("Frame Selected"), 10)->atajo = "Num .";
-        gMenu2DView->Agregar("Zoom 1:1", 1);   // pixel-perfect: un px del lienzo = uno real
-        gMenu2DView->Agregar("Zoom 2:1", 2);
-        gMenu2DView->Agregar("Zoom 3:1", 3);
-        gMenu2DView->Agregar("Zoom 4:1", 4);
+        gItem2DVistaJuego->atajo = "@2d.vistaJuego";
+        gMenu2DView->Agregar(T("Frame Selected"), 10)->atajo = "@2d.encuadrar";
+        gMenu2DView->Agregar(T("Zoom 1:1"), 1);   // pixel-perfect: un px del lienzo = uno real
+        gMenu2DView->Agregar(T("Zoom 2:1"), 2);
+        gMenu2DView->Agregar(T("Zoom 3:1"), 3);
+        gMenu2DView->Agregar(T("Zoom 4:1"), 4);
     }
     // el menu es UNO solo para todos los viewports 2D: el check de "Game View" tiene que
     // apuntar al miembro del viewport que lo abrio (sino togglea el de otro)
@@ -2537,8 +2615,26 @@ static void IDEConfirmarCambio() {
     gIDECambiarA.clear();
 }
 
+// "Load .lua...": un script de AFUERA (descargas, otra carpeta del celular). Se IMPORTA como cualquier asset: con
+// un proyecto montado queda copiado adentro (scripts/) y aparece en esta lista; sin proyecto se edita el archivo.
+static const int kIDECargarLua = 100000;
+static void IDECargarLuaElegido(const std::string& elegido) {
+    IDE* ide = gIDEMenuDe;
+    if (!ide || elegido.empty()) return;
+    const std::string ruta = W3dImportarAsset(elegido);
+    if (ide->sucio && ruta != ide->archivo) {   // con cambios sin guardar avisa antes de descartarlos
+        gIDECambiarA = ruta;
+        if (!confirmarPopup) confirmarPopup = new ConfirmarPopup();
+        confirmarPopup->Abrir("Descartar los cambios de " + IDENombreScript(ide->archivo) + "?", IDEConfirmarCambio);
+        return;
+    }
+    ide->AbrirArchivo(ruta);
+}
+// (harness) lo mismo que elegir el archivo en el explorador de "Load .lua..."
+void LayoutIDECargarLua(IDE* ide, const std::string& ruta) { gIDEMenuDe = ide; IDECargarLuaElegido(ruta); }
 static void LayoutAccionIDEScript(int id) {
     IDE* ide = gIDEMenuDe;
+    if (ide && id == kIDECargarLua) { AbrirFileBrowser(T("Load script"), T("Open"), ".lua", IDECargarLuaElegido); return; }
     if (!ide || id < 0 || id >= (int)gIDEScriptRutas.size()) return;
     const std::string& ruta = gIDEScriptRutas[id];
     if (ruta == ide->archivo) return; // ya es el abierto
@@ -2562,8 +2658,9 @@ static void LayoutAbrirMenuIDEScript(IDE* ide, int x, int y) {
     gIDEMenuDe = ide;
     gMenuIDEScript->Limpiar();
     IDEColectarScripts(&gIDEScriptRutas); // escenas + contenido/*.lua, sin repetidos
+    gMenuIDEScript->Agregar(T("Load .lua..."), kIDECargarLua, (int)IconType::carpeta);   // un .lua de afuera (importar)
     if (gIDEScriptRutas.empty()) {
-        gMenuIDEScript->Agregar("(no hay scripts .lua)", -1);
+        gMenuIDEScript->Agregar(T("(no .lua scripts)"), -1);
     } else {
         for (size_t i = 0; i < gIDEScriptRutas.size(); i++) {
             bool abierto = (gIDEScriptRutas[i] == ide->archivo);
@@ -2578,6 +2675,121 @@ static void LayoutAbrirMenuIDEScript(IDE* ide, int x, int y) {
     MenuAbierto = gMenuIDEScript;
 }
 
+// ===== menu ARCHIVO del IDE: Guardar / Guardar como... / Guardar en el w3d (o fuera) / Cargar .lua... =====
+static PopupMenu* gMenuIDEArchivo = NULL;
+static IDE* gIDEArchivoDe = NULL;
+enum { IDEA_Guardar = 1, IDEA_GuardarComo, IDEA_AlW3d, IDEA_FueraW3d, IDEA_Cargar };
+// la carpeta de la biblioteca en la que esta un archivo ("" = la raiz o no esta en la biblioteca)
+static std::string CarpetaBibliotecaDe(int vista, const std::string& id) {
+    if (id.empty()) return std::string();
+    std::vector<W3dRecursoItem> items; W3dVistaRecListar(vista, items);
+    for (size_t i = 0; i < items.size(); i++) if (items[i].id == id || items[i].entrada == id) return items[i].carpeta;
+    return std::string();
+}
+// guardar el .w3d del disco (lo que vive ADENTRO recien queda en el archivo despues de esto)
+static bool GuardarProyectoAlDisco() {
+    extern std::string w3dPath;
+    return !w3dPath.empty() && W3dContenedorHayMontado() && GuardarW3D(w3dPath);
+}
+static bool IDEGuardarComoAccion(const GuardarComoDestino& d, bool forzar, bool* existe, std::string& msg) {
+    IDE* ide = gIDEArchivoDe;
+    if (!ide) { msg = "Nothing to save"; return false; }
+    if (d.interno) {
+        if (!W3dContenedorHayMontado()) { msg = "Save the project first"; return false; }
+        std::string base = d.nombre;
+        if (base.size() > 4 && base.substr(base.size() - 4) == ".lua") base = base.substr(0, base.size() - 4);
+        const std::string entrada = "scripts/" + W3dSlugEntrada(base) + ".lua";
+        if (entrada != ide->archivo && W3dContenedorExiste(entrada) && !forzar) { if (existe) *existe = true; return false; }
+        const std::string t = ide->GetTexto();
+        if (!W3dContenedorEscribirEntrada(entrada, t.empty() ? "" : t.c_str(), t.size())) { msg = "Could not write the file"; return false; }
+        ide->archivo = entrada; ide->sucio = false;
+        W3dRecursosVistaInvalidar();
+        W3dVistaRecMover(W3D_VISTA_SCRIPTS, entrada, d.carpetaProyecto);   // en esa carpeta de la biblioteca
+        GuardarProyectoAlDisco();
+        Notificar(IDENombreScript(entrada) + " " + T("saved inside the .w3d"), false);
+        g_redraw = true;
+        return true;
+    }
+    const std::string ruta = W3dRutaEnCarpeta(d.carpetaDisco, d.nombre, "");
+    if (ruta != ide->archivo && w3dFileSystem::FileExists(ruta) && !forzar) { if (existe) *existe = true; return false; }
+    const std::string prev = ide->archivo;
+    ide->archivo = ruta;
+    if (!ide->Guardar()) { ide->archivo = prev; msg = "Could not write the file"; return false; }
+    g_redraw = true;
+    return true;
+}
+void IDEAbrirGuardarComo(IDE* ide) {
+    if (!ide) return;
+    gIDEArchivoDe = ide;
+    const std::string nombre = ide->archivo.empty() ? std::string("script.lua") : IDENombreScript(ide->archivo);
+    const bool interno = ide->archivo.empty() ? W3dContenedorHayMontado() : W3dEsNombreDeEntrada(ide->archivo);
+    AbrirGuardarComoPopup(T("Save As..."), nombre, ".lua", interno, CarpetaBibliotecaDe(W3D_VISTA_SCRIPTS, ide->archivo), IDEGuardarComoAccion);
+}
+// un script de AFUERA pasa ADENTRO del .w3d (las referencias de los objetos lo siguen) y se guarda el proyecto
+static void IDEMoverAlW3d(IDE* ide) {
+    if (!ide || ide->archivo.empty()) return;
+    if (!W3dContenedorHayMontado()) { Notificar(T("Save the project first"), true); return; }
+    if (ide->sucio && !ide->Guardar()) return;   // que el archivo de afuera tenga lo ultimo
+    std::string nuevo, motivo;
+    if (!W3dVistaRecFijarUbicacion(W3D_VISTA_SCRIPTS, ide->archivo, 0, std::string(), &nuevo, &motivo)) {
+        Notificar(T(motivo.empty() ? "It couldn't be copied into the .w3d" : motivo.c_str()), true);
+        return;
+    }
+    ide->archivo = nuevo; ide->sucio = false;
+    GuardarProyectoAlDisco();
+    Notificar(IDENombreScript(nuevo) + " " + T("saved inside the .w3d"), false);
+    g_redraw = true;
+}
+// un script de ADENTRO sale a un archivo del disco (donde se elija); los objetos pasan a usar ese archivo
+static void IDEFueraElegido(const std::string& elegido) {
+    IDE* ide = gIDEArchivoDe;
+    if (!ide || ide->archivo.empty()) return;
+    std::string base = IDENombreScript(ide->archivo);
+    if (base.size() > 4 && base.substr(base.size() - 4) == ".lua") base = base.substr(0, base.size() - 4);
+    const std::string ruta = W3dRutaDeSalida(elegido, base, ".lua");
+    if (ide->sucio) { ide->silencioso = true; ide->Guardar(); ide->silencioso = false; }   // la entrada tiene lo ultimo
+    std::string nuevo, motivo;
+    if (!W3dVistaRecFijarUbicacion(W3D_VISTA_SCRIPTS, ide->archivo, 1, ruta, &nuevo, &motivo)) {
+        Notificar(T(motivo.empty() ? "The file couldn't be written" : motivo.c_str()), true);
+        return;
+    }
+    ide->archivo = nuevo; ide->sucio = false;
+    GuardarProyectoAlDisco();   // el proyecto recuerda que ahora el script esta afuera
+    Notificar(IDENombreScript(nuevo) + " " + T("saved outside the .w3d"), false);
+    g_redraw = true;
+}
+static void LayoutAccionIDEArchivo(int id) {
+    IDE* ide = gIDEArchivoDe;
+    if (!ide) return;
+    switch (id) {
+        case IDEA_Guardar:     ide->GuardarEnProyecto(); break;
+        case IDEA_GuardarComo: IDEAbrirGuardarComo(ide); break;
+        case IDEA_AlW3d:       IDEMoverAlW3d(ide); break;
+        case IDEA_FueraW3d:    AbrirFileBrowser(T("Save outside the .w3d..."), T("Use this folder"), ".lua", IDEFueraElegido, true); break;
+        case IDEA_Cargar:      gIDEMenuDe = ide; AbrirFileBrowser(T("Load script"), T("Open"), ".lua", IDECargarLuaElegido); break;
+    }
+    g_redraw = true;
+}
+static void LayoutAbrirMenuIDEArchivo(IDE* ide, int x, int y) {
+    if (!ide) return;
+    gIDEArchivoDe = ide;
+    if (!gMenuIDEArchivo) { gMenuIDEArchivo = new PopupMenu(); gMenuIDEArchivo->action = LayoutAccionIDEArchivo; }
+    gMenuIDEArchivo->Limpiar();
+    gMenuIDEArchivo->Agregar(T("Save"), IDEA_Guardar, (int)IconType::guardar);
+    gMenuIDEArchivo->Agregar(T("Save As..."), IDEA_GuardarComo);
+    if (!ide->archivo.empty()) {
+        if (W3dEsNombreDeEntrada(ide->archivo)) gMenuIDEArchivo->Agregar(T("Save outside the .w3d..."), IDEA_FueraW3d);
+        else                                    gMenuIDEArchivo->Agregar(T("Save inside the .w3d"), IDEA_AlW3d);
+    }
+    gMenuIDEArchivo->Agregar(T("Load .lua..."), IDEA_Cargar, (int)IconType::carpeta);
+    if (MenuAbierto && MenuAbierto != gMenuIDEArchivo) MenuAbierto->Cerrar();
+    gMenuIDEArchivo->Abrir(x, y, MenuPantallaW, MenuPantallaH);
+    MenuAbierto = gMenuIDEArchivo;
+}
+// (harness) accion del menu Archivo del IDE sin abrir el menu; "fuera del w3d" con la carpeta ya elegida
+void LayoutIDEArchivoAccion(IDE* ide, int id) { gIDEArchivoDe = ide; LayoutAccionIDEArchivo(id); }
+void LayoutIDEFueraDelW3d(IDE* ide, const std::string& carpeta) { gIDEArchivoDe = ide; IDEFueraElegido(carpeta); }
+
 // click en la barra del IDE: por ROL (como la barra del 2D), no por indice
 bool LayoutClickBarraIDE(IDE* ide, int mx, int my) {
     if (!ide) return false;
@@ -2590,7 +2802,7 @@ bool LayoutClickBarraIDE(IDE* ide, int mx, int my) {
         int bx = b->sx, by = b->sy + b->height - GlobalScale;
         switch (b->rol) {
             case BRIDE_Script:  LayoutAbrirMenuIDEScript(ide, bx, by); return true;
-            case BRIDE_Guardar: ide->Guardar(); return true;
+            case BRIDE_Guardar: LayoutAbrirMenuIDEArchivo(ide, bx, by); return true;   // menu Archivo
             case BRIDE_Refresh: ide->Refresh(); return true;
         }
     }
@@ -2822,13 +3034,13 @@ static void LayoutAbrirMenuUVArmature(UVEditor* uv, int x, int y) {
         gMenuUVArm = new PopupMenu();
         gMenuUVArm->titulo = T("Armature");
         gMenuUVArm->action = LayoutAccionUVArm;
-        gMenuUVArm->Agregar(T("Extrude"), 0)->atajo = "E";
-        gMenuUVArm->Agregar(T("Duplicate"), 1)->atajo = "Shift D";
-        gMenuUVArm->Agregar(T("Delete"), 2)->atajo = "X";
+        gMenuUVArm->Agregar(T("Extrude"), 0)->atajo = "@uv.extruir";
+        gMenuUVArm->Agregar(T("Duplicate"), 1)->atajo = "@uv.duplicar";
+        gMenuUVArm->Agregar(T("Delete"), 2)->atajo = "@uv.borrar";
         // Set Parent y Clear Parent son SUBMENUS de 2 opciones cada uno (Keep Offset/Connected y
         // Disconnect Bone/Clear Parent): despachan por SU action propia (Parent.cpp)
-        gMenuUVArm->Agregar(T("Set Parent"), 3, -1, LayoutSubmenuBoneCtrlP())->atajo = "Ctrl P";
-        gMenuUVArm->Agregar(T("Clear Parent"), 4, -1, LayoutSubmenuBoneAltP())->atajo = "Alt P";
+        gMenuUVArm->Agregar(T("Set Parent"), 3, -1, LayoutSubmenuBoneCtrlP())->atajo = "@global.emparentar";
+        gMenuUVArm->Agregar(T("Clear Parent"), 4, -1, LayoutSubmenuBoneAltP())->atajo = "@global.desemparentar";
     }
     if (MenuAbierto && MenuAbierto != gMenuUVArm) MenuAbierto->Cerrar();
     gMenuUVArm->Abrir(x, y, MenuPantallaW, MenuPantallaH);
@@ -2968,6 +3180,14 @@ bool LayoutAbrirMenuDeBarra(ViewportBase* vp, int mx, int my) {
     Button* bProp = BarRolBtn(B, BR_Proporcional);
     Button* bAnim = BarRolBtn(B, BR_Animation);
     Button* bRaiz = BarRolBtn(B, BR_Raiz);
+    Button* bTexG = BarRolBtn(B, BR_TexGuardar);
+    if (bTexG && bTexG->visible && bTexG->Contains(mx, my)) {   // pintura de textura: guardar lo pintado
+        if (MenuAbierto) MenuAbierto->Cerrar();
+        LayoutAbrirMenuUVGuardar(NULL, bTexG->sx, bTexG->sy + bTexG->height - GlobalScale);
+        if (!MenuAbierto) Notificar(T("Texture Paint: the active part has no texture"), true);
+        else RegistrarMenuBarra(MenuAbierto, bTexG);
+        return true;
+    }
     if (bRaiz && bRaiz->visible && bRaiz->Contains(mx, my)) {
         // la ESCENA / el PREFAB que se edita: el menu se REARMA cada vez (la lista cambia)
         static PopupMenu* menuRaiz = NULL;
@@ -3319,18 +3539,18 @@ void LayoutMenuArmEdit(int mx, int my) {
     if (!BoneEditActivo()) return;
     if (!gMenuArmEdit) {
         gMenuArmEdit = new PopupMenu();
-        gMenuArmEdit->titulo = "Armature";
+        gMenuArmEdit->titulo = T("Armature");
         gMenuArmEdit->action = LayoutAccionObject;
-        gMenuArmEdit->Agregar(T("Extrude Bone"), 600)->atajo = "E";
-        gMenuArmEdit->Agregar(T("Move"), 604)->atajo = "G";
-        gMenuArmEdit->Agregar(T("Rotate"), 605)->atajo = "R";
-        gMenuArmEdit->Agregar(T("Scale"), 606)->atajo = "S";
-        gMenuArmEdit->Agregar(T("Duplicate"), 601)->atajo = "Shift D";
-        gMenuArmEdit->Agregar(T("Delete"), 602)->atajo = "X";
+        gMenuArmEdit->Agregar(T("Extrude Bone"), 600)->atajo = "@3d.extruir";
+        gMenuArmEdit->Agregar(T("Move"), 604)->atajo = "@3d.mover";
+        gMenuArmEdit->Agregar(T("Rotate"), 605)->atajo = "@3d.rotar";
+        gMenuArmEdit->Agregar(T("Scale"), 606)->atajo = "@3d.escalar";
+        gMenuArmEdit->Agregar(T("Duplicate"), 601)->atajo = "@3d.duplicar";
+        gMenuArmEdit->Agregar(T("Delete"), 602)->atajo = "@3d.borrar";
         // Set Parent y Clear Parent: submenus de 2 opciones cada uno (Keep Offset/Connected y
         // Disconnect Bone/Clear Parent); despachan por SU action (Parent.cpp), no por los 600s
-        gMenuArmEdit->Agregar(T("Set Parent"), 607, -1, LayoutSubmenuBoneCtrlP())->atajo = "Ctrl P";
-        gMenuArmEdit->Agregar(T("Clear Parent"), 608, -1, LayoutSubmenuBoneAltP())->atajo = "Alt P";
+        gMenuArmEdit->Agregar(T("Set Parent"), 607, -1, LayoutSubmenuBoneCtrlP())->atajo = "@global.emparentar";
+        gMenuArmEdit->Agregar(T("Clear Parent"), 608, -1, LayoutSubmenuBoneAltP())->atajo = "@global.desemparentar";
     }
     BoneAltPContexto3D(); // el submenu Clear Parent opera sobre los huesos 3D en edicion
     gMenuArmEdit->Abrir(mx, my, MenuPantallaW, MenuPantallaH);
@@ -3376,23 +3596,23 @@ void LayoutMenuEditContexto(int mx, int my) {
     if (EditSelectMode == SelFace) {
         if (!gMenuFace) {
             gMenuFace = new PopupMenu(); gMenuFace->titulo = T("Face"); gMenuFace->action = LayoutAccionObject;
-            gMenuFace->Agregar(T("Extrude Faces"), 300)->atajo = "E";
-            gMenuFace->Agregar(T("Loop Cut and Slide"), 340)->atajo = "Ctrl R";
-            gMenuFace->Agregar(T("Rip"), 341)->atajo = "V";
+            gMenuFace->Agregar(T("Extrude Faces"), 300)->atajo = "@3d.extruir";
+            gMenuFace->Agregar(T("Loop Cut and Slide"), 340)->atajo = "@3d.loopcut";
+            gMenuFace->Agregar(T("Rip"), 341)->atajo = "@3d.rip";
             gMenuFace->Agregar(T("Shade Smooth"), 320);
             gMenuFace->Agregar(T("Shade Flat"), 321);
             gMenuFace->Agregar(T("Recalculate Normals"), 322);
-            gMenuFace->Agregar(T("Triangulate Faces"), 323)->atajo = "Ctrl T";
+            gMenuFace->Agregar(T("Triangulate Faces"), 323)->atajo = "@3d.triangular";
             // (Delete se movio al menu "Mesh": es comun a vertice/borde/cara)
         }
         m = gMenuFace;
     } else if (EditSelectMode == SelEdge) {
         if (!gMenuEdge) {
             gMenuEdge = new PopupMenu(); gMenuEdge->titulo = T("Edge"); gMenuEdge->action = LayoutAccionObject;
-            gMenuEdge->Agregar(T("Extrude Edges"), 300)->atajo = "E";
-            gMenuEdge->Agregar(T("Loop Cut and Slide"), 340)->atajo = "Ctrl R";
-            gMenuEdge->Agregar(T("Rip"), 341)->atajo = "V";
-            gMenuEdge->Agregar(T("Mark Sharp"), 330)->atajo = "W";
+            gMenuEdge->Agregar(T("Extrude Edges"), 300)->atajo = "@3d.extruir";
+            gMenuEdge->Agregar(T("Loop Cut and Slide"), 340)->atajo = "@3d.loopcut";
+            gMenuEdge->Agregar(T("Rip"), 341)->atajo = "@3d.rip";
+            gMenuEdge->Agregar(T("Mark Sharp"), 330);
             gMenuEdge->Agregar(T("Clear Sharp"), 331);
             gMenuEdge->Agregar(T("Mark Seam"), 358);   // costuras del unwrap (tambien en el menu U)
             gMenuEdge->Agregar(T("Clear Seam"), 359);
@@ -3402,11 +3622,11 @@ void LayoutMenuEditContexto(int mx, int my) {
     } else {
         if (!gMenuVertex) {
             gMenuVertex = new PopupMenu(); gMenuVertex->titulo = T("Vertex"); gMenuVertex->action = LayoutAccionObject;
-            gMenuVertex->Agregar(T("New Edge/Face from Vertices"), 310)->atajo = "F";
-            gMenuVertex->Agregar(T("Connect Vertex Path"), 342)->atajo = "J";
-            gMenuVertex->Agregar(T("Extrude Vertices"), 300)->atajo = "E";
-            gMenuVertex->Agregar(T("Slide Vertices"), 343)->atajo = "Shift+V";
-            gMenuVertex->Agregar(T("Rip"), 341)->atajo = "V";
+            gMenuVertex->Agregar(T("New Edge/Face from Vertices"), 310)->atajo = "@3d.cara";
+            gMenuVertex->Agregar(T("Connect Vertex Path"), 342)->atajo = "@3d.conectar";
+            gMenuVertex->Agregar(T("Extrude Vertices"), 300)->atajo = "@3d.extruir";
+            gMenuVertex->Agregar(T("Slide Vertices"), 343)->atajo = "@3d.slide";
+            gMenuVertex->Agregar(T("Rip"), 341)->atajo = "@3d.rip";
             // (Delete se movio al menu "Mesh": es comun a vertice/borde/cara)
         }
         m = gMenuVertex;
@@ -3472,7 +3692,7 @@ static PopupMenu* gMenuProp = NULL;
 void LayoutMenuProporcional(int mx, int my){
     if (!gMenuProp){ gMenuProp = new PopupMenu(); gMenuProp->titulo = T("Proportional Editing"); gMenuProp->action = LayoutAccionObject; }
     gMenuProp->Limpiar();
-    gMenuProp->AgregarCheck(T("Enable"), 0, &g_prop.on)->atajo = "O";
+    gMenuProp->AgregarCheck(T("Enable"), 0, &g_prop.on)->atajo = "@3d.proporcional";
     // el resto en GRIS con el proportional apagado (como el menu Snap)
     gMenuProp->AgregarCheck(T("Connected Only"), 0, &g_prop.conectado)->gris = &g_prop.on;
     for (int t = 0; t < PropTipos; t++){
@@ -3488,21 +3708,21 @@ void LayoutMenuProporcional(int mx, int my){
 void LayoutMenuSnapTool(int mx, int my){
     if (!gMenuSnapBase){ gMenuSnapBase=new PopupMenu(); gMenuSnapBase->titulo=T("Snap Base"); }
     gMenuSnapBase->Limpiar();
-    for (int b=SNAP_CLOSEST;b<=SNAP_ACTIVE;b++) gMenuSnapBase->Agregar(SnapBaseNom(b), 100+b)->verde=(g_snap.base==b);
+    for (int b=SNAP_CLOSEST;b<=SNAP_ACTIVE;b++) gMenuSnapBase->Agregar(T(SnapBaseNom(b)), 100+b)->verde=(g_snap.base==b);
     if (!gMenuSnapTarget){ gMenuSnapTarget=new PopupMenu(); gMenuSnapTarget->titulo=T("Snap Target"); }
     gMenuSnapTarget->Limpiar();
-    for (int t=SNAP_VERTEX;t<=SNAP_FACECENTER;t++) gMenuSnapTarget->Agregar(SnapTargetNom(t), 200+t)->verde=(g_snap.target==t);
+    for (int t=SNAP_VERTEX;t<=SNAP_FACECENTER;t++) gMenuSnapTarget->Agregar(T(SnapTargetNom(t)), 200+t)->verde=(g_snap.target==t);
     // sin titulo: el boton "Snap" de la barra ya lo dice; una cabecera "Snap" gastaria una fila (240p Symbian)
     // REGLA DE DISENO de los titulos: un menu que se abre desde algo SIN TEXTO (un icono, o un atajo de teclado)
     // lleva titulo -- es lo unico que te dice que estas mirando. Si lo abre un boton/item que YA decia el texto, NO
     // lleva: repetirlo es ruido. El boton Snap ahora es un iman -> titulo.
-    if (!gMenuSnapTool){ gMenuSnapTool=new PopupMenu(); gMenuSnapTool->titulo="Snap"; gMenuSnapTool->action=AccionSnapRouter; }
+    if (!gMenuSnapTool){ gMenuSnapTool=new PopupMenu(); gMenuSnapTool->titulo=T("Snap"); gMenuSnapTool->action=AccionSnapRouter; }
     gMenuSnapTool->Limpiar();
     gMenuSnapTool->AgregarCheck(T("Enable"), 0, &g_snap.enabled)->atajo="Shift Tab";
     // el resto se ve en GRIS cuando el snap esta apagado (->gris = &g_snap.enabled): sin snap
     // ninguna de estas opciones hace efecto, igual que "Show Overlays" grisa sus hijos.
-    gMenuSnapTool->Agregar(std::string("Snap Base: ")+SnapBaseNom(g_snap.base), 0, -1, gMenuSnapBase)->gris = &g_snap.enabled;
-    gMenuSnapTool->Agregar(std::string("Snap Target: ")+SnapTargetNom(g_snap.target), 0, -1, gMenuSnapTarget)->gris = &g_snap.enabled;
+    gMenuSnapTool->Agregar(std::string(T("Snap Base")) + ": " + T(SnapBaseNom(g_snap.base)), 0, -1, gMenuSnapBase)->gris = &g_snap.enabled;
+    gMenuSnapTool->Agregar(std::string(T("Snap Target")) + ": " + T(SnapTargetNom(g_snap.target)), 0, -1, gMenuSnapTarget)->gris = &g_snap.enabled;
     // SOLO en target FACE: proyeccion POR VERTICE (retopologia). Submenu con 2 tildes INDEPENDIENTES (no radio):
     // Face Project (a lo largo del rayo de la vista) y Face Nearest (al punto mas cercano de la superficie).
     if (g_snap.target == SNAP_FACE){
@@ -4445,7 +4665,7 @@ static void AccionSnap(int aId) {
 PopupMenu* LayoutSubmenuSnap() {
     if (!gMenuSnap) {
         gMenuSnap = new PopupMenu();
-        gMenuSnap->titulo = "Snap";
+        gMenuSnap->titulo = T("Snap");
         gMenuSnap->action = AccionSnap;
         gMenuSnap->Agregar(T("Selection to Grid"), 0);
         gMenuSnap->Agregar(T("Selection to Cursor"), 1);
@@ -4509,7 +4729,7 @@ PopupMenu* LayoutSubmenuNormals() {
         gMenuNormals = new PopupMenu();
         gMenuNormals->titulo = T("Normals");
         gMenuNormals->action = LayoutAccionObject;
-        gMenuNormals->Agregar(T("Recalculate Normals"), 322)->atajo = "Shift N"; // orienta hacia afuera (cubo/esfera OK)
+        gMenuNormals->Agregar(T("Recalculate Normals"), 322)->atajo = "@3d.normales"; // orienta hacia afuera (cubo/esfera OK)
         gMenuNormals->Agregar(T("Flip"), 324);                                    // simplemente invierte las normales
     }
     return gMenuNormals;
@@ -5296,8 +5516,17 @@ bool LayoutSoltarViewport(int mx, int my){
 // si no, la tecla se pierde en el no-op de la base (paso: las flechas de Properties dejaron de navegar el panel
 // porque en el telefono Properties todavia no overridea event_key_down y la base se las comia en silencio).
 // El arreglo de fondo es que event_key_down devuelva bool.
-bool LayoutTeclaViewport(int tecla, bool repeticion){
+// traducir: la tecla es la APRETADA y pasa por los atajos reasignados (app/W3dAtajos.h). false = ya es la tecla por
+// defecto de una funcion (el telefono manda su 1/2/3 como la g/r/s de PC) y no hay que traducirla otra vez.
+bool LayoutTeclaViewport(int tecla, bool repeticion, bool traducir){
     if (!viewPortActive || tecla == W3dK_NADA) return false;
+    W3dModsTemporales mods;
+    if (traducir) {
+        int ctx[4]; const int n = W3dAtajoContextos(ctx);
+        const int m0 = W3dModsActuales(); int m = m0;
+        if (!W3dAtajoTraducir(ctx, n, tecla, m)) return true;   // combinacion sin funcion: se traga
+        if (m != m0) mods.Fijar(m);
+    }
     viewPortActive->event_key_down(tecla, repeticion);
     return true;
 }
@@ -5432,7 +5661,7 @@ bool LayoutToggleEditMode() {
     // malla NO EDITABLE (escenario): sin datos de edicion, el Tab no entra. El boton
     // "Convertir en mesh editable" de la card Mesh la reabre (recalcula bordes/edges).
     if (InteractionMode != EditMode && ((Mesh*)ObjActivo)->noEditable) {
-        Notificar(T("Malla no editable (Convertir en mesh editable, card Mesh)"), true);
+        Notificar(T("Mesh not editable (Convert to editable mesh, Mesh card)"), true);
         return false;
     }
     UndoCapturarModo(); // Ctrl+Z: guarda el modo PREVIO antes de togglear

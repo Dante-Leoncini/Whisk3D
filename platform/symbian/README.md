@@ -31,3 +31,11 @@ La app escribe `E:\whisk3d.log` línea por línea, con flush a disco. Si se cier
 - `[mem] <hito>: heap X KB en uso (Y KB tomados), RAM libre Z KB`: los hitos de una carga grande (contenedor montado, JSON leído, cada animset y cada prefab, proyecto abierto, texturas del Play). "Tomados" es lo que el chunk del heap ya le sacó al teléfono: los huecos que deja lo liberado no vuelven.
 
 Pila del hilo principal: 80 KB (`EPOCSTACKSIZE 0x14000`, el máximo de EKA2).
+
+Al arrancar, las líneas `[gl]` registran lo que expone el driver: `GL_VENDOR`, `GL_RENDERER`, `GL_VERSION`, las extensiones de GL y de EGL en tramos, los límites (luces, unidades de textura, `GL_MAX_PALETTE_MATRICES_OES`, `GL_MAX_VERTEX_UNITS_OES`) y si `eglGetProcAddress` encuentra funciones que el driver no anuncia (programas de vértices de `IMG_vertex_program`, la paleta de matrices, multi-draw).
+
+## GPU del N95: lo que se sabe
+
+- **El chip.** El N95 usa un OMAP2420 con PowerVR **MBX + VGP**, según la hoja de datos de TI ("2D/3D hardware MBX/VGP accelerators, up to 2 Million polygons/sec"). El VGP es el procesador de vértices programable. El OMAP2430 trae, en cambio, MBX Lite + VGP Lite.
+- **El acceso al VGP.** Desde OpenGL ES 1.1 se programa con la extensión `GL_IMG_vertex_program` (ensamblador al estilo de `ARB_vertex_program`, compilado con el VGP Compiler del SDK de PowerVR). Según Imagination (foro de PowerVR, 2008), **el driver de Nokia no la expone en el N95 ni en ningún Nokia con OMAP2**, aunque otros equipos con el mismo chip sí (Samsung i8510 e i7710, Motorola Z8 y Z10). Sin esa extensión no hay programas de vértices propios.
+

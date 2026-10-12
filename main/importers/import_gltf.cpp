@@ -1,3 +1,4 @@
+#include "W3dLang.h"   // T(): los avisos salen en el idioma del editor
 #include "import_gltf.h"
 #include "import_obj.h"          // Wavefront / Face / FaceCorner / ExtractBaseName / EncolarTextura
 #include "objects/Mesh.h"
@@ -383,7 +384,7 @@ bool ImportGLTF(const std::string& filepath) {
     std::vector<unsigned char> file;
     if (!w3dFileSystem::ReadFileBytes(filepath, file) || file.size() < 12) {
         w3dLogfE("ImportGLTF: no pude leer %s", filepath.c_str());
-        Notificar("glTF: no pude abrir el archivo", true); return false;
+        Notificar(T("glTF: could not open the file"), true); return false;
     }
     GltfDoc doc; doc.dir = DirOf(filepath);
 
@@ -406,7 +407,7 @@ bool ImportGLTF(const std::string& filepath) {
     JParser jp(jsonStr.c_str(), jsonStr.size());
     if (!jp.parse(doc.root) || !jp.ok || doc.root.t != JVal::OBJ) {
         w3dLogfE("ImportGLTF: JSON invalido en %s", filepath.c_str());
-        Notificar("glTF: JSON invalido", true); return false;
+        Notificar(T("glTF: invalid JSON"), true); return false;
     }
 
     ProgresoIniciar("Importing glTF..."); // barra de progreso (no-op sin GUI; clave en el N95). Faltaba en glTF.
@@ -955,9 +956,9 @@ bool ImportGLTF(const std::string& filepath) {
         }
     }
 
-    if (importadas == 0 && !arm) { w3dLogfE("ImportGLTF: sin mallas ni esqueleto"); ProgresoFin(); Notificar("glTF: nada que importar", true); return false; }
+    if (importadas == 0 && !arm) { w3dLogfE("ImportGLTF: sin mallas ni esqueleto"); ProgresoFin(); Notificar(T("glTF: nothing to import"), true); return false; }
     ProgresoFin();
     w3dLogf("ImportGLTF: %d malla(s), %s", importadas, filepath.c_str());
-    Notificar("glTF imported successfully!", false);
+    Notificar(T("glTF imported successfully!"), false);
     return true;
 }

@@ -20,6 +20,7 @@ extern bool g_viewEditMode;   // toggle "vista" tactil (ViewPort3D_Toolbar): en 
 #include "Undo.h" // Ctrl+Z
 #include "objects/Gamepad.h"    // axisState/buttonState: se sueltan al desenchufar el mando
 #include "script/BindsJuego.h"  // el REGISTRO compartido de controles (hotplug + avisos + lua)
+#include "app/W3dAtajos.h"      // atajos de teclado reasignables
 
 // ---------------------------------------------------------------------------------------------------------------
 //  SDL -> el evento propio del editor (ViewPorts/W3dInput.h). Los viewports no hablan SDL: mientras lo hicieron,
@@ -46,7 +47,18 @@ static int W3dTeclaDesdeSDL(SDL_Keycode k){
         case SDLK_END:       return W3dK_END;
         case SDLK_PAGEUP:    return W3dK_PGUP;
         case SDLK_PAGEDOWN:  return W3dK_PGDN;
+        case SDLK_F1:        return W3dK_F1;
         case SDLK_F2:        return W3dK_F2;
+        case SDLK_F3:        return W3dK_F3;
+        case SDLK_F4:        return W3dK_F4;
+        case SDLK_F5:        return W3dK_F5;
+        case SDLK_F6:        return W3dK_F6;
+        case SDLK_F7:        return W3dK_F7;
+        case SDLK_F8:        return W3dK_F8;
+        case SDLK_F9:        return W3dK_F9;
+        case SDLK_F10:       return W3dK_F10;
+        case SDLK_F11:       return W3dK_F11;
+        case SDLK_F12:       return W3dK_F12;
         case SDLK_LEFT:      return W3dK_LEFT;
         case SDLK_RIGHT:     return W3dK_RIGHT;
         case SDLK_UP:        return W3dK_UP;
@@ -71,6 +83,28 @@ static int W3dTeclaDesdeSDL(SDL_Keycode k){
     if (k >= 32 && k < 127) return (int)k;   // imprimible: vale su ASCII
     return W3dK_NADA;
 }
+// La vuelta: un atajo reasignado reescribe el evento SDL con la tecla por defecto de su funcion, asi los atajos
+// globales de aca abajo (que miran el SDL_Event) y los viewports (que miran la W3dTecla) ven lo mismo.
+static SDL_Keycode W3dTeclaASDL(int t){
+    static const SDL_Keycode sdl[] = { SDLK_RETURN, SDLK_ESCAPE, SDLK_BACKSPACE, SDLK_DELETE, SDLK_TAB, SDLK_HOME,
+        SDLK_END, SDLK_PAGEUP, SDLK_PAGEDOWN, SDLK_F1, SDLK_F2, SDLK_F3, SDLK_F4, SDLK_F5, SDLK_F6, SDLK_F7, SDLK_F8,
+        SDLK_F9, SDLK_F10, SDLK_F11, SDLK_F12, SDLK_LEFT, SDLK_RIGHT, SDLK_UP, SDLK_DOWN, SDLK_KP_0, SDLK_KP_1,
+        SDLK_KP_2, SDLK_KP_3, SDLK_KP_4, SDLK_KP_5, SDLK_KP_6, SDLK_KP_7, SDLK_KP_8, SDLK_KP_9, SDLK_KP_ENTER,
+        SDLK_KP_PERIOD };
+    for (size_t i = 0; i < sizeof(sdl) / sizeof(sdl[0]); i++) if (W3dTeclaDesdeSDL(sdl[i]) == t) return sdl[i];
+    if (t >= 32 && t < 127) return (SDL_Keycode)t;
+    return SDLK_UNKNOWN;
+}
+SDL_Keycode W3dTeclaASDLPublica(int t){ return W3dTeclaASDL(t); }   // (el harness: teclareal)
+static int W3dModsDesdeSDL(Uint16 m){
+    return ((m & KMOD_SHIFT) ? W3dMOD_SHIFT : 0) | ((m & KMOD_CTRL) ? W3dMOD_CTRL : 0) | ((m & KMOD_ALT) ? W3dMOD_ALT : 0);
+}
+static Uint16 W3dModsASDL(int m){
+    return (Uint16)(((m & W3dMOD_SHIFT) ? KMOD_LSHIFT : 0) | ((m & W3dMOD_CTRL) ? KMOD_LCTRL : 0) | ((m & W3dMOD_ALT) ? KMOD_LALT : 0));
+}
+// tecla APRETADA -> la que se mando en su lugar (para que el SOLTAR llegue como la misma tecla que se apreto)
+static std::map<SDL_Keycode, SDL_Keycode> g_teclasTraducidas;
+
 static int W3dBotonDesdeSDL(Uint8 b){
     if (b == SDL_BUTTON_LEFT)   return W3dMB_IZQ;
     if (b == SDL_BUTTON_MIDDLE) return W3dMB_MEDIO;
@@ -138,6 +172,11 @@ static Uint32 g_tapStartTicks = 0;
 static const Uint32 kEsperaGestoMs = 180;
 static bool g_tlTapPending = false;          // toque sobre el CONTENIDO del timeline (kind 5) esperando: tap o arrastre
 static ViewportBase* g_tlTapView = NULL;
+// NAVEGACION CON ALT (estilo de los programas de pintura 3D): Alt + arrastre izquierdo ORBITA y Alt + Shift +
+// arrastre izquierdo DESPLAZA, ademas del boton del medio de siempre. Un click QUIETO con Alt sigue siendo el
+// click de siempre (Shift+Alt+click = loop select en Edit Mode): se decide al pasar el umbral de arrastre.
+bool g_altNavPend = false;     // down con Alt sobre el 3D, todavia sin decidir click / arrastre
+bool g_altNavActivo = false;   // arrastre con Alt en curso: el viewport 3D orbita / desplaza (ViewPort3D.cpp)
 bool g_uiTapEnCurso = false;        // el LayoutClickUI que corre es un TAP tactil diferido (no un click de mouse)
 Uint32 g_lastFingerTicks = 0;       // ultimo evento de DEDO: filtra los mouse FANTASMA que el browser sintetiza
                                     // tras el touch (llegan como mouse "real" y clickeaban/abrian al soltar)
@@ -502,6 +541,15 @@ void InputUsuarioSDL3(SDL_Event &e){
             return;
         }
         if (leftMouseDown && fingers.size() <= 1) {
+            // NAVEGACION CON ALT: pasado el umbral el arrastre ORBITA (o desplaza con Shift) y el click no pickea
+            if (g_altNavPend) {
+                int adx = mx - g_tapStartX; if (adx < 0) adx = -adx;
+                int ady = my - g_tapStartY; if (ady < 0) ady = -ady;
+                if (adx + ady > 4 * GlobalScale) {
+                    g_altNavPend = false; g_altNavActivo = true; g_view3dTapPending = false;
+                    dx = 0; dy = 0;   // el delta lo calcula el warp DESPUES: el primero arranca en cero (sin salto)
+                } else { g_redraw = true; return; }   // todavia es un click
+            }
             // VIEWPORT 3D en tactil: el down NO selecciono (g_view3dTapPending). Si el dedo paso el umbral,
             // es un orbit/paneo -> se cancela el tap (la seleccion NO cambia) y se sigue de largo al
             // event_mouse_motion (que orbita). Un jitter chico sigue siendo TAP (selecciona al soltar).
@@ -935,7 +983,19 @@ void InputUsuarioSDL3(SDL_Event &e){
                 // el up del viewport la confirma. Nada de diferir el pick ni de armar box select.
                 // GIZMO con MOUSE: agarra al instante (el up del viewport confirma). Con DEDO va por el toque
                 // pendiente de abajo: se decide recien pasada la espera anti-gesto (un 2do dedo = pinch, no gizmo).
-                if (es3Dnav && !esTouch && GizmoDown(hoja3d, (int)e.button.x, (int)e.button.y)) {
+                // NAVEGACION CON ALT (mouse): ni gizmo, ni trazo de pintura, ni caja de seleccion. Si se suelta sin
+                // arrastrar es el click de siempre (pick al soltar; en pintura no hace nada).
+                const bool altNav = !esTouch && (SDL_GetModState() & KMOD_ALT) != 0 && hoja3d && hoja3d->isLeaf() &&
+                                    hoja3d->ViewportKind() == 1 && estado == editNavegacion;
+                g_altNavPend = false; g_altNavActivo = false;
+                if (altNav) {
+                    const bool pinturaAlt = (InteractionMode == WeightPaint || InteractionMode == VertexPaint || InteractionMode == TexturePaint);
+                    g_altNavPend = true;
+                    viewPortActive = hoja3d;
+                    g_barTapView = hoja3d; g_tapStartX = (int)e.button.x; g_tapStartY = (int)e.button.y; g_tapStartTicks = SDL_GetTicks();
+                    if (!pinturaAlt) { viewPortActive->button_left(); g_view3dTapPending = true; }
+                }
+                else if (es3Dnav && !esTouch && GizmoDown(hoja3d, (int)e.button.x, (int)e.button.y)) {
                     ViewPortClickDown = true;
                 }
                 else if (esTouch && es3Dnav) {
@@ -1054,6 +1114,7 @@ void InputUsuarioSDL3(SDL_Event &e){
         }
         if (e.button.button == SDL_BUTTON_LEFT) {
             leftMouseDown = false;
+            g_altNavPend = false; g_altNavActivo = false;   // fin de la navegacion con Alt (si fue click, pickea abajo)
             // BOX SELECT: soltar cierra la caja y selecciona. Shift SUMA a lo que ya estaba
             // (misma regla que el pick de siempre). Consume el up: no hay pick ni orbita.
             if (BoxSelectArrastrando()) {
@@ -1104,6 +1165,11 @@ void InputUsuarioSDL3(SDL_Event &e){
             ViewPortClickDown = false;
             ViewportBase* h = g_barTapView;
             const bool pinturaTap = (InteractionMode == WeightPaint || InteractionMode == VertexPaint || InteractionMode == TexturePaint);
+            // TAP (dedo) sobre el GIZMO: pasa al modo siguiente (mover -> rotar -> escalar) en vez de seleccionar lo de abajo
+            if (e.button.which == SDL_TOUCH_MOUSEID && h && !pinturaTap && GizmoTocar(h, (int)e.button.x, (int)e.button.y)) {
+                GuardarMousePos();
+                return;
+            }
             if (h && h->isLeaf() && h->ViewportKind() == 1 && estado == editNavegacion && !pinturaTap) {   // pintando (vista ON) un tap no pickea ni pinta
                 if (viewPortActive) viewPortActive->button_left(); // GuardarMousePos + cursor 3D en el punto tocado
                 ScenePick3D((int)e.button.x, (int)e.button.y, h->x, h->y, h->width, h->height, W3dPantallaAlto);
@@ -1145,7 +1211,35 @@ void InputUsuarioSDL3(SDL_Event &e){
     }
 
     // eventos del teclado
+    W3dModsTemporales modsAtajo;   // (vuelve los modificadores a lo apretado al salir, por cualquier return)
     if (e.type == SDL_EVENT_KEY_DOWN) {
+
+        // CAPTURA de la ventana de atajos: la combinacion que se aprieta es para la funcion que la espera
+        if (g_atajoCapturando >= 0 &&
+            W3dAtajoCapturar(W3dTeclaDesdeSDL(e.key.keysym.sym), W3dModsDesdeSDL(e.key.keysym.mod))) {
+            g_redraw = true;
+            return;
+        }
+        // ATAJOS REASIGNADOS: la combinacion apretada se cambia por la por defecto de la funcion que la tiene, y de
+        // aca para abajo todo sigue igual que siempre. No con texto enfocado, un menu o un popup modal abiertos:
+        // ahi las teclas son de ellos (tipear, navegar). El panel semi-modal del ultimo transform si deja pasar.
+        if (!g_textFieldActivo && !RenameActivo() && !LayoutMenuAbierto() &&
+            (!PopUpActive || PopUpActive->CierraConViewport())) {
+            const SDL_Keycode fisica = e.key.keysym.sym;
+            int t = W3dTeclaDesdeSDL(fisica), m = W3dModsDesdeSDL(e.key.keysym.mod);
+            const int t0 = t, m0 = m;
+            int ctx[4]; const int nctx = W3dAtajoContextos(ctx);
+            if (!W3dAtajoTraducir(ctx, nctx, t, m)) return;   // era el atajo de fabrica de algo reasignado: libre
+            if (t != t0 || m != m0) {
+                const SDL_Keycode nueva = W3dTeclaASDL(t);
+                if (nueva != SDLK_UNKNOWN) {
+                    e.key.keysym.sym = nueva;
+                    e.key.keysym.mod = W3dModsASDL(m);
+                    modsAtajo.Fijar(m);
+                    g_teclasTraducidas[fisica] = nueva;
+                }
+            }
+        }
 
         // IDE (editor de texto lua): con el foco por hover en un viewport IDE, el teclado
         // ES DEL TEXTO: ni los atajos globales (Ctrl+S/Ctrl+Z de proyecto) ni los del
@@ -1394,7 +1488,10 @@ void InputUsuarioSDL3(SDL_Event &e){
         }
     }
     else if (e.type == SDL_EVENT_KEY_UP) {
-        viewPortActive->event_key_up(W3dTeclaDesdeSDL(e.key.keysym.sym));
+        SDL_Keycode k = e.key.keysym.sym;
+        std::map<SDL_Keycode, SDL_Keycode>::iterator tr = g_teclasTraducidas.find(k);
+        if (tr != g_teclasTraducidas.end()) { k = tr->second; g_teclasTraducidas.erase(tr); }
+        viewPortActive->event_key_up(W3dTeclaDesdeSDL(k));
     }
     // ENTRADA NUMERICA: el texto tipeado (respeta el layout del teclado: parentesis,
     // *, /, etc.) alimenta el valor exacto del transform. NumInputChar ignora todo si

@@ -256,7 +256,7 @@ MallaRecurso* W3dRutinaBuscarMalla(Object* desde, const std::string& nombre) {
 // ---------------------------------------------------------------------------
 Rutina::Rutina(Object* parent, const std::string& nombre)
     : Object(parent, nombre, Vector3(0, 0, 0)), listaEditada(0), pasoActivo(-1), invalida(false), sucia(true),
-      ejecutada(false), constructor(false), genHecha(0), arraysVistos(false), precargada(false), punterosOk(false),
+      ejecutada(false), constructor(false), repetir(1.0f), genHecha(0), arraysVistos(false), precargada(false), punterosOk(false),
       punterosEdad(0), valOk(false), valSabido(false), valVistos(false), valGen(0), valEdad(0) {
     sinTransformacion = true;
     for (int m = 0; m < ModoN; m++) { usar[m] = -1; conHijos[m] = false; }
@@ -820,7 +820,14 @@ void Rutina::RenderObject() {
     const long tris0 = (long)gfx::g_statTrisOpacos + gfx::g_statTrisBlend;
     AbrirCorrida();
     Rutina* antes = gEnCurso; gEnCurso = this;
-    Ejecutar(ListaActual());
+    int veces = (int)(repetir + 0.5f); if (veces < 1) veces = 1; if (veces > 100000) veces = 100000;
+    if (veces == 1) Ejecutar(ListaActual());
+    else {
+        // BUCLE: la lista entera N veces, con el estado que dejo la vuelta anterior (la matriz se acumula)
+        float* mem = W3dMemoria("bucle");
+        mem[1] = (float)veces;
+        for (int k = 0; k < veces; k++) { mem[0] = (float)k; Ejecutar(ListaActual()); }
+    }
     gEnCurso = antes;
     CerrarCorrida();
     if (g_rutinaPerfil) {
@@ -1003,6 +1010,7 @@ static void EscribirLista(std::string& s, int ind, std::vector<W3dPaso>& L,
 void RutinaEscribirCampos(std::string& s, int ind, Rutina* r, std::string (*emitirTextura)(std::string&, void*), void* ctx) {
     if (r->sucia) r->Resolver();   // (los punteros de las texturas: su ruta en memoria es la que se emite)
     if (r->constructor) { s += ",\n"; RuSang(s, ind); s += "\"constructor\": true"; }
+    if ((int)(r->repetir + 0.5f) > 1) { char b[48]; snprintf(b, sizeof b, "\"repetir\": %d", (int)(r->repetir + 0.5f)); s += ",\n"; RuSang(s, ind); s += b; }
     { char b[32]; snprintf(b, sizeof b, "\"version\": %d", kVersionPasos); s += ",\n"; RuSang(s, ind); s += b; }
     s += ",\n"; RuSang(s, ind); s += "\"pasos\": "; EscribirLista(s, ind, r->listas[Rutina::ModoDefecto], emitirTextura, ctx);
     bool hay = false;
@@ -1159,6 +1167,7 @@ static void LeerLista(JVal* l, std::vector<W3dPaso>& L, std::string (*refTextura
 void RutinaLeerCampos(JVal* j, Rutina* r, std::string (*refTextura)(const std::string&, void*), void* ctx) {
     if (!j || !r) return;
     r->constructor = JB(j, "constructor", false);
+    r->repetir = (float)JI(j, "repetir", 1);   // bucle de rutina (sin el campo: una rutina comun)
     if (r->constructor) g_w3dConstructorGen++;   // (un proyecto que se abre: su constructor corre de nuevo)
     const int version = JI(j, "version", 1);     // (sin version: la 1, la de los punteros que prendian su array)
     LeerLista(JHijo(j, "pasos", 5), r->listas[Rutina::ModoDefecto], refTextura, ctx, version);

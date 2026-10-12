@@ -100,7 +100,7 @@ bool LayoutTimelineNavFrame(int dx, int dy, bool zoomMode, bool panMode); // Tim
 // ---- click / tecla al viewport que corresponde (el ruteo de PC, ahora tambien para el telefono) ----
 bool LayoutClickViewport(int mx, int my);        // down: el viewport bajo el cursor pasa a activo y recibe el click
 bool LayoutSoltarViewport(int mx, int my);       // up: lo suelta (cierra arrastres/undos)
-bool LayoutTeclaViewport(int tecla, bool repeticion); // tecla -> viewport ACTIVO (W3dInput.h)
+bool LayoutTeclaViewport(int tecla, bool repeticion, bool traducir = true); // tecla -> viewport ACTIVO (W3dInput.h)
 bool LayoutTeclaViewportUp(int tecla);
 
 // Timeline: navegacion de la barra de transporte por teclado (soft-izq entra/sale; flechas mueven el foco; OK activa)

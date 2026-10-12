@@ -1,4 +1,5 @@
 #include "ViewPorts/IDE.h"
+#include "app/W3dTeclado.h"   // W3dTecladoAbrir: el teclado del celular (y el layout que se adapta)
 #include "w3dGraphics.h"                 // w3dEngine (abstraccion grafica)
 #include "WhiskUI/draw/glesdraw.h"       // W3dPantallaAlto
 #include "WhiskUI/theme/colores.h"       // ListaColores / ColorID
@@ -10,7 +11,10 @@
 #include "script/W3dScript.h"            // W3dScriptDatos (rutas de scripts de los objetos)
 #include "ViewPorts/Notificaciones.h"    // toasts de guardado / refresh
 #include "w3dFilesystem.h"               // ReadTextFile / ListDir (colector + abrir)
-#include "io/W3dContenedor.h"            // los .lua del proyecto v4 viven ADENTRO del .w3d
+#include "io/W3dContenedor.h"
+#ifndef W3D_SYMBIAN
+    #include <SDL2/SDL.h>               // SDL_StartTextInput: el teclado del celular al tocar el codigo
+#endif            // los .lua del proyecto v4 viven ADENTRO del .w3d
 #include "W3dLang.h"                     // T() para los textos de la barra
 #include "variables.h"                   // w3dPath (el proyecto abierto)
 #include <stdio.h>                       // guardado atomico: fopen/fwrite/rename
@@ -233,7 +237,7 @@ IDE::IDE() {
     haySel = false; selLin = 0; selCol = 0;
     undoUltimaOp = 0;
     lastLineas = -1; lastMaxAncho = 0;
-    selDrag = false;
+    selDrag = false; silencioso = false;
     lineas.push_back(std::string()); // el buffer nunca esta vacio (1 linea vacia)
     BarCrear(); // [0] = icono de tipo/split
     // botones por ROL (no por indice), como la barra del 2D/UV
@@ -241,8 +245,8 @@ IDE::IDE() {
     b = new Button(T("Script"), -1);
     b->rol = BRIDE_Script; b->desplegable = true; b->caretMenu = true;
     BarButtons.push_back(b);
-    b = new Button(T("Save"));
-    b->rol = BRIDE_Guardar;
+    b = new Button(T("File"), -1);   // menu ARCHIVO: Guardar / Guardar como... / dentro o fuera del w3d / Cargar .lua
+    b->rol = BRIDE_Guardar; b->desplegable = true; b->caretMenu = true;
     BarButtons.push_back(b);
     b = new Button(T("Refresh"));
     b->rol = BRIDE_Refresh;
@@ -281,7 +285,7 @@ bool IDE::AbrirArchivo(const std::string& ruta) {
     bool ok = false;
     std::string crudo = w3dFileSystem::ReadTextFile(ruta, &ok);
     if (!ok) {
-        Notificar("IDE: no pude leer " + IDENombreScript(ruta), true);
+        Notificar(std::string(T("IDE: could not read")) + " " + IDENombreScript(ruta), true);
         return false;
     }
     IdePartirEnLineas(crudo, &lineas);
@@ -333,26 +337,25 @@ bool IDE::Guardar() {
     // ---------------------------------------------------------------------
     if (W3dEsNombreDeEntrada(archivo)) {
         if (!W3dContenedorEscribirEntrada(archivo, t.empty() ? "" : t.c_str(), t.size())) {
-            Notificar("IDE: no pude guardar " + IDENombreScript(archivo) +
-                      " adentro del proyecto", true);
+            Notificar(std::string(T("IDE: could not save inside the project:")) + " " + IDENombreScript(archivo), true);
             return false;
         }
         sucio = false;
-        Notificar(IDENombreScript(archivo) + " guardado (guarda el proyecto para que quede en el .w3d)", false);
+        if (!silencioso) Notificar(IDENombreScript(archivo) + " guardado (guarda el proyecto para que quede en el .w3d)", false);
         g_redraw = true;
         return true;
     }
     std::string tmp = archivo + ".w3dtmp";
     FILE* f = fopen(tmp.c_str(), "wb");
     if (!f) {
-        Notificar("IDE: no pude escribir " + IDENombreScript(archivo), true);
+        Notificar(std::string(T("IDE: could not write")) + " " + IDENombreScript(archivo), true);
         return false;
     }
     size_t esc = t.empty() ? 0 : fwrite(t.c_str(), 1, t.size(), f);
     bool ok = (fclose(f) == 0) && (esc == t.size());
     if (!ok) {
         remove(tmp.c_str());
-        Notificar("IDE: fallo el guardado de " + IDENombreScript(archivo), true);
+        Notificar(std::string(T("IDE: saving failed:")) + " " + IDENombreScript(archivo), true);
         return false;
     }
 #if defined(_WIN32) || defined(W3D_SYMBIAN)
@@ -361,12 +364,30 @@ bool IDE::Guardar() {
 #endif
     if (rename(tmp.c_str(), archivo.c_str()) != 0) {
         remove(tmp.c_str());
-        Notificar("IDE: fallo el guardado de " + IDENombreScript(archivo), true);
+        Notificar(std::string(T("IDE: saving failed:")) + " " + IDENombreScript(archivo), true);
         return false;
     }
     sucio = false;
-    Notificar(IDENombreScript(archivo) + " guardado", false);
+    if (!silencioso) Notificar(IDENombreScript(archivo) + " guardado", false);
     g_redraw = true;
+    return true;
+}
+
+bool IDE::GuardarEnProyecto() {
+    if (archivo.empty()) { extern void IDEAbrirGuardarComo(IDE*); IDEAbrirGuardarComo(this); return false; }
+    if (!W3dEsNombreDeEntrada(archivo)) return Guardar();   // externo: el archivo del disco y listo
+    silencioso = true;
+    const bool ok = Guardar();
+    silencioso = false;
+    if (!ok) return false;
+    // adentro del proyecto: el .w3d del disco se reescribe con el script (sino el cambio quedaba solo en memoria)
+    extern std::string w3dPath;
+    extern bool GuardarW3D(const std::string&);
+    if (!w3dPath.empty() && GuardarW3D(w3dPath)) {
+        Notificar(IDENombreScript(archivo) + " " + T("saved inside the .w3d"), false);
+        return true;
+    }
+    Notificar(IDENombreScript(archivo) + " guardado (guarda el proyecto para que quede en el .w3d)", false);
     return true;
 }
 
@@ -401,7 +422,7 @@ void IDE::Refresh() {
         for (size_t i = 0; i < o->Childrens.size(); i++) pila.push_back(o->Childrens[i]);
     }
     for (size_t i = 0; i < usan.size(); i++) SimScriptsCambiados(usan[i]);
-    Notificar("Refresh: " + IdeNum((int)usan.size()) + " objeto(s) recargados en vivo", false);
+    Notificar(std::string(T("Refresh:")) + " " + IdeNum((int)usan.size()) + " " + T("object(s) reloaded live"), false);
     g_redraw = true;
 }
 
@@ -670,7 +691,7 @@ bool IDE::TeclaEditor(int tecla, bool repeticion) {
             case W3dK_V: Pegar(); return true;
             case W3dK_A: SeleccionarTodo(); return true;
             case W3dK_Z: DeshacerTexto(); return true;             // undo DEL TEXTO, no el global
-            case W3dK_S: Guardar(); return true;                   // guarda el .lua, no el proyecto
+            case W3dK_S: GuardarEnProyecto(); return true;         // guarda el .lua (y el .w3d si vive adentro)
             case W3dK_HOME: CursorA(0, 0, shift); return true;     // inicio del archivo
             case W3dK_END:
                 CursorA((int)lineas.size() - 1, (int)lineas.back().size(), shift);
@@ -739,6 +760,11 @@ void IDE::ClickContenido(int mx, int my, bool shift) {
     CursorA(lin, col, shift);
     selDrag = true;
     ViewPortClickDown = true; // el drag de seleccion congela el foco por hover
+    // TACTIL (Android): el teclado del celular NO aparece solo. En PC SDL deja la entrada de texto prendida desde
+    // el arranque; en Android hay que pedirlo. Un TAP sobre el codigo lo levanta (como los campos de texto del panel).
+#ifndef W3D_SYMBIAN
+    { extern bool g_uiTapEnCurso; if (g_uiTapEnCurso) W3dTecladoAbrir(); }
+#endif
     g_redraw = true;
 }
 
@@ -810,6 +836,8 @@ void IDE::Resize(int newW, int newH) {
     ViewportBase::Resize(newW, newH);
     ResizeBorder(newW, newH);
     RecalcularScroll();
+    // achicarse (el teclado del celular se abrio y el IDE quedo en la parte visible): la linea del cursor sigue a la vista
+    AsegurarCursorVisible();
 }
 
 void IDE::AsegurarCursorVisible() {

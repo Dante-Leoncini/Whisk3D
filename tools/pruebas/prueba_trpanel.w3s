@@ -1,0 +1,37 @@
+# AJUSTAR LA ULTIMA OPERACION: despues de mover / rotar / escalar aparece el panel con lo que se hizo; cambiar un valor
+# re-hace la operacion (queda UN paso de undo), Cancelar la deshace, Aceptar / un click afuera la deja.
+trpanel on
+add cube
+selobj Cubo.001
+objmove 1 0 0
+trinfo mover
+objat Cubo.001 1 0 0 0.001
+# X = 3 en el panel: el cubo queda en 3 (no en 1 + 3)
+trfijar 0 3
+objat Cubo.001 3 0 0 0.001
+# Y de la UI = z interno
+trfijar 1 2
+objat Cubo.001 3 0 2 0.001
+# un solo paso de undo: vuelve al origen
+undo
+objat Cubo.001 0 0 0 0.001
+trinfo cerrado
+# Cancelar deshace el cambio
+objmove 0 0 5
+trinfo mover
+trboton 0
+objat Cubo.001 0 0 0 0.001
+trinfo cerrado
+# escalar: factor de X desde el panel
+objxf scale x 2
+trinfo escalar
+trfijar 0 4
+objscaleat 4 1 1
+trboton 1
+trinfo cerrado
+# rotar: angulo desde el panel
+objxf rotate z 30
+trinfo rotar
+trfijar 0 90
+objroteuler 0 90 0
+trboton 1

@@ -1,0 +1,18 @@
+# BUCLE DE RUTINA: la lista corre N veces seguidas sin reponer nada entre vueltas ("trasladar, dibujar" x 5 = 5 cubos
+# corridos). Se dibujan N veces los triangulos y el campo "repetir" viaja en el .w3d.
+rutina Bucle
+rutinapaso Bucle array modo=0 on=1
+rutinapaso Bucle array modo=1 on=0
+rutinapaso Bucle array modo=2 on=0
+rutinapaso Bucle array modo=3 on=0
+rutinapaso Bucle punteroVertices ref=Cubo
+rutinapaso Bucle trasladar n0=2.5 n1=0 n2=0
+rutinapaso Bucle dibujar ref=Cubo
+tris3d
+tris3d
+# 5 vueltas: 4 cubos mas (12 triangulos cada uno)
+rutinarepetir Bucle 5
+tris3d 48
+guardarw3d /tmp/w3d_prueba_bucle.w3d
+abrirw3d /tmp/w3d_prueba_bucle.w3d
+tris3d 0

@@ -67,12 +67,12 @@ static bool PunterosAlDiaTodo(Rutina* r) {
 }
 // Lo que deja un puntero colgado es una MUERTE (un objeto, una malla o una textura que se va): si desde la ultima
 // revision completa no murio nada, los punteros siguen vivos. Los NOMBRES (un renombrado: el paso pasa a nombrar a
-// otro, pero no cuelga nada) jugando se revisan cada 16 cuadros; editando, en cada uno como siempre. Era la mitad de
-// la validacion: cada paso con su nombre comparado, cuadro por cuadro
+// otro, pero no cuelga nada) jugando no se revisan (antes cada 16 cuadros: todas las rutinas en el MISMO cuadro, miles
+// de nombres comparados, un tiron cada 16 en el N95); editando, en cada uno como siempre
 static bool PunterosAlDia(Rutina* r) {
     const unsigned g0 = W3dObjetosGen(), g1 = W3dMallasGen(), g2 = g_w3dTexturasGen;
     if (r->punterosOk && r->punterosGen[0] == g0 && r->punterosGen[1] == g1 && r->punterosGen[2] == g2 &&
-        W3dJuegoCorriendo() && ++r->punterosEdad < 16)
+        W3dJuegoCorriendo())
         return true;
     r->punterosOk = PunterosAlDiaTodo(r);
     r->punterosGen[0] = g0; r->punterosGen[1] = g1; r->punterosGen[2] = g2;
@@ -408,12 +408,12 @@ static bool ValidarRutina(Rutina* r) {
     const bool sabido = LaDibujaElArbol(r);
     // JUGANDO, el resultado de la vez anterior si no cambio nada de lo que lee: los pasos (suyos o de una subrutina) y
     // los datos de las mallas (g_w3dRutinasGen), los punteros (PunterosAlDia, arriba), si la dibuja el arbol, los arrays
-    // al empezar y lo que leyo de las memorias (los rangos que escribe lua). Igual se revalida entera cada 120 cuadros
-    // (cada rutina en otro momento). Editando, cada cuadro como siempre. Validar todo cada cuadro era lo mas caro del
-    // cuadro: miles de pasos (en el N95, milisegundos)
+    // al empezar y lo que leyo de las memorias (los rangos que escribe lua). Editando, cada cuadro como siempre. Validar
+    // todo cada cuadro era lo mas caro del cuadro: miles de pasos (en el N95, milisegundos; la revision entera cada 120
+    // cuadros que habia de reaseguro era un tiron de decenas de ms en la rutina del mundo)
     const bool jugando = W3dJuegoCorriendo();
     if (jugando && r->valOk && r->valGen == g_w3dRutinasGen && r->valSabido == sabido && r->valVistos == r->arraysVistos &&
-        memcmp(r->valArrays, r->arraysInicio, sizeof r->valArrays) == 0 && ++r->valEdad < 120 && MemoriasIguales(r))
+        memcmp(r->valArrays, r->arraysInicio, sizeof r->valArrays) == 0 && MemoriasIguales(r))
         return !r->invalida;
     std::vector<std::pair<const float*, int> > lecturas;
     std::vector<std::pair<const float*, int> >* antes = gLecturas;
@@ -513,6 +513,7 @@ void W3dRutinaMenuPasos(PopupMenu* raiz, std::vector<PopupMenu*>& subs, void (*a
     raiz->action = accion;
     if (subs.size() < (size_t)GrupoN) subs.resize(GrupoN, (PopupMenu*)NULL);
     if (conVacia) raiz->Agregar(T("Empty routine"), PasoN, (int)IconType::lista);
+    if (conVacia) raiz->Agregar(T("Routine loop"), PasoN + 1, (int)IconType::lista);   // la lista corre N veces
     for (int g = 0; g < GrupoN; g++) {
         int n = 0, unico = -1;
         for (int t = 0; t < PasoN; t++) if (W3dPasoGrupoDe(t) == g) { n++; unico = t; }

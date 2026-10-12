@@ -6,6 +6,7 @@
 //  botones guardan sx/sy LOCALES al popup; el hit-test se hace con (mx - x, my - y).
 // ============================================================================
 #include "w3dGraphics.h"
+#include "app/W3dTeclado.h"   // W3dTecladoAbrir: el teclado del celular (y el layout que se adapta)
 #include "W3dLang.h"
 #include "NuevaTexturaPopup.h"
 #include "WhiskUI/Propieties/PropText.h"
@@ -201,7 +202,7 @@ bool NuevaTexturaPopup::Click(int mx, int my) {
                 g_textFieldActivo = NULL;
                 p->EditPropertie();
                 #ifndef W3D_SYMBIAN
-                if (ToolbarUsaTactil()) SDL_StartTextInput();
+                if (ToolbarUsaTactil()) W3dTecladoAbrir();
                 #endif
             } else if (tipo == PropertyType::Color) {
                 if (!colorPicker) colorPicker = new ColorPicker();

@@ -11,9 +11,10 @@
 #include <stdio.h>
 #include <string>
 
-// Donde escribirlo: el mismo archivo que lee loadConfig al arrancar (res/config.ini junto al ejecutable).
+// Donde escribirlo: la carpeta ESCRIBIBLE del usuario (SDL_GetPrefPath; main.cpp lo lee de ahi si existe). res/ puede
+// ser de solo lectura: el AppImage monta la imagen, el .deb instala en /usr/share, Android lo tiene adentro del APK.
 static std::string W3dConfigPath(){
-    return w3dFileSystem::GetResDir() + "/config.ini";
+    return w3dFileSystem::GetUserDataDir() + "/config.ini";
 }
 
 // true = se escribio. false = no se pudo (disco lleno, carpeta de solo lectura, Android sin permiso...).

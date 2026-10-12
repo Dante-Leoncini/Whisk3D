@@ -30,6 +30,9 @@ void W3dInitUI(const std::string& skinDir) {
     W3dIdiomaDetectar();
     // los menus declarativos se traducen solos: el toolkit llama este hook. Aca es donde el editor se lo presta.
     { extern const char* (*W3dMenuTraducir)(const char*); W3dMenuTraducir = T; }
+    // los hints de atajo de los menus salen de la tabla de atajos (lo configurado, o la tecla del telefono)
+    { extern std::string (*W3dMenuAtajoTexto)(const std::string&); extern std::string W3dAtajoEtiquetaMenu(const std::string&);
+      W3dMenuAtajoTexto = W3dAtajoEtiquetaMenu; }
 
     // mismo ORDEN que esperan el resto de los modulos (constructor.cpp de PC):
     // 0=font (atlas), 1=origen, 2=cursor3d, 3=relationshipLine, 4=lampara

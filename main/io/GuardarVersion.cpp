@@ -31,6 +31,7 @@
 //  dejar afuera a proposito): se avisa por notificacion y estan listadas en el
 //  EXTERNOS.txt de adentro del .w3d.
 // ============================================================================
+#include "W3dLang.h"   // T(): los avisos salen en el idioma del editor
 #include "io/GuardarVersion.h"
 
 // (El stub W3D_SYMBIAN que vivia aca ya no hace falta: GuardarW3D.cpp y el W3dZip del
@@ -252,7 +253,7 @@ std::string GuardarVersionLabel() {
 // ---------------------------------------------------------------------------
 bool GuardarVersionEjecutar() {
     if (w3dPath.empty()) {
-        Notificar("Guardar version: el proyecto no tiene ubicacion (usa Guardar primero)", true);
+        Notificar(T("Save version: the project has no location (use Save first)"), true);
         return false;
     }
     std::string dir  = VerDirVersiones(w3dPath);   // <carpeta del proyecto>/versiones

@@ -1163,8 +1163,8 @@ Timeline::Timeline(){
 
     pfStart = new PropFloat(T("Start")); pfStart->value=&fStart; pfStart->entero=true; pfStart->onChange=TL_onStart;
     pfEnd   = new PropFloat(T("End"));   pfEnd->value=&fEnd;     pfEnd->entero=true;   pfEnd->onChange=TL_onEnd;
-    pfCur   = new PropFloat("Frame"); pfCur->value=&fCur;     pfCur->entero=true;   pfCur->onChange=TL_onCur;
-    pfFps   = new PropFloat("FPS");   pfFps->value=&fFpsTL;   pfFps->entero=true;   pfFps->onChange=TL_onFps;
+    pfCur   = new PropFloat(T("Frame")); pfCur->value=&fCur;     pfCur->entero=true;   pfCur->onChange=TL_onCur;
+    pfFps   = new PropFloat(T("FPS"));   pfFps->value=&fFpsTL;   pfFps->entero=true;   pfFps->onChange=TL_onFps;
 
     BarCrear(); // [0] = icono/menu de tipo
     for (int i=0;i<8;i++){
@@ -1182,7 +1182,7 @@ Timeline::Timeline(){
     BarButtons.push_back(btnAnim);
     // menu Select del dope sheet (All / None / Invert): al FINAL de la barra; solo visible si hay filas
     // AUTO KEY: toggle. Prendido = rojo (esta grabando). Siempre visible: es un modo, no depende de la seleccion.
-    btnAutoKey = new Button("Auto Key"); btnAutoKey->rol = TL_ROL_AUTOKEY;
+    btnAutoKey = new Button(T("Auto Key")); btnAutoKey->rol = TL_ROL_AUTOKEY;
     BarButtons.push_back(btnAutoKey);
     // switch DOPE SHEET <-> CURVES: el texto dice a que modo se PASA (es un boton, no un dropdown)
     btnModo = new Button(T("Curves")); btnModo->rol = TL_ROL_MODO;
@@ -1192,7 +1192,7 @@ Timeline::Timeline(){
     btnSelect->visible = false;
     BarButtons.push_back(btnSelect);
     // menu Key: Transform (Move/Rotate/Scale) + Duplicate + Delete
-    btnKey = new Button("Key"); btnKey->rol = TL_ROL_KEY; btnKey->desplegable = true;
+    btnKey = new Button(T("Key")); btnKey->rol = TL_ROL_KEY; btnKey->desplegable = true;
     btnKey->visible = false;
     BarButtons.push_back(btnKey);
     // menu View del dope sheet: encuadrar el timeline en los keyframes seleccionados
@@ -1290,8 +1290,8 @@ void Timeline::SyncFields(){
     // icono esqueleto = clip de armature. No depende del objeto seleccionado.
     btnAnim->visible = true;
     SkeletalAnimation* c = ClipActivo();
-    if (g_animMix){ btnAnim->text = "Mix"; btnAnim->icon = (int)IconType::igual; }   // capas mezcladas
-    else if (ActiveAnimKind == 2){ btnAnim->text = "Juego"; btnAnim->icon = (int)IconType::gamepad; }
+    if (g_animMix){ btnAnim->text = T("Mix"); btnAnim->icon = (int)IconType::igual; }   // capas mezcladas
+    else if (ActiveAnimKind == 2){ btnAnim->text = T("Game"); btnAnim->icon = (int)IconType::gamepad; }
     else if (ActiveAnimKind == 3 && ActiveAnimMesh){
         // vertex anim de una malla: el nombre de la anim activa (via el controlador)
         VertexAnimationActive* va = FindTargetAnim(ActiveAnimMesh);
@@ -3306,19 +3306,19 @@ void Timeline::AbrirMenuKey(int mx, int my){
     // se rearma en cada apertura: Rotate solo existe en CURVAS (en el dope sheet el unico eje es el tiempo, girar
     // no significa nada)
     g_tlMenuKeyXf->Limpiar();
-    g_tlMenuKeyXf->Agregar(T("Move"), TL_KEY_MOVE)->atajo = "G";
-    if (modo == TL_MODO_CURVAS) g_tlMenuKeyXf->Agregar(T("Rotate"), TL_KEY_ROT)->atajo = "R";
-    g_tlMenuKeyXf->Agregar(T("Scale"), TL_KEY_SCALE)->atajo = "S";
+    g_tlMenuKeyXf->Agregar(T("Move"), TL_KEY_MOVE)->atajo = "@tl.mover";
+    if (modo == TL_MODO_CURVAS) g_tlMenuKeyXf->Agregar(T("Rotate"), TL_KEY_ROT)->atajo = "@tl.rotar";
+    g_tlMenuKeyXf->Agregar(T("Scale"), TL_KEY_SCALE)->atajo = "@tl.escalar";
     ConstruirMenuInterp(g_tlMenuKeyIn);
     ConstruirMenuHandle(g_tlMenuHandle);
     g_tlMenuKey->Limpiar();
     g_tlMenuKey->Agregar(T("Transform"), -1, -1, g_tlMenuKeyXf);
-    g_tlMenuKey->Agregar(T("Interpolation Mode"), -1, -1, g_tlMenuKeyIn)->atajo = "T";
+    g_tlMenuKey->Agregar(T("Interpolation Mode"), -1, -1, g_tlMenuKeyIn)->atajo = "@tl.interp";
     // los handles solo existen en CURVAS: en el dope sheet no hay nada que ajustar
-    if (modo == TL_MODO_CURVAS) g_tlMenuKey->Agregar(T("Handle Type"), -1, -1, g_tlMenuHandle)->atajo = "V";
+    if (modo == TL_MODO_CURVAS) g_tlMenuKey->Agregar(T("Handle Type"), -1, -1, g_tlMenuHandle)->atajo = "@tl.handle";
     g_tlMenuKey->Agregar(T("Smart Euler"), TL_KEY_SMARTEULER);
-    g_tlMenuKey->Agregar(T("Duplicate"), TL_KEY_DUP)->atajo = "Shift D";
-    g_tlMenuKey->Agregar(T("Delete"), TL_KEY_DEL)->atajo = "X";
+    g_tlMenuKey->Agregar(T("Duplicate"), TL_KEY_DUP)->atajo = "@tl.duplicar";
+    g_tlMenuKey->Agregar(T("Delete"), TL_KEY_DEL)->atajo = "@tl.borrar";
     if (MenuAbierto && MenuAbierto != g_tlMenuKey) MenuAbierto->Cerrar();
     g_tlMenuKey->Abrir(mx, my, MenuPantallaW, MenuPantallaH);
     MenuAbierto = g_tlMenuKey;
@@ -3329,15 +3329,15 @@ void Timeline::ConstruirMenuInterp(PopupMenu* m){
     m->Limpiar();
     m->Agregar(T("Constant"), TL_KEY_INTERP0 + KfConstant);
     m->Agregar(T("Linear"),   TL_KEY_INTERP0 + KfLinear);
-    m->Agregar("Bezier",   TL_KEY_INTERP0 + KfBezier);
+    m->Agregar(T("Bezier"),   TL_KEY_INTERP0 + KfBezier);
 }
 // menu Select del dope sheet (All / None / Invert)
 void Timeline::AbrirMenuSelect(int mx, int my){
     if (!g_tlMenuSel){
         g_tlMenuSel = new PopupMenu(); g_tlMenuSel->action = TL_menuSelAction;
-        g_tlMenuSel->Agregar(T("All"), 0)->atajo = "A";
-        g_tlMenuSel->Agregar(T("None"), 1)->atajo = "Alt A";
-        g_tlMenuSel->Agregar(T("Invert"), 2)->atajo = "Ctrl I";
+        g_tlMenuSel->Agregar(T("All"), 0)->atajo = "@tl.seleccionarTodo";
+        g_tlMenuSel->Agregar(T("None"), 1)->atajo = "@tl.deseleccionar";
+        g_tlMenuSel->Agregar(T("Invert"), 2)->atajo = "@tl.invertir";
     }
     if (MenuAbierto && MenuAbierto != g_tlMenuSel) MenuAbierto->Cerrar();
     g_tlMenuSel->Abrir(mx, my, MenuPantallaW, MenuPantallaH);
@@ -3372,8 +3372,8 @@ void Timeline::AbrirMenuView(int mx, int my){
         g_tlMenuView = new PopupMenu(); g_tlMenuView->titulo = T("View"); g_tlMenuView->action = TL_menuViewAction; 
     }
     g_tlMenuView->Limpiar();
-    g_tlMenuView->Agregar(T("Frame Selected"), TL_VIEW_FRAMESEL)->atajo = "Num .";
-    g_tlMenuView->AgregarCheck("Show Panel", TL_VIEW_PANEL, &g_dopePanelOn);
+    g_tlMenuView->Agregar(T("Frame Selected"), TL_VIEW_FRAMESEL)->atajo = "@tl.encuadrar";
+    g_tlMenuView->AgregarCheck(T("Show Panel"), TL_VIEW_PANEL, &g_dopePanelOn);
     g_tlMenuView->AgregarCheck(T("Auto frame"), TL_VIEW_AUTOFRAME, &g_dopeAutoFrame);
     // toggle "Solo vertices seleccionados" (dope Y curvas: es el MISMO menu View). Con la
     // malla en Edit Mode filtra las filas de vertex anim y hace el move por mascara.

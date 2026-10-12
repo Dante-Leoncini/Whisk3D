@@ -976,7 +976,7 @@ TBool W3dLayoutTeclaViewport(TInt aScanCode) {
 // g/r/s que serian en PC y del viewport para adentro es exactamente el mismo comando.
 TBool W3dLayoutTeclaViewportDirecta(TInt aTecla) {
     if (aTecla == W3dK_G && PropiedadesActivas() && PropsRutinaTecla(W3dK_G)) return ETrue;
-    return LayoutTeclaViewport(aTecla, false) ? ETrue : EFalse;
+    return LayoutTeclaViewport(aTecla, false, false) ? ETrue : EFalse;   // ya es la tecla de la funcion: sin traducir
 }
 TBool W3dLayoutTeclaViewportUp(TInt aScanCode) {
     return LayoutTeclaViewportUp(W3dTeclaDesdeSymbian(aScanCode)) ? ETrue : EFalse;

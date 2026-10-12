@@ -100,6 +100,27 @@ public class Whisk3DActivity extends SDLActivity {
     // que el file browser interno (opendir/fopen) NO podia leer los modelos .obj/.w3d ni sus texturas. "All files
     // access" (MANAGE_EXTERNAL_STORAGE) habilita leer/escribir CUALQUIER archivo, como en Android <=10, sin tener
     // que reescribir el browser con SAF. Se pide una sola vez: si no esta otorgado, se abre la pantalla de Settings.
+    // la PANTALLA tiene recorte (notch / camara)? Lo pregunta el codigo nativo (W3dTeclado.cpp) al arrancar: sin notch
+    // la app va en pantalla completa (la barra de arriba ocupa espacio valioso); con notch se deja la barra, que es
+    // donde esta la camara. Antes de Android 9 no hay API de recortes -> pantalla completa.
+    public boolean tieneNotch() {
+        try {
+            if (Build.VERSION.SDK_INT >= 29) {
+                android.view.DisplayCutout c = getWindowManager().getDefaultDisplay().getCutout();
+                return c != null && !c.getBoundingRects().isEmpty();
+            }
+            if (Build.VERSION.SDK_INT >= 28) {
+                android.view.WindowInsets wi = getWindow().getDecorView().getRootWindowInsets();
+                if (wi == null) return true;   // sin datos todavia: no arriesgar a tapar la camara
+                android.view.DisplayCutout c = wi.getDisplayCutout();
+                return c != null && !c.getBoundingRects().isEmpty();
+            }
+        } catch (Throwable t) {
+            return true;
+        }
+        return false;
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);

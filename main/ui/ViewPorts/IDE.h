@@ -17,7 +17,7 @@
 // NO por indice: agregar/reordenar botones no rompe nada; mismo esquema que 2D/UV).
 enum BarRolIDE {
     BRIDE_Script = 1, // selector desplegable: los .lua del proyecto (marca el abierto)
-    BRIDE_Guardar,    // guarda el archivo (Ctrl+S)
+    BRIDE_Guardar,    // menu ARCHIVO: Guardar (Ctrl+S) / Guardar como... / Guardar en el w3d o fuera del w3d / Cargar .lua
     BRIDE_Refresh     // guarda + recarga los scripts EN VIVO si el juego corre
 };
 
@@ -76,6 +76,10 @@ class IDE : public ViewportBase, public WithBorder, public Scrollable {
         // ================= API de edicion (headless: la usa idetest) =================
         bool AbrirArchivo(const std::string& ruta); // lee el .lua al buffer (tabs -> 4 espacios, sin \r)
         bool Guardar();                             // ATOMICO: tmp + rename. false si fallo
+        // "Guardar" del menu Archivo / Ctrl+S: Guardar() y, si el script vive ADENTRO del proyecto, guarda tambien el
+        // proyecto (el .w3d del disco queda con el script nuevo). Sin archivo abre "Guardar como..."
+        bool GuardarEnProyecto();
+        bool silencioso;                            // Guardar() sin aviso (lo da GuardarEnProyecto al final)
         void Refresh();                             // guardar + recargar scripts en vivo (ver arriba)
         void SetTexto(const std::string& texto);    // reemplaza el buffer entero (resetea undo)
         std::string GetTexto() const;               // el buffer unido con '\n'

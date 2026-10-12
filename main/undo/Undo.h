@@ -33,6 +33,9 @@ void UndoRehacer();  // Ctrl+Y: rehace el ultimo deshecho (pasa de vuelta al sta
 void UndoLimpiar();  // limpia ambos stacks (al borrar/crear objetos: punteros invalidos)
 bool UndoHayAlgo();  // hay algo para deshacer?
 bool UndoHayRedo();  // hay algo para rehacer?
+const void* UndoUltimo();          // identidad del ultimo comando (NULL = vacio): el panel de la ultima operacion
+                                   // solo deshace SU paso
+extern void (*g_undoCambioHook)(); // se llama antes de cada deshacer / rehacer (el panel se cierra)
 
 void UndoCapturarModo();                        // antes de cambiar Edit/Object
 void UndoCapturarVisibilidad();                 // antes de togglear Object::visible con 'h' (guarda el estado previo)

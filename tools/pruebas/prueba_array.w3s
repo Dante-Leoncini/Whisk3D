@@ -1,0 +1,17 @@
+# Modificador ARRAY: N copias de la malla. Desplazamiento relativo (factor del tamano), constante (metros), soldar, y
+# guardar / abrir el .w3d con sus parametros.
+add cube
+selobj Cubo.001
+modadd array
+# 4 copias una al lado de la otra en X: el cubo de 2 m pasa a ocupar de -1 a 7
+modarray 4 1 0 0
+genbbox
+genbbox -1 -1 -1 7 1 1 0.01
+# relativo 0 + constante 3 m hacia arriba (Z de la UI = y interno): de -1 a 1 en y pasa a -1 a 7
+modarray 4 0 0 0 0 0 2
+genbbox -1 -1 -1 1 7 1 0.01
+# guardar y abrir: los parametros vuelven
+guardarw3d /tmp/w3d_prueba_array.w3d
+abrirw3d /tmp/w3d_prueba_array.w3d
+selobj Cubo.001
+genbbox -1 -1 -1 1 7 1 0.01

@@ -51,6 +51,8 @@ struct UVMalla {
     int nSel;
 };
 
+// (W3dSmartUVProjectTodas) desplegar TODAS las caras, sin mirar la seleccion de Edit Mode
+static bool gUVTodasLasCaras = false;
 static bool Preparar(Mesh* m, UVMalla& M, std::string& msg, const char* op) {
     msg = std::string(op) + ": select faces first";
     if (!m) return false;
@@ -73,6 +75,8 @@ static bool Preparar(Mesh* m, UVMalla& M, std::string& msg, const char* op) {
     }
     EditMesh* e = m->edit;
     M.sel.assign(m->faces3d.size(), 0); M.nSel = 0;
+    if (gUVTodasLasCaras) { for (size_t f = 0; f < m->faces3d.size(); f++) M.sel[f] = 1; M.nSel = (int)m->faces3d.size(); }
+    else
     for (size_t f = 0; f < e->faceSel.size() && f < e->faceSrc.size(); f++) {
         if (!e->faceSel[f]) continue;
         const int f3 = e->faceSrc[f];
@@ -794,4 +798,15 @@ bool W3dUVReset(Mesh* m, std::string& msg) {
     UndoCapturarMallaGeo(m);
     m->EscribirUVProyeccion(uvL);
     return true;
+}
+
+// Smart UV Project de TODAS las caras de la malla (sin Edit Mode ni seleccion): lo usa la pintura de textura cuando la
+// malla no tiene UV o las tiene todas pisadas (el cubo por defecto: las 6 caras en el mismo cuadrado)
+bool W3dSmartUVProjectTodas(Mesh* m, float anguloLimiteDeg, float margen, std::string& msg) {
+    if (!m) return false;
+    m->EnsureEdit();
+    gUVTodasLasCaras = true;
+    const bool ok = W3dSmartUVProject(m, anguloLimiteDeg, margen, msg);
+    gUVTodasLasCaras = false;
+    return ok;
 }

@@ -75,7 +75,8 @@ enum BarRol3D {
     BR_Mesh, // menu "Mesh" de Edit Mode (Transform/Snap/Delete), comun a vertice/borde/cara
     BR_Animation, // menu "Animation": keyframes del objeto + Motion Trail. Solo con algo seleccionado.
     BR_Proporcional, // PROPORTIONAL EDITING (tecla O): el icono de la curva, verde si esta ON; abre su menu
-    BR_Raiz          // la ESCENA 3D o el PREFAB que se edita (W3dRaices.h): su menu cambia de raiz / crea otra
+    BR_Raiz,         // la ESCENA 3D o el PREFAB que se edita (W3dRaices.h): su menu cambia de raiz / crea otra
+    BR_TexGuardar    // PINTURA DE TEXTURA: guardar la textura pintada (Guardar / Guardar como / dentro o fuera del w3d)
 };
 // roles de la barra de HERRAMIENTAS (abajo) del 3D. TBR_Hist+i = boton i del historial de acciones.
 enum ToolbarRol3D {

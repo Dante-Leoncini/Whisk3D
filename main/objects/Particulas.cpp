@@ -445,14 +445,46 @@ void W3dParticulasDibujarPendientes() {
 // ---------------------------------------------------------------------------
 //  El TICK global (una vez por frame) + "hay algo animando?"
 // ---------------------------------------------------------------------------
-// recorre TODO el arbol (NO corta por !visible): las particulas VIVAS se simulan y mueren aunque su emisor o un
-// ancestro esten ocultos (son world-space, ya emitidas). La EMISION si respeta la cadena de visibilidad (vis)
-// Y el radioEmision contra la camara (perf del N95: emisores del otro lado del mapa no emiten; las vivas
-// terminan su vida y la sim queda vacia = gratis).
-static void ParticulasRec(Object* o, bool cadenaVisible, float dt, const Vector3& ojo, bool hayOjo) {
-    bool vis = cadenaVisible && o->visible;
-    if (o->getType() == ObjectType::particulas) {
-        Particulas* p = (Particulas*)o;
+// las particulas VIVAS se simulan y mueren aunque su emisor o un ancestro esten ocultos (son world-space, ya
+// emitidas). La EMISION si respeta la cadena de visibilidad (vis) Y el radioEmision contra la camara (perf del N95:
+// emisores del otro lado del mapa no emiten; las vivas terminan su vida y la sim queda vacia = gratis).
+// LOS EMISORES de la escena en el orden del arbol (el de antes: el azar de cada uno sale igual), sin recorrer el arbol
+// entero en cada cuadro (en Daytona ~900 nodos por cuadro para 3 emisores; en el N95 milisegundos). Se rearman cuando
+// cambia el conjunto de vivos (W3dVivosCambios: nace o muere alguno) o la escena, y cada 120 cuadros de reaseguro (un
+// emisor que se mueve a la escena desde otra raiz no avisa). En cada cuadro, la cadena de visibilidad sube por los padres
+static std::vector<Particulas*> gEmisores;
+static void JuntarEmisores(Object* o) {
+    if (o->getType() == ObjectType::particulas) gEmisores.push_back((Particulas*)o);
+    for (size_t i = 0; i < o->Childrens.size(); i++) JuntarEmisores(o->Childrens[i]);
+}
+void W3dParticulasTick(float dt) {
+    if (!SceneCollection || dt <= 0.0f) return;
+    static unsigned armados = 0;
+    static Object* raiz = 0;
+    static int edad = 0;
+    if (armados != W3dVivosCambios() || raiz != SceneCollection || ++edad >= 120) {
+        gEmisores.clear();
+        if (!W3dVivosDeTipo((int)ObjectType::particulas).empty()) JuntarEmisores(SceneCollection);
+        armados = W3dVivosCambios(); raiz = SceneCollection; edad = 0;
+    }
+    if (gEmisores.empty()) return;
+    // el "ojo" de la medida: la camara del juego jugando, o la vista que dibuja
+    Vector3 ojo; bool hayOjo = false;
+    Camera* cam = W3dCamaraDeMedida(false);
+    if (cam) { ojo = cam->GetGlobalPosition(); hayOjo = true; }
+    else if (g_vistaBindeada) { ojo = g_renderCamPos; hayOjo = true; }
+    for (size_t i = 0; i < gEmisores.size(); i++) {
+        Particulas* p = gEmisores[i];
+        // INACTIVO (sin vivas y sin emision continua: las rafagas de emitir() salen en el acto, no pasan por aca):
+        // nada que simular ni emitir. Se saltea ANTES de la cadena de visibilidad y de la posicion de mundo (con un
+        // Child Of a un hueso cuesta posar el esqueleto): en un nivel con decenas de emisores de efectos esperando
+        // su rafaga, en el N95 eran ~14 ms por cuadro.
+        if (p->sys.parts.empty() && !(p->activo && p->cantidad > 0.0f)) { p->emAcc = 0.0f; continue; }
+        bool vis = true;
+        const Object* a = p;
+        const Object* tope = p;
+        for (; a; a = a->Parent) { if (!a->visible) vis = false; tope = a; }
+        if (tope != SceneCollection) continue;              // (se fue de la escena: hasta que se rearme)
         bool cerca = true;
         if (hayOjo && p->radioEmision > 0.0f) {
             Vector3 d = p->GetGlobalPosition() - ojo;
@@ -460,17 +492,6 @@ static void ParticulasRec(Object* o, bool cadenaVisible, float dt, const Vector3
         }
         p->Tick(dt, vis && cerca);  // sin emitir: NO emite, SI simula lo vivo
     }
-    for (size_t i = 0; i < o->Childrens.size(); i++)
-        ParticulasRec(o->Childrens[i], vis, dt, ojo, hayOjo);
-}
-void W3dParticulasTick(float dt) {
-    if (!SceneCollection || dt <= 0.0f) return;
-    // el "ojo" de la medida: la camara del juego jugando, o la vista que dibuja
-    Vector3 ojo; bool hayOjo = false;
-    Camera* cam = W3dCamaraDeMedida(false);
-    if (cam) { ojo = cam->GetGlobalPosition(); hayOjo = true; }
-    else if (g_vistaBindeada) { ojo = g_renderCamPos; hayOjo = true; }
-    ParticulasRec(SceneCollection, true, dt, ojo, hayOjo);
 }
 
 bool W3dParticulasAnimando() {

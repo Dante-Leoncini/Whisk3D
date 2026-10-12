@@ -2002,6 +2002,18 @@ static void CargarModificadores(JVal* j, Mesh* mesh) {
             md->boolOp = (op == "intersect") ? 0 : (op == "union") ? 1 : 2;
             std::string tg = JS(e, "target", "");
             if (!tg.empty()) { PendModTgt p; p.md = md; p.nombre = tg; p.m = mesh; gPendModTgt.push_back(p); }
+        } else if (tipo == ModifierType::Array) {
+            md->arrCount   = JF(e, "copias", md->arrCount);
+            md->arrRelOn   = JB(e, "relativo", md->arrRelOn);
+            md->arrConstOn = JB(e, "constante", md->arrConstOn);
+            JVal* r = JHijo(e, "rel", 5);     // (5 = lista; puede venir compactada: JFila*)
+            if (r && JFilaLen(r) >= 3) { md->arrRelX = JFilaNum(r, 0, md->arrRelX); md->arrRelY = JFilaNum(r, 1, md->arrRelY); md->arrRelZ = JFilaNum(r, 2, md->arrRelZ); }
+            JVal* c = JHijo(e, "const", 5);
+            if (c && JFilaLen(c) >= 3) { md->arrConstX = JFilaNum(c, 0, md->arrConstX); md->arrConstY = JFilaNum(c, 1, md->arrConstY); md->arrConstZ = JFilaNum(c, 2, md->arrConstZ); }
+            md->arrMerge     = JB(e, "merge", md->arrMerge);
+            md->arrMergeDist = JF(e, "mergeDist", md->arrMergeDist);
+            std::string tg = JS(e, "target", "");
+            if (!tg.empty()) { PendModTgt p; p.md = md; p.nombre = tg; p.m = mesh; gPendModTgt.push_back(p); }
         } else if (tipo == ModifierType::SubdivisionSurface) {
             md->subLevel       = JF(e, "nivel", md->subLevel);
             md->subRenderLevel = JF(e, "nivelRender", md->subRenderLevel);
@@ -2770,8 +2782,8 @@ static Object* JsonObjetoCrear(JVal* j, Object* parent, const std::string& base)
             for (int i = 0; i < 3; i++) l->diffuse[i] = (float)col->lista[i]->num;
         l->direccional = JB(j, "direccional", l->direccional);
         l->ignorarOrden = JB(j, "ignorarOrden", true);   // ausente = alumbra toda la escena (el pre-pase)
-        JVal* at = JHijo(j, "atenuacion", 10);
-        if (at && at->lista.size() >= 3) { l->attConstant = (float)at->lista[0]->num; l->attLinear = (float)at->lista[1]->num; l->attQuadratic = (float)at->lista[2]->num; }
+        JVal* at = JHijo(j, "atenuacion", 5);   // (5 = lista)
+        if (at && JFilaLen(at) >= 3) { l->attConstant = JFilaNum(at, 0, l->attConstant); l->attLinear = JFilaNum(at, 1, l->attLinear); l->attQuadratic = JFilaNum(at, 2, l->attQuadratic); }
         l->rtRadio = JF(j, "rtRadio", l->rtRadio);   // trazado de rayos: tamano de la lampara (penumbra)
         l->rtRayos = JF(j, "rtRayos", l->rtRayos);   // rayos de sombra (0 = global)
         return l;

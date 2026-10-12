@@ -70,15 +70,21 @@ Texture* TexEditCrear(const std::string& nombre, const std::vector<unsigned char
     g_tex.push_back(te);
     return t;
 }
-void TexEditSubir(TexturaEditable* te, int x0, int y0, int x1, int y1) {
+void TexEditSubir(TexturaEditable* te, int x0, int y0, int x1, int y1, bool trazo) {
     if (!te || !te->tex || !te->tex->iID) return;
     if (x0 < 0) x0 = 0; if (y0 < 0) y0 = 0; if (x1 > te->w) x1 = te->w; if (y1 > te->h) y1 = te->h;
     if (x1 <= x0 || y1 <= y0) return;
     const int rw = x1 - x0, rh = y1 - y0;
-    if (rw == te->w && rh == te->h) { w3dEngine::UpdateRGBA(te->tex->iID, 0, 0, te->w, te->h, &te->rgba[0]); return; }
+    if (trazo) te->mipsPendientes = true;
+    if (rw == te->w && rh == te->h) { w3dEngine::UpdateRGBA(te->tex->iID, 0, 0, te->w, te->h, &te->rgba[0], !trazo); return; }
     std::vector<unsigned char> tmp((size_t)rw * rh * 4);
     for (int y = 0; y < rh; y++) memcpy(&tmp[(size_t)y * rw * 4], &te->rgba[((size_t)(y0 + y) * te->w + x0) * 4], (size_t)rw * 4);
-    w3dEngine::UpdateRGBA(te->tex->iID, x0, y0, rw, rh, &tmp[0]);
+    w3dEngine::UpdateRGBA(te->tex->iID, x0, y0, rw, rh, &tmp[0], !trazo);
+}
+void TexEditFinTrazo(TexturaEditable* te) {
+    if (!te || !te->mipsPendientes || !te->tex || !te->tex->iID || te->rgba.empty()) return;
+    te->mipsPendientes = false;
+    w3dEngine::RegenerarMips(te->tex->iID, 0, 0, &te->rgba[0]);
 }
 bool TexEditEsExterna(const Texture* t) { return t && !t->path.empty() && !W3dEsNombreDeEntrada(t->path); }
 
@@ -132,6 +138,28 @@ bool TexEditHacerInterna(TexturaEditable* te, std::string& msg) {
     const size_t pt = nombre.rfind('.'); if (pt != std::string::npos) nombre = nombre.substr(0, pt);
     const std::string viejo = te->tex->path;
     TexturaRenombrar(te->tex, NombreInternoLibre(nombre));
+    if (UVTexProyectoRuta() == viejo) UVSetTexProyecto(te->tex->path);
+    te->enMemoria = true;
+    return TexEditGuardar(te, msg);
+}
+// "Guardar como..." ADENTRO del .w3d con otro nombre: la textura pasa a ser texturas/<nombre>.png (los materiales que
+// la usan la siguen usando: es la misma textura renombrada). Si otra textura del proyecto ya usa ese nombre, no se
+// pisa (msg); 'existe'/'forzar' quedan por la firma comun de los "Guardar como".
+bool TexEditGuardarComoInterna(TexturaEditable* te, const std::string& nombre, bool forzar, bool* existe, std::string& msg) {
+    if (existe) *existe = false;
+    if (!te || !te->tex) { msg = "Save Texture: no texture"; return false; }
+    std::string base = nombre;
+    const size_t sl = base.find_last_of("/\\"); if (sl != std::string::npos) base = base.substr(sl + 1);
+    const size_t pt = base.rfind('.'); if (pt != std::string::npos) base = base.substr(0, pt);
+    if (base.empty()) { msg = "Name"; return false; }
+    const std::string destino = "texturas/" + W3dSlugEntrada(base) + ".png";
+    (void)forzar;
+    if (destino != te->tex->path && PathEnUso(destino)) {   // otra textura VIVA con ese nombre: no se pisa
+        msg = "A texture with that name already exists";
+        return false;
+    }
+    const std::string viejo = te->tex->path;
+    if (destino != viejo) TexturaRenombrar(te->tex, destino);
     if (UVTexProyectoRuta() == viejo) UVSetTexProyecto(te->tex->path);
     te->enMemoria = true;
     return TexEditGuardar(te, msg);

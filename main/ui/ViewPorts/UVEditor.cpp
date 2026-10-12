@@ -143,7 +143,7 @@ UVEditor::UVEditor() {
         b->desplegable = true; b->visible = false; BarButtons.push_back(b); // solo en UVModoHuesos
     b = new Button(T("Texture")); b->rol = BRUV_Texture;              // dropdown: elegir que textura ver
         b->desplegable = true; BarButtons.push_back(b);
-    b = new Button("Mipmap"); b->rol = BRUV_Mipmap;                   // inspector de la piramide (Auto / nivel)
+    b = new Button(T("Mipmap")); b->rol = BRUV_Mipmap;                   // inspector de la piramide (Auto / nivel)
         b->desplegable = true; b->visible = false; BarButtons.push_back(b); // visible con textura mostrada (SyncBarra)
     b = new Button(T("Edit")); b->rol = BRUV_Editar; b->visible = false; BarButtons.push_back(b);   // pintura de textura
     b = new Button("", IconType::guardar); b->rol = BRUV_Guardar;    // Save Texture / Make External / Make Internal
@@ -164,11 +164,11 @@ UVEditor::UVEditor() {
     // (radio y valor no tienen boton: son la fila de barras deslizables de arriba de la toolbar,
     //  ViewportBase::RenderBrushBar -- la misma que el viewport 3D, con el mismo pincel detras)
     b = new Button("+");     b->rol = TBR_PincelModo;   b->centrado = true; b->cuadrado = true; b->visible = false; ToolButtons.push_back(b);
-    b = new Button("Group"); b->rol = TBR_Grupo;        b->desplegable = true; b->visible = false; ToolButtons.push_back(b);
+    b = new Button(T("Group")); b->rol = TBR_Grupo;        b->desplegable = true; b->visible = false; ToolButtons.push_back(b);
     // marcas + falloff: los MISMOS del 3D (el pincel es uno solo). En el UV las marcas van por
     // CORNER, que es la unidad que pinta este editor (los uv groups son por render-vert).
     b = new Button("", (int)IconType::mesh); b->rol = TBR_Marcas; b->centrado = true; b->cuadrado = true; b->visible = false; ToolButtons.push_back(b);
-    b = new Button("Smooth"); b->rol = TBR_Falloff; b->desplegable = true; b->visible = false; ToolButtons.push_back(b);
+    b = new Button(T("Smooth")); b->rol = TBR_Falloff; b->desplegable = true; b->visible = false; ToolButtons.push_back(b);
     b = new Button(""); b->rol = TBR_ColorPincel; b->centrado = true; b->cuadrado = true; b->visible = false; ToolButtons.push_back(b); // color del pincel de textura
     // "editar solo lo seleccionado" (mascara de pintura): toggle GLOBAL compartido con la
     // toolbar del 3D (WeightPaintSoloSel); icono de seleccion, tinte accent cuando esta ON
@@ -592,10 +592,10 @@ static void UVPintarTextura(UVEditor* uv) {
         for (int i = 1; i <= n; i++) { const float f = (float)i / (float)n; TexEditDab(gUVTexEd, gUVTexPrevX + dx * f, gUVTexPrevY + dy * f, rTex, rgba, br.fuerza, fo, rect); }
     } else TexEditDab(gUVTexEd, tx, ty, rTex, rgba, br.fuerza, fo, rect);
     gUVTexPrevX = tx; gUVTexPrevY = ty;
-    if (rect[0] >= 0) { TexEditSubir(gUVTexEd, rect[0], rect[1], rect[2], rect[3]); gUVTexCambio = true; }
+    if (rect[0] >= 0) { TexEditSubir(gUVTexEd, rect[0], rect[1], rect[2], rect[3], true); gUVTexCambio = true; }
     g_redraw = true;
 }
-static void UVTexTrazoFin() { UndoTexturaConfirmar(gUVTexCambio); gUVTexEd = NULL; gUVTexCambio = false; }
+static void UVTexTrazoFin() { TexEditFinTrazo(gUVTexEd); UndoTexturaConfirmar(gUVTexCambio); gUVTexEd = NULL; gUVTexCambio = false; }
 
 void UVPintarPesos(UVEditor* uv, Mesh* m) {
     if (!uv || !m || !m->uv) return;
@@ -1078,7 +1078,7 @@ void UVEditor::SyncBarra() {
           bEd->tinte = texpaint ? verdeEd : NULL;
           bEd->colorTexto = texpaint ? acc : NULL;
       }
-      if (bGu) bGu->visible = (tm != NULL) && TexEditBuscar(tm) != NULL;   // solo las que estan en edicion (memoria) se guardan
+      if (bGu) bGu->visible = true;   // siempre: Export UV Layout no necesita textura (Save Texture sale solo si hay una en edicion)
     }
     // Mipmap: inspector de la piramide de la textura mostrada. Visible cuando hay
     // textura; el texto dice que se esta viendo (Auto o el tamano del nivel).
@@ -2057,6 +2057,7 @@ void UVEditor::ZoomCentro(int dir) {
 
 #ifndef W3D_SYMBIAN
 // teclas del editor UV: flechas = paneo (cualquier modo); G/R/S inician mover/rotar/escalar; ESC/ENTER transform.
+extern bool LShiftPressed, LCtrlPressed, LAltPressed;
 void UVEditor::event_key_down(int tecla, bool repeticion) {
     if (PopUpActive) return;                    // un popup modal abierto (file browser) tiene prioridad
     const int k = tecla;
@@ -2089,9 +2090,10 @@ void UVEditor::event_key_down(int tecla, bool repeticion) {
     }
     // ===== ARMATURE 2D DEL MESH: atajos en los modos Huesos/Pose (mismas teclas que el 3D) =====
     if (uvModo == UVModoHuesos || uvModo == UVModoPose) {
-        const Uint8* ks = SDL_GetKeyboardState(NULL);
-        bool shift = ks && (ks[SDL_SCANCODE_LSHIFT] || ks[SDL_SCANCODE_RSHIFT]);
-        bool alt   = ks && (ks[SDL_SCANCODE_LALT]   || ks[SDL_SCANCODE_RALT]);
+        // (los modificadores salen de los flags globales y no del teclado fisico: un atajo reasignado llega con
+        //  los modificadores de SU combinacion por defecto, ver app/W3dAtajos.h)
+        bool shift = LShiftPressed;
+        bool alt   = LAltPressed;
         if (Bone2DXformActivo()) {      // transform de huesos en curso: Enter confirma / Esc cancela
             // (via los hooks compartidos: mismo funnel que el tilde/cruz de la toolbar, con
             // el gate de la entrada numerica invalida y el reset del NumInput)
@@ -2102,7 +2104,7 @@ void UVEditor::event_key_down(int tecla, bool repeticion) {
             else if (k == W3dK_X || k == W3dK_Y) XformToggleEje((k == W3dK_X) ? 1 : 2);
             return;
         }
-        bool ctrl  = ks && (ks[SDL_SCANCODE_LCTRL]  || ks[SDL_SCANCODE_RCTRL]);
+        bool ctrl  = LCtrlPressed;
         // A = seleccionar TODOS los huesos / Alt+A = deseleccionar todos (como el 3D). Con la
         // seleccion completa, las ops (G/R/S, X, Shift+D, Ctrl+P) operan sobre todo.
         if (k == W3dK_A) { Bone2DSeleccionarTodos(m, !alt); return; }
@@ -2156,8 +2158,7 @@ void UVEditor::event_key_down(int tecla, bool repeticion) {
     // modos de huesos y con el 3D). En SYNC la seleccion del UV es un espejo de la del 3D ->
     // se toca la del 3D y se re-deriva; fuera de sync se escribe uvSelVert (la propia).
     if (k == W3dK_A && uvModo == UVModoEdicion) {
-        const Uint8* ksA = SDL_GetKeyboardState(NULL);
-        bool altA = ksA && (ksA[SDL_SCANCODE_LALT] || ksA[SDL_SCANCODE_RALT]);
+        bool altA = LAltPressed;
         SeleccionarTodoUV(m, !altA);
         return;
     }
@@ -2165,9 +2166,8 @@ void UVEditor::event_key_down(int tecla, bool repeticion) {
     // la barra y que el del viewport 3D. La L arranca de lo que hay BAJO EL CURSOR (como la L del
     // 3D, que agarra la isla bajo el mouse); shift SUMA la isla a la seleccion en vez de reemplazar.
     if (uvModo == UVModoEdicion && (k == W3dK_I || k == W3dK_L)) {
-        const Uint8* ksS = SDL_GetKeyboardState(NULL);
-        bool ctrlS  = ksS && (ksS[SDL_SCANCODE_LCTRL]  || ksS[SDL_SCANCODE_RCTRL]);
-        bool shiftS = ksS && (ksS[SDL_SCANCODE_LSHIFT] || ksS[SDL_SCANCODE_RSHIFT]);
+        bool ctrlS  = LCtrlPressed;
+        bool shiftS = LShiftPressed;
         if (k == W3dK_I && ctrlS) { InvertirSeleccionUV(m); return; }   // (I sin ctrl = Insert Keyframe, abajo)
         if (k == W3dK_L) { UVSeleccionarVinculado(m, VertBajoCursorUV(m), shiftS); return; }
     }
