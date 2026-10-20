@@ -55,6 +55,20 @@ static void PCWarpMouse(int x, int y) {
     lastMouseY = y;
 }
 
+#ifdef __EMSCRIPTEN__
+// MOUSE CAPTURADO EN EL NAVEGADOR (juego estilo FPS): la pagina no puede mover el cursor, asi que el truco de PC
+// (teletransportarlo al centro cada cuadro) no existe. Se usa el POINTER LOCK del navegador (SDL_SetRelativeMouseMode):
+// el cursor desaparece y el movimiento llega como relativo. Lo maneja la captura de MainLoopFrame; ProcesarEvento junta
+// el movimiento y clava la posicion del cursor al centro del juego (como en PC: un click no cae en otro panel).
+static bool  g_webPunteroPedido = false;          // SDL_SetRelativeMouseMode(SDL_TRUE) pedido para el juego
+static float g_webRatonDX = 0, g_webRatonDY = 0;  // movimiento con el puntero bloqueado desde el ultimo cuadro
+static int   g_webCentroX = 0, g_webCentroY = 0;  // el centro del viewport del juego
+static bool WebPunteroBloqueado() {
+    EmscriptenPointerlockChangeEvent pl;
+    return emscripten_get_pointerlock_status(&pl) == EMSCRIPTEN_RESULT_SUCCESS && pl.isActive;
+}
+#endif
+
 // "Load Texture": el browser COMPARTIDO elige la imagen (png/jpg/bmp...) y la
 // carga al material que la pidio (async: el browser es modal)
 extern void RebindMaterialMeshPart(); // Properties.cpp
@@ -605,6 +619,17 @@ static bool CambiosGuardar() {
 }
 static void ProcesarEvento(SDL_Event& e) {
     g_redraw = true;
+#ifdef __EMSCRIPTEN__
+    // puntero bloqueado para el juego: el movimiento va a ratonRel() y, para el resto del editor, el cursor queda en el
+    // centro del juego (el movimiento relativo ya no lo mueve)
+    if (g_webPunteroPedido && (e.type == SDL_MOUSEMOTION || e.type == SDL_MOUSEBUTTONDOWN || e.type == SDL_MOUSEBUTTONUP) &&
+        WebPunteroBloqueado()) {
+        if (e.type == SDL_MOUSEMOTION) {
+            g_webRatonDX += (float)e.motion.xrel; g_webRatonDY += (float)e.motion.yrel;
+            e.motion.x = g_webCentroX; e.motion.y = g_webCentroY; e.motion.xrel = 0; e.motion.yrel = 0;
+        } else { e.button.x = g_webCentroX; e.button.y = g_webCentroY; }
+    }
+#endif
     // el SISTEMA cierra la app (Android: SDLActivity.onDestroy inyecta SDL_QUIT + SDL_APP_TERMINATING y bloquea su
     // hilo de UI hasta que main() vuelva): no hay a quien preguntarle; se sale siempre
     if (e.type == SDL_APP_TERMINATING) { running = false; return; }
@@ -802,6 +827,32 @@ static void MainLoopFrame() {
         const bool foco = (wf & SDL_WINDOW_INPUT_FOCUS) != 0 && (wf & SDL_WINDOW_MINIMIZED) == 0;
         const bool quiere = AnimEsJuego && PlayAnimation && SimActiva() && W3dScriptRatonCapturar() && foco &&
                             JuegoViewportRect(&vx, &vy, &vw, &vh);
+#ifdef __EMSCRIPTEN__
+        // NAVEGADOR: POINTER LOCK. El navegador lo concede recien con un click o una tecla (el pedido queda armado
+        // hasta entonces: el aviso lo dice). Si lo suelta por su cuenta (Esc, otra pestania) es el Esc de PC: pausa.
+        static bool bloqueadoAntes = false;
+        const bool bloqueado = g_webPunteroPedido && WebPunteroBloqueado();
+        if (quiere) {
+            g_webCentroX = vx + vw / 2; g_webCentroY = vy + vh / 2;
+            // (SDL lo arma solo con el puntero sobre el canvas: si no, se reintenta el cuadro siguiente)
+            if (!g_webPunteroPedido && SDL_SetRelativeMouseMode(SDL_TRUE) == 0) {
+                g_webPunteroPedido = true;
+                if (!WebPunteroBloqueado()) Notificar(T("Click the game to capture the mouse (Esc releases it)"), false);
+            }
+            if (bloqueado) {
+                if (g_webRatonDX != 0.0f || g_webRatonDY != 0.0f) { W3dScriptRatonRel(g_webRatonDX, g_webRatonDY); g_redraw = true; }
+            } else if (bloqueadoAntes) {
+                PlayAnimation = false;   // el navegador solto el mouse (Esc): pausa, como el Esc de PC
+                g_redraw = true;
+            }
+        } else if (g_webPunteroPedido) {
+            SDL_SetRelativeMouseMode(SDL_FALSE);
+            g_webPunteroPedido = false;
+        }
+        g_webRatonDX = 0.0f; g_webRatonDY = 0.0f;
+        bloqueadoAntes = quiere && bloqueado;
+        ratonCapturado = quiere && bloqueado;
+#else
         if (quiere) {
             const int cx = vx + vw / 2, cy = vy + vh / 2;
             int mx = cx, my = cy; SDL_GetMouseState(&mx, &my);
@@ -817,6 +868,7 @@ static void MainLoopFrame() {
             SDL_ShowCursor(SDL_ENABLE);
             ratonCapturado = false;
         }
+#endif
         W3dScriptRatonCapturadoSet(ratonCapturado);
     }
     // Animación
@@ -1012,6 +1064,20 @@ int main(int argc, char* argv[]) {
 
     W3dSetReloj(RelojSDL);   // el motor usa el reloj de PARED de SDL en vez de su respaldo
     w3dFileSystem::Init();
+    #if !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+    // SIN res/ el editor abre igual pero sin texturas ni iconos (cuadrados blancos) y sin decir por que. Se avisa
+    // claro: en el log, en la consola y con un cartel del sistema (en --script solo el log: no hay nadie mirando).
+    if (!w3dFileSystem::IsDir(w3dFileSystem::GetResDir() + "/Skins")) {
+        const std::string msg = "No se encontro la carpeta de recursos de Whisk3D (res/).\n"
+                                "Se busco en: " + w3dFileSystem::GetResDir() + "\n"
+                                "Instala el paquete (.deb) o deja la carpeta res/ al lado del ejecutable.";
+        w3dLogfE("%s", msg.c_str());
+        std::cerr << msg << std::endl;
+        bool enScript = false;
+        for (int ai = 1; ai < argc; ai++) if (std::string(argv[ai]) == "--script") enScript = true;
+        if (!enScript) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_WARNING, "Whisk3D", msg.c_str(), NULL);
+    }
+    #endif
     // AUDIO: arranca el mixer (efectos de los juegos: beep() de los scripts lua). Si el device no
     // abre, la app sigue MUDA (W3dAudioInit devuelve false y todo queda no-op). 44100 en desktop/web.
     w3dEngine::W3dAudioInit(44100);

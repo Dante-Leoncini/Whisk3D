@@ -23,7 +23,7 @@ extern bool g_gizmoOn;   // Overlays > Gizmo. PC/tactil: ON; Symbian: OFF
 
 enum GizmoManija { GizmoNinguna = -1, GizmoEjeX = 0, GizmoEjeY, GizmoEjeZ, GizmoPlanoX, GizmoPlanoY, GizmoPlanoZ, GizmoCentro,
                    GizmoAnilloVista, GizmoLibre };   // (rotar) el anillo blanco = girar sobre la vista; el interior = giro libre
-// MODOS: un click / toque RAPIDO sobre el gizmo (sin arrastrar) pasa al siguiente.
+// MODOS: un click / toque sobre el gizmo (sin arrastrar) pasa al siguiente.
 //   mover   : flechas con punta de piramide + cuadrados de plano + circulo central (libre)
 //   rotar   : un semicirculo de color por eje (girar en ese eje), anillo blanco (girar sobre la vista), interior (libre)
 //   escalar : como mover pero con puntas CUADRADAS; el circulo central escala parejo

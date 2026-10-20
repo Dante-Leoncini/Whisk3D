@@ -1,0 +1,43 @@
+# Object Mode
+
+| 機能 | 説明 | 使い方 |
+|---|---|---|
+| Select | オブジェクトを選択します。何もない所をクリックすると選択を解除します。 | クリック。<kbd>Shift</kbd>+クリックで追加または解除 |
+| Move / Rotate / Scale | [移動・回転・拡大縮小](transformar.md)を参照してください。 | <kbd>G</kbd> / <kbd>R</kbd> / <kbd>S</kbd>、ギズモ |
+| Add | 3Dカーソルの位置に新しいオブジェクトを作成します（[Addメニュー](#addメニュー)を参照）。 | <kbd>Shift+A</kbd>または+ボタン |
+| Apply | 位置、回転、スケール、またはそのすべてをメッシュにベイクします（オブジェクトは回転なし、スケール1で0, 0, 0に置かれます）。 | <kbd>Ctrl+A</kbd> |
+| Set Origin | Geometry to Origin、Origin to Geometry、Origin to 3D Cursor。 | Objectメニュー |
+| Duplicate Objects | 独立したコピーを作り、動かせるようにつかんだ状態にします。 | <kbd>Shift+D</kbd> |
+| Duplicate Linked | 元のオブジェクトとメッシュを共有するコピーです（片方を編集すると両方が変わります）。 | <kbd>Alt+D</kbd> |
+| Join | 選択したメッシュをアクティブなオブジェクトにまとめます。 | <kbd>Ctrl+J</kbd> |
+| Set Parent | 選択したものをアクティブなオブジェクトの子にします（トランスフォームを保持するかどうかを選べます）。 | <kbd>Ctrl+P</kbd> |
+| Clear Parent | 親を解除します（位置を保持するかどうかを選べます）。 | <kbd>Alt+P</kbd> |
+| Delete | 選択したオブジェクトを削除します（確認があります）。 | <kbd>X</kbd>または<kbd>Delete</kbd> |
+| Hide / Show | アクティブなオブジェクトの表示・非表示を切り替えます。 | <kbd>H</kbd> |
+| Create Prefab / Unpack Prefab | 選択したものを再利用できるプレハブにする、またはインスタンスを再び分解します。 | Objectメニュー |
+| Insert Keyframe | 現在のフレームに、位置、回転、スケールのいずれか（または複数）を保存します（チャンネルのメニュー）。<kbd>Shift+I</kbd>では確認なしですべて保存します。 | <kbd>I</kbd> |
+| Delete Keyframe / Clear Keyframe | 現在のフレームのキーフレーム、またはアニメーション全体を削除します。 | Animationメニュー |
+| Motion Trail | アニメーションするオブジェクトの通り道を描画します。 | Animationメニュー |
+| モードの切り替え | メッシュ：Object ↔ Edit。アーマチュア：Object ↔ Pose。カーブ：ノードの編集。 | <kbd>Tab</kbd> |
+
+## Addメニュー
+
+Object Modeのみです。新しいものは3Dカーソルの位置に作成され、選択された状態になります。プリミティブでは、寸法を調整するパネルが開きます。
+
+| 機能 | 説明 |
+|---|---|
+| Mesh | Plane、Cube、Circle、UV Sphere、Cone、Cylinder（サイズ、半径、分割数、スムーズシェーディングを指定できます）。さらに、Vertex（モデリングを始めるための単独の点）とReference（なぞり描き用の、画像を貼った平面）。 |
+| Empty | メッシュを持たないオブジェクトです。グループ化や基準点に使います。 |
+| Camera / Light / Fog | シーンのカメラ、ライト、フォグ。 |
+| Armature | ボーンが1本あるアーマチュアです。キャラクターのアニメーションに使います。 |
+| Path | 2つのノードからなるカーブです（メッシュのように編集します。<kbd>E</kbd>でノードを追加します）。 |
+| Collection | オブジェクトを整理するためのフォルダーです。 |
+| UI | ゲーム用の2Dインターフェースです（2D Editorで編集します）。 |
+| Hitbox | 衝突を検出するボックスです。アクティブなオブジェクトがある場合は、その子として、その大きさで作成されます。 |
+| Physics | オブジェクトは作成しません。アクティブなオブジェクトに剛体を追加します。 |
+| Particles | パーティクルのエミッターです。 |
+| LOD / Culling / Grid Cull | 最適化用のオブジェクト：詳細度（LOD）の切り替えと、見えないものを描画しない処理。 |
+| Clear Depth / Screen Rect | 描画用のツール：深度をクリアする、または画面の一部を切り抜きます。 |
+| Prefab / Scene / Proxy W3D | プロジェクトのプレハブ、別のシーン、または外部ライブラリーのプレハブを挿入します。 |
+| Imports | OBJ、FBX、glTF、GLB、またはWhisk3D UIのインターフェース。 |
+| Core (advanced) | ルーチン：手で組み立てる描画ステップのリストです（トランスフォーム、描画、テクスチャ、ライト、フォグ、ブレンド、深度、制御、Call Lua）。**Routine loop**も含まれます。これはステップを何度も繰り返すルーチンで（たとえば「移動、描画」を20回）、Arrayに似ていますが、より高速です。 |

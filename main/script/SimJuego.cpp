@@ -916,6 +916,16 @@ static void EntradaPad() {
     W3dScriptBotonPad("abajo",      buttonState[SDL_CONTROLLER_BUTTON_DPAD_DOWN]);
     W3dScriptBotonPad("izquierda",  buttonState[SDL_CONTROLLER_BUTTON_DPAD_LEFT]);
     W3dScriptBotonPad("derecha",    buttonState[SDL_CONTROLLER_BUTTON_DPAD_RIGHT]);
+    // los hombros, los gatillos como botones, los sticks apretados, start y select (con los nombres de un mando de
+    // PlayStation: L1/R1 = los hombros, L2/R2 = los gatillos; en un mando de Xbox son LB/RB y LT/RT)
+    W3dScriptBotonPad("l1",     buttonState[SDL_CONTROLLER_BUTTON_LEFTSHOULDER]);
+    W3dScriptBotonPad("r1",     buttonState[SDL_CONTROLLER_BUTTON_RIGHTSHOULDER]);
+    W3dScriptBotonPad("l2",     axisState[SDL_CONTROLLER_AXIS_TRIGGERLEFT]  > 0.5f);
+    W3dScriptBotonPad("r2",     axisState[SDL_CONTROLLER_AXIS_TRIGGERRIGHT] > 0.5f);
+    W3dScriptBotonPad("l3",     buttonState[SDL_CONTROLLER_BUTTON_LEFTSTICK]);
+    W3dScriptBotonPad("r3",     buttonState[SDL_CONTROLLER_BUTTON_RIGHTSTICK]);
+    W3dScriptBotonPad("start",  buttonState[SDL_CONTROLLER_BUTTON_START]);
+    W3dScriptBotonPad("select", buttonState[SDL_CONTROLLER_BUTTON_BACK]);
 #endif
 }
 // UN TICK DE CINEMATICA (reproducirEscena): el juego en PAUSA (ni su fisica ni sus scripts ni sus

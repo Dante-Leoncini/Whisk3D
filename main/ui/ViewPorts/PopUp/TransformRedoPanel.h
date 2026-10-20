@@ -5,10 +5,13 @@
 //  teclado, el gizmo o el tilde) aparece abajo a la izquierda del viewport, EN LUGAR de la barra de herramientas:
 //    - lo que se hizo: Mover X/Y/Z, Rotar angulo (+ eje), Escalar X/Y/Z; todo editable
 //    - la orientacion (Global / Local) y la edicion proporcional (prendida, curva, tamano, solo conectados)
-//    - abajo: Cancelar (deshace el cambio) | Aceptar. Un click afuera tambien acepta.
+//    - abajo: Cancelar (deshace el cambio) | Aceptar. Un click afuera tambien acepta; Esc o Supr tambien (OK sobre un
+//      valor lo edita SIN cerrar). Solo Cancelar deshace.
+//    - si no entra en la mitad del alto de la pantalla se recorta y se desplaza (dedo, rueda o flechas)
 //  Cambiar un valor DESHACE el paso y lo vuelve a hacer con los valores nuevos (queda UN paso de undo).
 // ============================================================================
 #include "PopUpBase.h"
+#include "PanelDesplazable.h"
 #include "WhiskUI/Propieties/GroupPropertie.h"
 class Viewport3D; class Card;
 
@@ -35,6 +38,7 @@ class TransformRedoPanel : public PopUpBase {
         void Soltar() W3D_OVERRIDE;
         bool Arrastrando() W3D_OVERRIDE;
         bool CierraConViewport() W3D_OVERRIDE { return true; }   // click afuera = aceptar (y el click sigue)
+        void Wheel(int delta) W3D_OVERRIDE;
         void Cerrar() W3D_OVERRIDE;
 
         GroupPropertie* grupo;
@@ -42,6 +46,9 @@ class TransformRedoPanel : public PopUpBase {
         int listaAbierta;   // 0 = ninguna, 1 = orientacion, 2 = curva proporcional
         int listaSel;
         Card* lista;
+        Card* marco;                  // el borde verde de lo que se ve (el contenido puede estar desplazado)
+        PanelDesplazable dz;          // mas alto que media pantalla: recortado y con desplazamiento
+        void ClickFila(int mx, int my, bool soloArmar);
         void Armar();
         void ResizeGrupo();
         void Reubicar();

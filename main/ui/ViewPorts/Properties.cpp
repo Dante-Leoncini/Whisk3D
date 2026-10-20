@@ -1,3 +1,4 @@
+#include "io/W3dWeb.h"   // navegador: guardar = descargar
 #include "w3dGraphics.h" // abstraccion de graficos (independencia de OpenGL)
 #include "app/W3dTeclado.h"   // W3dTecladoAbrir: el teclado del celular (y el layout que se adapta)
 #include "gfx/w3dTexture.h"   // Texturas16Siempre (tarjeta Render)
@@ -2050,7 +2051,7 @@ static void UIExportCarpetaElegida(const std::string& carpeta){
     // "Usar carpeta actual" devuelve la CARPETA -> carpeta + nombre de la UI + ".w3dui".
     // (antes se concatenaba con "/" a mano: en la raiz salia "//menu.w3dui")
     std::string ruta = W3dRutaDeSalida(carpeta, u->name, ".w3dui");
-    if (UI2DGuardar(u, ruta)) Notificar(std::string(T("Saved: ")) + ruta, false);
+    if (UI2DGuardar(u, ruta)) { Notificar(std::string(T("Saved: ")) + ruta, false); W3dDescargarSiWeb(ruta); }
     else                      Notificar(T("Could not write the file"), true);
 }
 // el techo del cache de estados (espejo float del int de SimJuego)
@@ -3573,9 +3574,6 @@ static void AccionOptimizarVertexGroups(){
     confirmarPopup->Abrir("Esto modificara el vertex group y lo simplificara a 1 hueso por vertice (skinning mas rapido). Puede haber perdida de datos.", HacerOptimizarVG);
 }
 
-#ifdef __EMSCRIPTEN__
-extern "C" void WebDescargarArchivo(const char* path, const char* name); // main.cpp (EM_JS): baja un archivo del FS al disco
-#endif
 extern bool g_uiTapEnCurso; // (controles.cpp; en Symbian lo define variables.cpp) tap tactil diferido en curso
 // teclado tactil de Whisk3D (NumPad numerico + QWERTY). TAMBIEN en Symbian: NumPad.cpp esta en el .mmp y la
 // edicion por tap abre QwertyAbrir() (ver rama Text de ClickEn). Antes iba guardado -> QwertyAbrir sin declarar.
@@ -3635,10 +3633,11 @@ static void HacerExportActual(){
     if (f == 0) {
         ok = ExportOBJ(path, PropsActivo->exportSelectedOnly, PropsActivo->exportApplyModifiers, PropsActivo->exportApplyTransforms);
         if (ok) Notificar(T("OBJ saved successfully!"), false); else Notificar(T("Error: could not save the OBJ"), true);
-#ifdef __EMSCRIPTEN__
-        if (ok) { std::string mtl = ExtractBaseName(path) + ".mtl"; // web: bajar .obj + .mtl (FS virtual de emscripten)
-            WebDescargarArchivo(path.c_str(), SoloNombre(path).c_str()); WebDescargarArchivo(mtl.c_str(), SoloNombre(mtl).c_str()); }
-#endif
+        if (ok) {   // navegador: bajan el .obj y el .mtl (las texturas ya bajaron desde ExportOBJ)
+            const size_t sl = path.find_last_of("/\\");
+            W3dDescargarSiWeb(path);
+            W3dDescargarSiWeb((sl == std::string::npos ? std::string() : path.substr(0, sl + 1)) + ExtractBaseName(path) + ".mtl");
+        }
     } else {
         ok = ExportGLTF(path, PropsActivo->exportSelectedOnly, f == 3); // f==2 glTF (texto), f==3 GLB (binario)
         // ExportGLTF ya tira su propia notificacion + autodescarga en web
@@ -5847,7 +5846,7 @@ static void ProyExtraerCarpetaElegida(const std::string& elegido) {
     for (size_t i = 0; i < ents.size(); i++) {
         if (W3dEsEntradaDeServicio(ents[i])) continue;   // mimetype/LEEME/EXTERNOS: no son assets
         // W3dContenedorExtraer crea las carpetas del destino ("texturas/") solo
-        if (W3dContenedorExtraer(ents[i], dir + "/" + ents[i])) sacados++; else fallados++;
+        if (W3dContenedorExtraer(ents[i], dir + "/" + ents[i])) { sacados++; W3dDescargarSiWeb(dir + "/" + ents[i]); } else fallados++;
     }
     char b[256];
     if (fallados)
@@ -8747,6 +8746,7 @@ void PropsRecExternoElegido(const std::string& elegido) {
         return;
     }
     Notificar(std::string(T("Now external")) + ": " + nuevo, false);
+    W3dDescargarSiWeb(nuevo);   // navegador: el recurso que paso a ser externo baja a la PC
     PropertiesLayoutDirty = true;
     g_redraw = true;
 }

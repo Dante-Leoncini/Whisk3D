@@ -1,0 +1,12 @@
+# Свет и камера
+
+| Функция | Что делает |
+|---|---|
+| `color(luz) → r, g, b`, `setColor(luz, r, g, b)` | Цвет источника света. |
+| `energia(luz) → e`, `setEnergia(luz, e)` | Его яркость, от 0 до 1 (чтобы он мерцал или постепенно гас). |
+| `setCamaraActiva(cam)` | Меняет камеру, через которую видна игра. |
+| `lenteDe(cam) → fov, cerca, lejos`, `setLente(cam [, fov, cerca, lejos])` | Угол обзора и расстояния отсечения. |
+| `camaraXZ() → fx, fz, rx, rz` | Куда смотрит камера в плоскости пола (чтобы двигать персонажа относительно камеры). |
+| `pantallaDe(obj) → x, y, delante` | Где 3D-объект находится на экране (чтобы поставить над ним 2D-метку). |
+| `setRiel(cam, curva [, offset])`, `setRielNodo`, `setMiradaRiel`, `rielDe` | Заставить камеру следовать по кривой (рельсу). |
+| `resolucion() → ancho, alto` | Реальный размер 3D-изображения в пикселях. |

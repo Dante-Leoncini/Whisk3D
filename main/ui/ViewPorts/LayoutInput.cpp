@@ -2786,6 +2786,56 @@ static void LayoutAbrirMenuIDEArchivo(IDE* ide, int x, int y) {
     gMenuIDEArchivo->Abrir(x, y, MenuPantallaW, MenuPantallaH);
     MenuAbierto = gMenuIDEArchivo;
 }
+// ===== menus EDITAR y SELECCIONAR del IDE =====
+static PopupMenu* gMenuIDEEditar = NULL;
+static PopupMenu* gMenuIDESeleccionar = NULL;
+static IDE* gIDEEditarDe = NULL;
+enum { IDEE_Deshacer = 1, IDEE_Rehacer, IDEE_Cortar, IDEE_Copiar, IDEE_Pegar, IDEE_Buscar, IDEE_Reemplazar, IDEE_Todo };
+static void LayoutAccionIDEEditar(int id) {
+    IDE* ide = gIDEEditarDe;
+    if (!ide) return;
+    extern void IDEAbrirBuscar(IDE*, bool);
+    switch (id) {
+        case IDEE_Deshacer:   ide->DeshacerTexto(); break;
+        case IDEE_Rehacer:    ide->RehacerTexto(); break;
+        case IDEE_Cortar:     ide->Cortar(); break;
+        case IDEE_Copiar:     ide->Copiar(); break;
+        case IDEE_Pegar:      ide->Pegar(); break;
+        case IDEE_Buscar:     IDEAbrirBuscar(ide, false); break;
+        case IDEE_Reemplazar: IDEAbrirBuscar(ide, true); break;
+        case IDEE_Todo:       ide->SeleccionarTodo(); break;
+    }
+    g_redraw = true;
+}
+static void LayoutAbrirMenuIDEEditar(IDE* ide, int x, int y) {
+    if (!ide) return;
+    gIDEEditarDe = ide;
+    if (!gMenuIDEEditar) { gMenuIDEEditar = new PopupMenu(); gMenuIDEEditar->action = LayoutAccionIDEEditar; }
+    gMenuIDEEditar->Limpiar();
+    gMenuIDEEditar->Agregar(T("Undo"), IDEE_Deshacer)->atajo = "@ide.deshacer";
+    gMenuIDEEditar->Agregar(T("Redo"), IDEE_Rehacer)->atajo = "@ide.rehacer";
+    gMenuIDEEditar->Agregar(T("Cut"), IDEE_Cortar)->atajo = "@ide.cortar";
+    gMenuIDEEditar->Agregar(T("Copy"), IDEE_Copiar)->atajo = "@ide.copiar";
+    gMenuIDEEditar->Agregar(T("Paste"), IDEE_Pegar)->atajo = "@ide.pegar";
+    gMenuIDEEditar->Agregar(T("Find..."), IDEE_Buscar)->atajo = "@ide.buscar";
+    gMenuIDEEditar->Agregar(T("Replace..."), IDEE_Reemplazar)->atajo = "@ide.reemplazar";
+    if (MenuAbierto && MenuAbierto != gMenuIDEEditar) MenuAbierto->Cerrar();
+    gMenuIDEEditar->Abrir(x, y, MenuPantallaW, MenuPantallaH);
+    MenuAbierto = gMenuIDEEditar;
+}
+static void LayoutAbrirMenuIDESeleccionar(IDE* ide, int x, int y) {
+    if (!ide) return;
+    gIDEEditarDe = ide;
+    if (!gMenuIDESeleccionar) { gMenuIDESeleccionar = new PopupMenu(); gMenuIDESeleccionar->action = LayoutAccionIDEEditar; }
+    gMenuIDESeleccionar->Limpiar();
+    gMenuIDESeleccionar->Agregar(T("Select All"), IDEE_Todo)->atajo = "@ide.todo";
+    if (MenuAbierto && MenuAbierto != gMenuIDESeleccionar) MenuAbierto->Cerrar();
+    gMenuIDESeleccionar->Abrir(x, y, MenuPantallaW, MenuPantallaH);
+    MenuAbierto = gMenuIDESeleccionar;
+}
+// (harness) una accion de Editar / Seleccionar sin abrir el menu (ids: 1 deshacer .. 8 seleccionar todo)
+void LayoutIDEEditarAccion(IDE* ide, int id) { gIDEEditarDe = ide; LayoutAccionIDEEditar(id); }
+
 // (harness) accion del menu Archivo del IDE sin abrir el menu; "fuera del w3d" con la carpeta ya elegida
 void LayoutIDEArchivoAccion(IDE* ide, int id) { gIDEArchivoDe = ide; LayoutAccionIDEArchivo(id); }
 void LayoutIDEFueraDelW3d(IDE* ide, const std::string& carpeta) { gIDEArchivoDe = ide; IDEFueraElegido(carpeta); }
@@ -2804,6 +2854,8 @@ bool LayoutClickBarraIDE(IDE* ide, int mx, int my) {
             case BRIDE_Script:  LayoutAbrirMenuIDEScript(ide, bx, by); return true;
             case BRIDE_Guardar: LayoutAbrirMenuIDEArchivo(ide, bx, by); return true;   // menu Archivo
             case BRIDE_Refresh: ide->Refresh(); return true;
+            case BRIDE_Editar:  LayoutAbrirMenuIDEEditar(ide, bx, by); return true;       // menu Editar
+            case BRIDE_Seleccionar: LayoutAbrirMenuIDESeleccionar(ide, bx, by); return true;
         }
     }
     return false;
@@ -4880,8 +4932,8 @@ bool LayoutMotionUI(int mx, int my) {
         if (leftMouseDown) { BrushBarDragMover(mx, my); return true; }
         BrushBarDragSoltar(); // up perdido (se solto fuera de la ventana): cerrar el gesto
     }
-    if (PopUpActive) {
-        // popup modal (selector de color): se queda con el mouse
+    if (PopUpActive && (!PopUpActive->NoModal() || PopUpActive->Arrastrando())) {
+        // popup modal (selector de color): se queda con el mouse (uno NO modal, solo mientras lo arrastran)
         PopUpActive->Motion(mx, my);
         return true;
     }
@@ -4981,10 +5033,13 @@ bool LayoutClickUI(int mx, int my) {
     if (PopUpActive) {
         if (PopUpActive->Click(mx, my)) return true; // adentro: el popup lo maneja
         // afuera: cerrarlo. Si es semi-modal (redo-panel) el click ademas cae al
-        // viewport (selecciona/orbita); si es modal, se consume y listo.
-        bool semimodal = PopUpActive->CierraConViewport();
-        PopUpActive->Cerrar();
-        if (!semimodal) return true;
+        // viewport (selecciona/orbita); si es modal, se consume y listo. Uno NO modal (Buscar del IDE) sigue
+        // abierto y el click va a lo de abajo.
+        if (!PopUpActive->NoModal()) {
+            bool semimodal = PopUpActive->CierraConViewport();
+            PopUpActive->Cerrar();
+            if (!semimodal) return true;
+        }
     }
     if (LayoutMenuAbierto()) {
         // menu SCROLLABLE (ej: 129 clips): NO seleccionar en el DOWN -> diferir al UP para poder arrastrar y

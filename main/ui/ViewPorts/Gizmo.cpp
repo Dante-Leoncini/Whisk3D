@@ -13,7 +13,6 @@
 #include "w3dGraphics.h"
 #include "WhiskUI/draw/glesdraw.h"      // W3dDrawLinesF
 #include "WhiskUI/core/UI.h"            // GlobalScale
-#include "W3dProfile.h"                 // W3dNowMs (click rapido = cambiar de modo)
 #include <math.h>
 #include <vector>
 
@@ -28,14 +27,13 @@ bool g_gizmoOn = true;
 
 static bool g_gizmoArrastre = false;
 static int  g_gizmoManija   = GizmoNinguna;
-// MODO del gizmo: un click / toque RAPIDO sobre el (sin arrastrar) pasa al siguiente: mover -> rotar -> escalar
+// MODO del gizmo: un click / toque sobre el (sin arrastrar) pasa al siguiente: mover -> rotar -> escalar
 static int  g_gizmoModo = GizmoModoMover;
 int  GizmoModo() { return g_gizmoModo; }
 void GizmoSetModo(int m) { g_gizmoModo = (m < 0 || m > 2) ? 0 : m; g_redraw = true; }
 static void GizmoSiguienteModo() { g_gizmoModo = (g_gizmoModo + 1) % 3; g_redraw = true; }
-// el agarre: donde y cuando fue (para distinguir el click rapido del arrastre)
+// el agarre: donde fue (para distinguir el click del arrastre)
 static int    g_gizmoDownX = 0, g_gizmoDownY = 0;
-static double g_gizmoDownT = 0.0;
 static bool   g_gizmoSeMovio = false;
 // ROTAR por eje: el angulo de pantalla alrededor del centro, acumulado (cruza +-180 sin saltar) y su signo
 static float g_gizmoAngPrev = 0.0f, g_gizmoAngAcum = 0.0f, g_gizmoSigno = 1.0f, g_gizmoCx = 0.0f, g_gizmoCy = 0.0f;
@@ -335,7 +333,7 @@ bool GizmoDown(ViewportBase* vb, int mx, int my) {
     }
     axisSelect = eje;
     if (est == rotacion) { extern bool gTrackballCap; gTrackballCap = false; }   // la vista / el giro libre miden desde aca
-    g_gizmoDownX = mx; g_gizmoDownY = my; g_gizmoDownT = W3dNowMs(); g_gizmoSeMovio = false;
+    g_gizmoDownX = mx; g_gizmoDownY = my; g_gizmoSeMovio = false;
     // ROTAR por eje: angulo de pantalla alrededor del centro; el signo depende de si el eje mira a la camara
     if (est == rotacion && manija >= GizmoEjeX && manija <= GizmoEjeZ) {
         float cx = lx, cy = ly; vp->ProyectarPunto(c, cx, cy);
@@ -375,10 +373,11 @@ bool GizmoDown(ViewportBase* vb, int mx, int my) {
 
 bool GizmoMotion(Viewport3D* vp, int mx, int my) {
     if (!g_gizmoArrastre || !vp) return false;
-    // hasta pasar el umbral es un CLICK (quieto): si se suelta asi, el gizmo cambia de modo
+    // hasta pasar el umbral es un CLICK (quieto): si se suelta asi, el gizmo cambia de modo. El MISMO umbral que el
+    // toque con el dedo (controles.cpp): al apretar el touchpad o un mouse sensible el puntero se corre unos pixeles
     if (!g_gizmoSeMovio) {
         const int ddx = mx - g_gizmoDownX, ddy = my - g_gizmoDownY;
-        if ((ddx < 0 ? -ddx : ddx) + (ddy < 0 ? -ddy : ddy) <= 4 * GlobalScale) return true;
+        if ((ddx < 0 ? -ddx : ddx) + (ddy < 0 ? -ddy : ddy) <= 8 * GlobalScale) return true;
         g_gizmoSeMovio = true;
     }
     const float lx = (float)(mx - vp->x), ly = (float)(my - vp->y);
@@ -429,10 +428,9 @@ bool GizmoMotion(Viewport3D* vp, int mx, int my) {
 
 void GizmoSoltar(Viewport3D* vp) {
     if (!g_gizmoArrastre) return;
-    // CLICK RAPIDO sin arrastrar: no era una operacion -> se descarta (sin paso de undo) y el gizmo pasa al modo
-    // siguiente (mover -> rotar -> escalar). Sin reloj (N95: W3dNowMs = 0) cuenta solo la quietud.
-    const double ahora = W3dNowMs();
-    const bool click = !g_gizmoSeMovio && (ahora <= 0.0 || ahora - g_gizmoDownT < 450.0);
+    // CLICK sin arrastrar: no era una operacion -> se descarta (sin paso de undo) y el gizmo pasa al modo siguiente
+    // (mover -> rotar -> escalar). Como el toque con el dedo: cuenta solo la quietud, no cuanto se tuvo apretado.
+    const bool click = !g_gizmoSeMovio;
     g_gizmoArrastre = false; g_gizmoManija = GizmoNinguna; g_gizmoTieneP0 = false;
     if (click) {
         if (InteractionMode == EditMode && EditXformActivo()) EditXformCancelar(); else Cancelar();

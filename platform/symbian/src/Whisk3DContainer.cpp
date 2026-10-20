@@ -520,7 +520,9 @@ TKeyResponse CWhisk3DContainer::OfferKeyEventL( const TKeyEvent& aKeyEvent,TEven
 			// TODO el keypad (flechas mueven el foco/menu, OK selecciona, soft
 			// IZQ=164=Cancelar/cerrar). Asi se navegan SIN mouse BT y los
 			// digitos no tocan la escena 3D.
-			if (W3dLayoutPopupActivo() || W3dLayoutMenuAbierto()){
+			// ...SALVO un campo del popup en edicion (OK sobre un valor del panel de la ultima transformacion, el texto
+			// de Buscar del IDE): ahi el keypad ESCRIBE (bloque T9 de abajo) y el popup sigue abierto. Termina con OK.
+			if ((W3dLayoutPopupActivo() && !W3dT9Activo()) || W3dLayoutMenuAbierto()){
 				extern GLshort mouseX; extern GLshort mouseY;
 				// soft DER (165) sobre un MENU desplegable (no un popup modal) -> lo CIERRA, igual que el soft
 				// IZQ. (En un popup -ej color picker- 165 sigue siendo Aceptar/OK.) Pedido Dante.
@@ -790,6 +792,8 @@ TKeyResponse CWhisk3DContainer::OfferKeyEventL( const TKeyEvent& aKeyEvent,TEven
 				// LAPIZ: solo REGISTRAR. La accion (ciclar) va al SOLTAR si fue una pulsacion
 				// corta SIN flecha. Larga = nada. Mantener + flecha = navegar (handler de flechas).
 				gLapizHeld = ETrue; gLapizArrowUsed = EFalse; gLapizDownTick = User::NTickCount();
+				// editando un script: abajo aparece la barra de las softkeys "Copiar | Pegar" mientras se mantiene
+				{ extern void IDELapizSostenido(bool); if (W3dLayoutIDEEditando()) IDELapizSostenido(true); }
 				return EKeyWasConsumed;
 			}
 			// OK del telefono: acepta el transform o la edicion de propiedad
@@ -913,7 +917,9 @@ TKeyResponse CWhisk3DContainer::OfferKeyEventL( const TKeyEvent& aKeyEvent,TEven
 			}
 			if (usc == EStdKeyLeftShift){ // LAPIZ (solo shift ahora)
 				TUint dt = User::NTickCount() - gLapizDownTick; // lapiz soltado: corto + sin flecha = ciclar
-				if (gLapizHeld && !gLapizArrowUsed && dt < 500 && !W3dNewTransformActive() && !mouseVisible){
+				{ extern void IDELapizSostenido(bool); IDELapizSostenido(false); }   // se va la barra Copiar | Pegar
+				// (editando un script el lapiz es solo shift: no cicla la seleccion de la escena)
+				if (gLapizHeld && !gLapizArrowUsed && dt < 500 && !W3dNewTransformActive() && !mouseVisible && !W3dLayoutIDEEditando()){
 					// en el TIMELINE: saca el keyframe actual y pasa al siguiente. En el resto: cicla el activo.
 					if (!DopeNavTecla(0)) W3dNewCycleSelect();
 				} // con mouse virtual el lapiz es shift (no cicla)

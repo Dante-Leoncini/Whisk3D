@@ -1,0 +1,15 @@
+# Teclado, mando, táctil y mouse
+
+| Función | Qué hace |
+|---|---|
+| `tecla(nombre) → bool` | La tecla está apretada (mientras la mantenés). |
+| `teclaApretada(nombre) → bool` | Se apretó justo en este cuadro (una sola vez por pulsación). |
+| `boton(nombre)`, `botonApretado(nombre)` | Lo mismo con un botón del mando. |
+| `stick(["izq"\|"der"]) → x, y` | Palanca del mando, de -1 a 1 (arriba es -1). |
+| `gatillo(["izq"\|"der"]) → 0..1` | Gatillo analógico. |
+| `controles() → n`, `control([n]) → nombre, tipo` | Cuántos mandos hay y de qué tipo (`"xbox"`, `"playstation"`, `"nintendo"`, `"generico"`). |
+| `toque() → x, y, tocando` | El dedo (o el click del mouse) en la pantalla. |
+| `dedo([n]) → x, y, activo` | Multitáctil: el dedo número n (1 a 4). |
+| `apretado(obj) → bool` | Se tocó o clickeó ese elemento 2D en este cuadro (botones). |
+| `raton() → x, y, dentro` | Dónde está el mouse. |
+| `capturarRaton(bool)`, `ratonRel() → dx, dy`, `ratonCapturado()` | Mouse capturado para mirar con el mouse (juegos en primera persona). En PC y en el navegador; en el navegador el mouse se captura con el primer click o tecla en el juego. <kbd>Esc</kbd> lo suelta y pausa el juego. |

@@ -75,16 +75,19 @@ DEF="-DW3D_WEBGL -DW3D_ENABLE_AUDIO"
 
 # --- flags de Emscripten ---
 #   -sUSE_SDL=2            ventana + eventos (mismo SDL2 que los ejemplos web)
-#   -sINITIAL_MEMORY=128MB  memoria FIJA. OJO: NO usar -sALLOW_MEMORY_GROWTH: con growth la
-#                           memoria WASM es un ArrayBuffer "resizable" y el Chrome/Firefox nuevos
-#                           rechazan TextDecoder.decode() sobre eso -> crash al arrancar (pantalla
-#                           negra + cuelgue). Con memoria fija es un buffer normal y anda.
-#                           128MB (antes 256): iOS Safari fallaba al alocar el bloque fijo de 256MB
-#                           -> "no carga" (pantalla en blanco). 128 alcanza para el editor + un modelo
-#                           y es mucho mas facil de alocar en iOS. Sigue FIJA (no rompe Chrome/Firefox).
+#   -sINITIAL_MEMORY=128MB  memoria con la que ARRANCA. 128MB (antes 256): iOS Safari fallaba al alocar
+#                           un bloque inicial de 256MB -> "no carga" (pantalla en blanco).
+#   -sALLOW_MEMORY_GROWTH   ...y CRECE cuando hace falta: un proyecto grande (un nivel con animaciones, musica
+#                           y texturas) no entra en 128MB fijos -> "Aborted(OOM)" al abrirlo.
+#   -sGROWABLE_ARRAYBUFFERS=0  OJO, imprescindible con el growth: por defecto emcc 6 crece con un ArrayBuffer
+#                           "resizable" y Chrome/Firefox rechazan TextDecoder.decode() sobre eso -> crash al
+#                           arrancar (pantalla negra + cuelgue; por eso la memoria era FIJA). Con 0 crece a la
+#                           antigua: cambia el buffer por uno NORMAL mas grande y TextDecoder anda.
+#                           (el JS propio -EM_JS- lee HEAPU8 en el momento y copia: no guarda vistas viejas)
+#   -sMAXIMUM_MEMORY=2GB    el tope del growth
 #   --preload-file res@/res  empaqueta res/ y lo monta en /res (= GetResDir() en web)
 #   --shell-file           HTML propio (canvas fullscreen + pantalla de carga)
-EMFLAGS="-sUSE_SDL=2 -sINITIAL_MEMORY=134217728"
+EMFLAGS="-sUSE_SDL=2 -sINITIAL_MEMORY=134217728 -sALLOW_MEMORY_GROWTH=1 -sGROWABLE_ARRAYBUFFERS=0 -sMAXIMUM_MEMORY=2147483648"
 #   -sMIN_SAFARI_VERSION=140100  Safari 14.1+: el emcc 6.x por defecto emite features wasm
 #                           (bulk-memory, sign-ext, non-trapping fptoint, etc.) que Safari viejo
 #                           no soporta -> "no carga". Con este flag emcc baja el target y el

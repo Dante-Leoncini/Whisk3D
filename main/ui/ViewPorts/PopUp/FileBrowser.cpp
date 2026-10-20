@@ -1,3 +1,4 @@
+#include "io/W3dWeb.h"   // navegador: abrir con su selector, guardar = descargar
 #include "W3dLang.h"   // T()
 #include "w3dGraphics.h" // abstraccion de graficos (independencia de OpenGL)
 #include "FileBrowser.h"
@@ -794,6 +795,16 @@ const char* const kUsarCarpetaActual = "Usar carpeta actual";
 void AbrirFileBrowser(const std::string& title, const std::string& accionLabel,
                       const std::string& filtro, void (*accept)(const std::string&),
                       bool guardar) {
+#ifdef __EMSCRIPTEN__
+    // NAVEGADOR: el explorador del editor mostraria el disco virtual en memoria, que no le sirve a nadie. Abrir usa
+    // el selector de archivos del navegador; guardar escribe en /descargas y cada punto de escritura lo descarga.
+    if (guardar) {
+        if (PopUpActive) PopUpActive->Cerrar();
+        accept(W3dWebCarpetaDescargas());
+        return;
+    }
+    if (W3dWebAbrirArchivo(title, filtro, accept)) { if (PopUpActive) PopUpActive->Cerrar(); return; }
+#endif
     if (PopUpActive) PopUpActive->Cerrar();
     FileBrowser* fb = new FileBrowser(title, accionLabel, filtro, accept);
     fb->modoGuardar = guardar;

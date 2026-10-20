@@ -57,7 +57,7 @@ static std::string FirmaMaterial(const Material* m) {
     const bool bs[14] = { m->textureOn, m->filtrado, m->transparent, m->vertexColor, m->lighting, m->repeat, m->uv8bit,
                           m->culling, m->depth_test, m->fondo, m->depth_write, m->chrome, m->normalMap, m->lineas };
     for (int k = 0; k < 14; k++) s += bs[k] ? '1' : '0';
-    s += RutaBase(m) + "\x01" + Ruta(m->normalTexture) + "\x01" + Ruta(m->texturaB); Num(s, m->mezclaB);
+    s += RutaBase(m) + "\x01" + Ruta(m->normalTexture) + "\x01" + Ruta(m->texturaB); Num(s, m->mezclaB); Num(s, m->toon); Num(s, m->contorno);
     for (size_t c = 0; c < m->capas.size(); c++) { s += "\x02" + Ruta(m->capas[c].tex); Num(s, m->capas[c].blend); Num(s, m->capas[c].uvMapa); s += m->capas[c].on ? '1' : '0'; }
     return s;
 }

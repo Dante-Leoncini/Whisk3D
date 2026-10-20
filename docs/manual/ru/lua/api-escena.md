@@ -1,0 +1,12 @@
+# Сцена: поиск, создание и удаление
+
+| Функция | Что делает |
+|---|---|
+| `buscar(nombre [, raiz]) → obj \| nil` | Ищет объект по имени в Outliner (или только внутри `raiz`). |
+| `nombre(obj) → texto` | Имя объекта. |
+| `tipo(obj) → texto` | Что это: `"mesh"`, `"luz"`, `"camara"`, `"vacio"`, `"esqueleto"`, `"texto"`, `"imagen"`, `"boton"`, `"hitbox"`, `"prefab"`, `"rutina"`… (`""`, если объекта нет). |
+| `instanciar(prefab [, x, y, z [, rotY]]) → obj \| nil` | Создаёт копию префаба в этой позиции (rotY в градусах). |
+| `destruir(obj) → bool` | Удаляет объект в конце кадра. |
+| `importarW3D(ruta) → obj \| nil` | Добавляет в сцену другой файл .w3d во время игры. |
+| `cargar(obj)` / `descargar(obj)` / `cargaAuto(obj)` | Вручную загружает или выгружает часть уровня (стриминг) или возвращает её в автоматический режим. |
+| `cargado(obj) → bool` | Загружена ли уже эта часть. |

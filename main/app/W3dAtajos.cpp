@@ -171,6 +171,9 @@ static const W3dAtajoDef kAtajos[] = {
     { "ide.cortar",           W3dATC_IDE,      "Cut",                        "Ctrl+X" },
     { "ide.pegar",            W3dATC_IDE,      "Paste",                      "Ctrl+V" },
     { "ide.todo",             W3dATC_IDE,      "Select All",                 "Ctrl+A" },
+    { "ide.rehacer",          W3dATC_IDE,      "Redo",                       "Ctrl+Y, Ctrl+Shift+Z" },
+    { "ide.buscar",           W3dATC_IDE,      "Find",                       "Ctrl+F" },
+    { "ide.reemplazar",       W3dATC_IDE,      "Replace",                    "Ctrl+H" },
 };
 static const int kNAtajos = (int)(sizeof(kAtajos) / sizeof(kAtajos[0]));
 

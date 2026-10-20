@@ -1,0 +1,12 @@
+# Sahne: bulma, oluşturma ve yok etme
+
+| Fonksiyon | Ne yapar |
+|---|---|
+| `buscar(nombre [, raiz]) → obj \| nil` | Outliner'da bir nesneyi adıyla arar (ya da yalnızca `raiz` içinde). |
+| `nombre(obj) → texto` | Nesnenin adı. |
+| `tipo(obj) → texto` | Ne olduğu: `"mesh"`, `"luz"`, `"camara"`, `"vacio"`, `"esqueleto"`, `"texto"`, `"imagen"`, `"boton"`, `"hitbox"`, `"prefab"`, `"rutina"`… (yoksa `""`). |
+| `instanciar(prefab [, x, y, z [, rotY]]) → obj \| nil` | O konumda bir prefab'ın kopyasını oluşturur (rotY derece cinsinden). |
+| `destruir(obj) → bool` | Nesneyi karenin sonunda siler. |
+| `importarW3D(ruta) → obj \| nil` | Oyun çalışırken sahneye başka bir .w3d dosyası ekler. |
+| `cargar(obj)` / `descargar(obj)` / `cargaAuto(obj)` | Seviyenin bir bölümünü elle yükler ya da boşaltır (streaming) veya onu otomatiğe döndürür. |
+| `cargado(obj) → bool` | O bölümün yüklenip yüklenmediği. |

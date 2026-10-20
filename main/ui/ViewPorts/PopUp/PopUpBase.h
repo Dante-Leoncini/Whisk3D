@@ -47,6 +47,9 @@ class PopUpBase {
         // click) con el mouse AFUERA del popup lo cierra y deja pasar la accion
         // Por defecto los popups son modales.
         virtual bool CierraConViewport() { return false; }
+        // NO MODAL (Buscar del IDE): un click o una tecla con el puntero AFUERA del popup van al viewport de abajo
+        // como si no estuviera, y el popup sigue abierto (se cierra con su boton o con Esc).
+        virtual bool NoModal() { return false; }
         // TECLADO en pantalla (numerico / qwerty): sus teclas EDITAN el campo activo, asi que un click adentro NO
         // commitea la edicion. En cualquier otro popup, un click en otro control APLICA lo tipeado.
         virtual bool EsTeclado() const { return false; }

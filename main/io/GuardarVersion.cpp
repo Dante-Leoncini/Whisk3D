@@ -31,6 +31,7 @@
 //  dejar afuera a proposito): se avisa por notificacion y estan listadas en el
 //  EXTERNOS.txt de adentro del .w3d.
 // ============================================================================
+#include "io/W3dWeb.h"   // navegador: guardar = descargar
 #include "W3dLang.h"   // T(): los avisos salen en el idioma del editor
 #include "io/GuardarVersion.h"
 
@@ -268,6 +269,7 @@ bool GuardarVersionEjecutar() {
     std::string destino = dir + "/" + VerNombreDe(base, n);
     char b[400];
     if (VerCopiarArchivo(w3dPath, destino)) {
+        W3dDescargarSiWeb(destino);   // navegador: la copia de la version tambien baja a la PC
         snprintf(b, sizeof(b), "Version v%d guardada: versiones/%s", n, VerNombreDe(base, n).c_str());
         Notificar(b, false);
         w3dLogf("[Version] v%d = copia de %s en %s", n, VerBase(w3dPath).c_str(), destino.c_str());

@@ -35,3 +35,8 @@ trinfo rotar
 trfijar 0 90
 objroteuler 0 90 0
 trboton 1
+# --- pantalla BAJA: el panel se ve a la mitad del alto y se desplaza arrastrando (sin tocar las opciones); las flechas
+#     llevan la fila elegida a la vista; Esc / Supr cierran aceptando ---
+objmove 1 0 0
+trinfo mover
+trpanelscroll

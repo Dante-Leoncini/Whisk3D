@@ -5,6 +5,7 @@
 //    mezcla: "over" con alpha no premultiplicado -> dos caras superpuestas dan 1-(1-a)^2, tres 1-(1-a)^3...
 //    bordes: despues de todas las caras, opacos, con un grosor que acompana la resolucion (1px hasta 512)
 // ============================================================================
+#include "io/W3dWeb.h"   // navegador: guardar = descargar
 #include "io/UVExportar.h"
 #include "objects/Mesh.h"
 #include "objects/Materials.h"
@@ -161,6 +162,7 @@ bool UVExportarPNG(Mesh* m, Texture* filtro, int w, int h, const std::string& ru
     fclose(f);
     delete[] png;
     if (wr != (size_t)len) { msg = "Could not write the file"; return false; }
+    W3dDescargarSiWeb(ruta);   // navegador: el mapa UV baja a la PC
     msg.clear();
     return true;
 }

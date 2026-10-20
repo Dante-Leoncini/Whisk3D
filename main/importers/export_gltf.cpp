@@ -18,6 +18,7 @@
 #include "math/Matrix4.h"
 #include "math/Vector3.h"
 #include "w3dFilesystem.h"
+#include "io/W3dWeb.h"   // W3dDescargarSiWeb: en el navegador el export (y sus texturas) bajan a la PC
 #include "w3dlog.h"
 #include <vector>
 #include <string>
@@ -28,11 +29,6 @@
 #include <fstream>
 #include <stdint.h>
 
-#ifdef __EMSCRIPTEN__
-// extern "C": la def es un EM_JS en main.cpp (linkage C). Sin esto el link falla con "undefined symbol
-// WebDescargarArchivo(char const*, char const*)" (busca el simbolo C++-mangled). Igual que Properties.cpp / ViewPort3D.cpp.
-extern "C" void WebDescargarArchivo(const char* rutaVFS, const char* nombreSugerido); // main.cpp
-#endif
 
 // ============================================================================
 //  Exportador glTF 2.0 (.gltf embebido / .glb). Inverso de import_gltf.cpp: la
@@ -249,6 +245,7 @@ bool ExportGLTF(const std::string& filepath, bool selectedOnly, bool binary) {
                     else w3dLogfW("ExportGLTF: no pude copiar la textura a %s", dest.c_str());
                 }
             }
+            W3dDescargarSiWeb(dest);   // navegador: la textura baja AL LADO del .gltf/.glb (el export la nombra por basename)
         }
         imgUri.push_back(base.empty() ? PathUri(texs[i]->path) : base);   // (la uri de cada imagen: la usan las capas)
         imgsJson.push_back("{\"uri\":\"" + Jesc(imgUri.back()) + "\"}");
@@ -282,6 +279,10 @@ bool ExportGLTF(const std::string& filepath, bool selectedOnly, bool binary) {
            + ",\"w3d_shininess\":"   + Ftos(mat->shininess);
         if (mat->texturaB && texIdx.count(mat->texturaB))   // mezcla de texturas: la textura B (uri) y cuanto de ella
             j += ",\"w3d_texturaB\":\"" + Jesc(imgUri[(size_t)texIdx[mat->texturaB]]) + "\",\"w3d_mezclaB\":" + Ftos(mat->mezclaB);
+        if (mat->toon && mat->texturaB && texIdx.count(mat->texturaB))   // sombreado toon: la rampa y como se aplica
+            j += ",\"w3d_toon\":\"" + Jesc(imgUri[(size_t)texIdx[mat->texturaB]]) + "\",\"w3d_toonMezcla\":\""
+               + (mat->toon == 2 ? "multiplicar" : "restar") + "\"";
+        if (mat->contorno > 0.0f) j += ",\"w3d_contorno\":" + Ftos(mat->contorno);
         if (!mat->capas.empty()) {   // capas de textura extra: [{textura (uri), mezcla, uv, on}]
             std::vector<std::string> cj;
             for (size_t c = 0; c < mat->capas.size(); c++) {
@@ -685,9 +686,7 @@ bool ExportGLTF(const std::string& filepath, bool selectedOnly, bool binary) {
     if (!ok) { ProgresoFin(); w3dLogfE("ExportGLTF: no pude escribir %s", filepath.c_str()); Notificar(T("glTF: could not write the file"), true); return false; }
     ProgresoFin();
     w3dLogf("ExportGLTF: %s (%d malla(s), %d hueso(s), %d clip(s), buffer=%d bytes)", filepath.c_str(), (int)meshesJson.size(), nBones, (int)animsJson.size(), (int)buf.bin.size());
-#ifdef __EMSCRIPTEN__
-    WebDescargarArchivo(filepath.c_str(), filepath.c_str()); // web: bajar el archivo (FS virtual de emscripten)
-#endif
+    W3dDescargarSiWeb(filepath);   // navegador: bajar el archivo a la PC (el disco de emscripten es virtual)
     Notificar(binary ? "GLB saved successfully!" : "glTF saved successfully!", false);
     return true;
 }

@@ -3613,7 +3613,7 @@ static bool W3dMismoMaterial(const Material* v, const Material& n, const std::st
         v->normalMap != n.normalMap || v->uv8bit != n.uv8bit) return false;
     if (v->depth_write != n.depth_write || v->orden_pasada != n.orden_pasada ||
         v->mezcla != n.mezcla || !W3dMatCasi(v->depth_bias, n.depth_bias) || !W3dMatCasi(v->sesgo_metros, n.sesgo_metros) || !W3dMatCasi(v->alphaTest, n.alphaTest)) return false;
-    if (!W3dMatCasi(v->mezclaB, n.mezclaB)) return false;
+    if (!W3dMatCasi(v->mezclaB, n.mezclaB) || v->toon != n.toon || !W3dMatCasi(v->contorno, n.contorno)) return false;
     if (v->lineas != n.lineas || !W3dMatCasi(v->grosorLinea, n.grosorLinea)) return false;
     if (W3dMatRutaTex(v) != texPath) return false;
     return true;
@@ -3631,7 +3631,7 @@ static void W3dCopiarMaterial(const Material& src, Material* dst) {
     dst->culling = src.culling; dst->depth_test = src.depth_test; dst->chrome = src.chrome;
     dst->normalMap = src.normalMap; dst->uv8bit = src.uv8bit;
     dst->depth_write = src.depth_write; dst->depth_bias = src.depth_bias; dst->sesgo_metros = src.sesgo_metros; dst->alphaTest = src.alphaTest;
-    dst->orden_pasada = src.orden_pasada; dst->mezcla = src.mezcla; dst->mezclaB = src.mezclaB;
+    dst->orden_pasada = src.orden_pasada; dst->mezcla = src.mezcla; dst->mezclaB = src.mezclaB; dst->toon = src.toon; dst->contorno = src.contorno;
     dst->lineas = src.lineas; dst->grosorLinea = src.grosorLinea;
 }
 // (el normal map y las capas extra de un material se cargan al DESPERTAR sus texturas, sincronicas
@@ -3663,6 +3663,10 @@ static void CargarMateriales(JVal* raiz, const std::string& base, const std::str
         tmp.sesgo_metros  = JF(e, "sesgoMetros",      tmp.sesgo_metros);   // sesgo de profundidad en metros (ausente = 0)
         tmp.alphaTest     = JF(e, "alfaCorte",        tmp.alphaTest);   // recorte por alfa (rejas); ausente = 0
         tmp.mezclaB       = JF(e, "mezclaB",          tmp.mezclaB);     // mezcla de texturas (texturaB); ausente = 0
+        tmp.toon          = JI(e, "toon",             tmp.toon);        // sombreado toon (texturaB = la rampa); ausente = 0
+        if (tmp.toon < 0 || tmp.toon > 2) tmp.toon = 0;
+        tmp.contorno      = JF(e, "contorno",         tmp.contorno);    // borde del dibujo animado; ausente = 0
+        if (tmp.contorno < 0.0f) tmp.contorno = 0.0f;
         tmp.orden_pasada  = JI(e, "ordenPasada",      tmp.orden_pasada);
         tmp.mezcla        = JI(e, "mezcla",           tmp.mezcla);
         // LINEAS (aristas por material). Ausentes en lo guardado hasta hoy -> default apagado.

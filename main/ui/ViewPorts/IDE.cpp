@@ -1,3 +1,6 @@
+#include "io/W3dWeb.h"   // navegador: guardar = descargar
+#include "ViewPorts/PopUp/ConfirmarPopup.h"   // Guardar/Refresh preguntan antes de pisar o descartar
+#include "ViewPorts/PopUp/BuscarPopup.h"      // Buscar/Reemplazar: lo que se resalta
 #include "ViewPorts/IDE.h"
 #include "app/W3dTeclado.h"   // W3dTecladoAbrir: el teclado del celular (y el layout que se adapta)
 #include "w3dGraphics.h"                 // w3dEngine (abstraccion grafica)
@@ -17,7 +20,10 @@
 #endif            // los .lua del proyecto v4 viven ADENTRO del .w3d
 #include "W3dLang.h"                     // T() para los textos de la barra
 #include "variables.h"                   // w3dPath (el proyecto abierto)
+#include "animation/Animation.h"         // w3dGetTicks: doble/triple toque
+#include "ViewPorts/TransformUI.h"       // ToolbarUsaTactil: las agarraderas solo con pantalla tactil
 #include <stdio.h>                       // guardado atomico: fopen/fwrite/rename
+#include <math.h>                        // cosf/sinf: las agarraderas
 
 namespace gfx = w3dEngine;
 
@@ -30,6 +36,10 @@ static const float kIdeString[4]     = { 0.93f, 0.78f, 0.38f, 1.0f }; // amarill
 static const float kIdeKeyword[4]    = { 0.52f, 0.72f, 0.98f, 1.0f }; // azul
 static const float kIdeNumero[4]     = { 0.55f, 0.88f, 0.94f, 1.0f }; // celeste
 static const float kIdeSeleccion[4]  = { 0.22f, 0.36f, 0.55f, 1.0f }; // fondo de la seleccion
+static const float kIdeGuia[4]       = { 0.26f, 0.26f, 0.26f, 1.0f }; // lineas verticales de la sangria
+static const float kIdeCoincide[4]   = { 0.42f, 0.33f, 0.08f, 1.0f }; // las coincidencias de Buscar
+static const float kIdeGuiaActiva[4] = { 0.50f, 0.50f, 0.50f, 1.0f }; // la del bloque donde esta el cursor
+static const int   kIdeTab = 4;                                       // ancho de un nivel de sangria (en espacios)
 
 // clipboard INTERNO: respaldo si el clipboard de SDL no esta (Symbian / headless)
 static std::string gIDEClipInterno;
@@ -237,7 +247,8 @@ IDE::IDE() {
     haySel = false; selLin = 0; selCol = 0;
     undoUltimaOp = 0;
     lastLineas = -1; lastMaxAncho = 0;
-    selDrag = false; silencioso = false;
+    selDrag = false; silencioso = false; hayTextoDisco = false;
+    tapsSeguidos = 0; tUltimoTap = 0; ultTapX = -1000; ultTapY = -1000; gestoTactil = 0; lupaX = 0; lupaY = 0;
     lineas.push_back(std::string()); // el buffer nunca esta vacio (1 linea vacia)
     BarCrear(); // [0] = icono de tipo/split
     // botones por ROL (no por indice), como la barra del 2D/UV
@@ -247,6 +258,12 @@ IDE::IDE() {
     BarButtons.push_back(b);
     b = new Button(T("File"), -1);   // menu ARCHIVO: Guardar / Guardar como... / dentro o fuera del w3d / Cargar .lua
     b->rol = BRIDE_Guardar; b->desplegable = true; b->caretMenu = true;
+    BarButtons.push_back(b);
+    b = new Button(T("Edit"), -1);   // menu EDITAR: deshacer / rehacer / cortar / copiar / pegar / buscar / reemplazar
+    b->rol = BRIDE_Editar; b->desplegable = true; b->caretMenu = true;
+    BarButtons.push_back(b);
+    b = new Button(T("Select"), -1); // menu SELECCIONAR
+    b->rol = BRIDE_Seleccionar; b->desplegable = true; b->caretMenu = true;
     BarButtons.push_back(b);
     b = new Button(T("Refresh"));
     b->rol = BRIDE_Refresh;
@@ -264,6 +281,68 @@ void IDE::AbrirPrimerScript() {
     IDEColectarScripts(&rutas);
     if (!rutas.empty()) AbrirArchivo(rutas[0]);
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+//  UTF-8. Las lineas guardan los BYTES del archivo tal cual (UTF-8), pero el cursor, el borrado, la seleccion y el
+//  dibujo trabajan por LETRA: la 'n~' o una vocal con acento son 2 bytes y una sola columna en pantalla. Antes el
+//  editor solo aceptaba ASCII ("no anda la letra n~ en el IDE", reporte del dueno). curCol / selCol siguen siendo
+//  posiciones de BYTE, siempre al principio de una letra.
+// ---------------------------------------------------------------------------------------------------------------
+static bool IdeEsCont(unsigned char c) { return (c & 0xC0) == 0x80; }   // byte de continuacion (10xxxxxx)
+static int IdeColVisual(const std::string& s, int b) {                 // byte -> columna en pantalla
+    int v = 0;
+    for (int i = 0; i < b && i < (int)s.size(); i++) if (!IdeEsCont((unsigned char)s[(size_t)i])) v++;
+    return v;
+}
+static int IdeByteDeCol(const std::string& s, int v) {                 // columna en pantalla -> byte
+    int i = 0, n = (int)s.size();
+    while (i < n && v > 0) { i++; while (i < n && IdeEsCont((unsigned char)s[(size_t)i])) i++; v--; }
+    return i;
+}
+static int IdeLetraSig(const std::string& s, int b) {
+    int n = (int)s.size(); if (b >= n) return n;
+    b++; while (b < n && IdeEsCont((unsigned char)s[(size_t)b])) b++;
+    return b;
+}
+static int IdeLetraAnt(const std::string& s, int b) {
+    if (b <= 0) return 0;
+    b--; while (b > 0 && IdeEsCont((unsigned char)s[(size_t)b])) b--;
+    return b;
+}
+static int IdeAlInicioDeLetra(const std::string& s, int b) {
+    while (b > 0 && b < (int)s.size() && IdeEsCont((unsigned char)s[(size_t)b])) b--;
+    return b;
+}
+// lo que se puede ESCRIBIR: imprimibles y letras no ASCII (UTF-8); fuera los de control
+static std::string IdeFiltrarTexto(const std::string& t, bool conSaltos) {
+    std::string out;
+    for (size_t i = 0; i < t.size(); i++) {
+        const unsigned char c = (unsigned char)t[i];
+        if (c == '\r') continue;
+        if (c == '\n') { if (conSaltos) out += '\n'; continue; }
+        if (c == '\t') { out += "    "; continue; }   // la fuente no tiene tabulador
+        if (c < 32 || c == 127) continue;
+        out += (char)c;
+    }
+    return out;
+}
+
+// BUSCAR: comparacion sin distinguir mayusculas. ASCII y las letras latinas de 2 bytes (UTF-8 C3 80..9E -> +0x20:
+// la N~ y las vocales con acento): el texto plegado tiene los MISMOS bytes de largo, asi las posiciones coinciden.
+static std::string IdePlegar(const std::string& s) {
+    std::string o = s;
+    for (size_t i = 0; i < o.size(); i++) {
+        const unsigned char c = (unsigned char)o[i];
+        if (c >= 'A' && c <= 'Z') o[i] = (char)(c + 32);
+        else if (c == 0xC3 && i + 1 < o.size()) {
+            const unsigned char d = (unsigned char)o[i + 1];
+            if (d >= 0x80 && d <= 0x9E && d != 0x97) o[i + 1] = (char)(d + 0x20);
+            i++;
+        }
+    }
+    return o;
+}
+static bool IdeEsLetraPalabra(unsigned char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c >= 0x80; }
 
 // texto crudo -> lineas del buffer (sin '\r'; tab -> 4 espacios: la fuente
 // pixel no tiene tabulador y el cursor por columnas necesita ancho fijo)
@@ -291,9 +370,10 @@ bool IDE::AbrirArchivo(const std::string& ruta) {
     IdePartirEnLineas(crudo, &lineas);
     archivo = ruta;
     sucio = false;
+    textoDisco = crudo; hayTextoDisco = true;
     curLin = 0; curCol = 0; haySel = false; selDrag = false;
     PosX = 0; PosY = 0;
-    pilaUndo.clear(); undoUltimaOp = 0;
+    pilaUndo.clear(); pilaRedo.clear(); undoUltimaOp = 0;
     lastLineas = -1; // fuerza el recalculo del scroll en el proximo Render
     RecalcularBloques();
     g_redraw = true;
@@ -312,7 +392,7 @@ std::string IDE::GetTexto() const {
 void IDE::SetTexto(const std::string& texto) {
     IdePartirEnLineas(texto, &lineas);
     curLin = 0; curCol = 0; haySel = false;
-    pilaUndo.clear(); undoUltimaOp = 0;
+    pilaUndo.clear(); pilaRedo.clear(); undoUltimaOp = 0;
     sucio = true;
     lastLineas = -1;
     RecalcularBloques();
@@ -322,8 +402,23 @@ void IDE::SetTexto(const std::string& texto) {
 // REGLA: el IDE NUNCA rompe el archivo. Guardado ATOMICO: se escribe TODO a un
 // .w3dtmp al lado y recien si salio completo se renombra sobre el .lua. Si el
 // disco falla a mitad de camino, el original queda intacto.
-bool IDE::Guardar() {
+static IDE* gIdePregunta = NULL;   // el IDE que pregunto (la respuesta del popup vuelve a el)
+static void IdeGuardarForzado() { if (gIdePregunta) gIdePregunta->Guardar(true); }
+static void IdeRefreshForzado() { if (gIdePregunta) gIdePregunta->Refresh(true); }
+
+bool IDE::Guardar(bool forzar) {
     if (archivo.empty()) return false;
+    // EXTERNO editado por otro programa desde que se abrio: pisarlo sin avisar borra ese trabajo
+    if (!forzar && hayTextoDisco && !W3dEsNombreDeEntrada(archivo)) {
+        bool ok = false;
+        const std::string enDisco = w3dFileSystem::ReadTextFile(archivo, &ok);
+        if (ok && enDisco != textoDisco && enDisco != GetTexto()) {
+            gIdePregunta = this;
+            if (!confirmarPopup) confirmarPopup = new ConfirmarPopup();
+            confirmarPopup->Abrir(std::string(T("The file was changed outside the editor. Overwrite it?")) + "\n" + IDENombreScript(archivo), IdeGuardarForzado);
+            return false;
+        }
+    }
     // el outliner por recursos busca en los scripts las texturas que nombran: su foto se re-arma
     { extern void W3dRecursosVistaInvalidar(); W3dRecursosVistaInvalidar(); }
     std::string t = GetTexto();
@@ -341,7 +436,9 @@ bool IDE::Guardar() {
             return false;
         }
         sucio = false;
+        textoDisco = t; hayTextoDisco = true;
         if (!silencioso) Notificar(IDENombreScript(archivo) + " guardado (guarda el proyecto para que quede en el .w3d)", false);
+        RecargarEnVivo(false);
         g_redraw = true;
         return true;
     }
@@ -368,7 +465,10 @@ bool IDE::Guardar() {
         return false;
     }
     sucio = false;
+    textoDisco = t; hayTextoDisco = true;
+    W3dDescargarSiWeb(archivo);   // navegador: el .lua externo guardado baja a la PC
     if (!silencioso) Notificar(IDENombreScript(archivo) + " guardado", false);
+    RecargarEnVivo(false);
     g_redraw = true;
     return true;
 }
@@ -391,22 +491,53 @@ bool IDE::GuardarEnProyecto() {
     return true;
 }
 
-// REFRESH: guardar + aplicar EN VIVO. Comportamiento elegido (predecible):
-//  - juego CORRIENDO (SimActiva): se recargan SOLO los objetos cuyos scripts
-//    usan el archivo editado (SimScriptsCambiados): sus lua_State se recrean
-//    (variables locales de cero + inicio() de nuevo) y el RESTO del juego
-//    (posiciones, otros scripts, escena activa) se PRESERVA tal cual. No se
-//    reinicia la partida: es la misma semantica que ya tiene cambiar el .lua
-//    de un objeto desde la tarjeta Script con el juego andando.
-//  - juego parado: refresh = solo guardar (el proximo Play ya lee lo nuevo).
-void IDE::Refresh() {
+// REFRESH: TRAER el archivo. Para cuando el script se edita con OTRO editor (el archivo externo, o la entrada del .w3d
+// que cambio por otro camino): el buffer pasa a ser lo que hay en el archivo. Antes Refresh GUARDABA el buffer encima
+// del archivo y pisaba lo editado afuera (reporte del dueno); guardar es Guardar.
+//  - con cambios locales sin guardar: pregunta antes de descartarlos (y lo de antes queda en el deshacer: Ctrl+Z)
+//  - juego CORRIENDO: ademas se recargan los objetos que usan el script (RecargarEnVivo)
+void IDE::Refresh(bool forzar) {
     if (archivo.empty()) return;
-    if (!Guardar()) return;
-    // (antes esto estaba bajo #ifndef W3D_SYMBIAN sin razon: SimJuego.cpp -SimActiva/SimScriptsCambiados- SI
-    //  compila en el .mmp del N95 -ya se usa desde Whisk3DContainer.cpp-, asi que la recarga en vivo linkea igual.)
+    if (sucio && !forzar) {
+        gIdePregunta = this;
+        if (!confirmarPopup) confirmarPopup = new ConfirmarPopup();
+        confirmarPopup->Abrir(std::string(T("The editor has unsaved changes. Discard them and reload the file?")) + "\n" + IDENombreScript(archivo), IdeRefreshForzado);
+        return;
+    }
+    bool ok = false;
+    const std::string crudo = w3dFileSystem::ReadTextFile(archivo, &ok);
+    if (!ok) { Notificar(std::string(T("IDE: could not read")) + " " + IDENombreScript(archivo), true); return; }
+    std::vector<std::string> nuevas;
+    IdePartirEnLineas(crudo, &nuevas);
+    if (nuevas != lineas) {
+        Mutar(0);                       // lo que habia (incluso lo descartado) se recupera con Ctrl+Z
+        lineas = nuevas;
+        if (curLin >= (int)lineas.size()) curLin = (int)lineas.size() - 1;
+        if (curCol > (int)lineas[curLin].size()) curCol = (int)lineas[curLin].size();
+        curCol = IdeAlInicioDeLetra(lineas[curLin], curCol);
+        haySel = false; undoUltimaOp = 0;
+        lastLineas = -1;
+        RecalcularBloques();
+        AsegurarCursorVisible();
+        Notificar(IDENombreScript(archivo) + ": " + T("reloaded from the file"), false);
+    } else {
+        Notificar(IDENombreScript(archivo) + ": " + T("no new changes in the file"), false);
+    }
+    sucio = false;
+    textoDisco = crudo; hayTextoDisco = true;
+    RecargarEnVivo(true);
+    g_redraw = true;
+}
+
+// Con el juego CORRIENDO (SimActiva) se recargan SOLO los objetos cuyos scripts usan este archivo
+// (SimScriptsCambiados): sus lua_State se recrean (variables locales de cero + inicio() de nuevo) y el RESTO del juego
+// (posiciones, otros scripts, escena activa) se PRESERVA tal cual. Con el juego parado no hace nada (el proximo Play
+// ya lee lo nuevo).
+void IDE::RecargarEnVivo(bool avisarSiNada) {
+    // (SimJuego.cpp -SimActiva/SimScriptsCambiados- compila tambien en el .mmp del N95)
     extern bool SimActiva();
     extern void SimScriptsCambiados(Object*);
-    if (!SimActiva()) return;
+    if (archivo.empty() || !SimActiva()) return;
     // juntar primero (SimScriptsCambiados puede agregar a la lista interna de la sim)
     std::vector<Object*> usan;
     std::vector<Object*> pila;
@@ -422,15 +553,84 @@ void IDE::Refresh() {
         for (size_t i = 0; i < o->Childrens.size(); i++) pila.push_back(o->Childrens[i]);
     }
     for (size_t i = 0; i < usan.size(); i++) SimScriptsCambiados(usan[i]);
-    Notificar(std::string(T("Refresh:")) + " " + IdeNum((int)usan.size()) + " " + T("object(s) reloaded live"), false);
+    if (!usan.empty() || avisarSiNada)
+        Notificar(std::string(T("Refresh:")) + " " + IdeNum((int)usan.size()) + " " + T("object(s) reloaded live"), false);
     g_redraw = true;
+}
+
+// ---------------------------------------------------------------------------
+//  BUSCAR / REEMPLAZAR (lo usa el popup PopUp/BuscarPopup)
+// ---------------------------------------------------------------------------
+void IDE::Coincidencias(const std::string& t, bool mayus, bool palabra, std::vector<int>* lin, std::vector<int>* col) const {
+    lin->clear(); col->clear();
+    if (t.empty()) return;
+    const std::string aguja = mayus ? t : IdePlegar(t);
+    for (size_t l = 0; l < lineas.size(); l++) {
+        const std::string pajar = mayus ? lineas[l] : IdePlegar(lineas[l]);
+        size_t p = pajar.find(aguja);
+        while (p != std::string::npos) {
+            bool ok = true;
+            if (palabra) {
+                if (p > 0 && IdeEsLetraPalabra((unsigned char)pajar[p - 1])) ok = false;
+                const size_t e = p + aguja.size();
+                if (e < pajar.size() && IdeEsLetraPalabra((unsigned char)pajar[e])) ok = false;
+            }
+            if (ok) { lin->push_back((int)l); col->push_back((int)p); }
+            p = pajar.find(aguja, p + (aguja.empty() ? 1 : aguja.size()));
+        }
+    }
+}
+bool IDE::IrACoincidencia(const std::string& t, bool mayus, bool palabra, int dir) {
+    std::vector<int> L, C;
+    Coincidencias(t, mayus, palabra, &L, &C);
+    if (L.empty()) return false;
+    // desde donde: el FINAL de la seleccion para adelante, el PRINCIPIO para atras
+    int l0 = curLin, c0 = curCol;
+    if (haySel) { int a, b, c, d; NormalizarSel(&a, &b, &c, &d); if (dir > 0) { l0 = c; c0 = d; } else { l0 = a; c0 = b; } }
+    int elegido = -1;
+    if (dir > 0) {
+        for (size_t i = 0; i < L.size(); i++) if (L[i] > l0 || (L[i] == l0 && C[i] >= c0)) { elegido = (int)i; break; }
+        if (elegido < 0) elegido = 0;                       // da la vuelta al principio
+    } else {
+        for (int i = (int)L.size() - 1; i >= 0; i--) if (L[(size_t)i] < l0 || (L[(size_t)i] == l0 && C[(size_t)i] < c0)) { elegido = i; break; }
+        if (elegido < 0) elegido = (int)L.size() - 1;       // da la vuelta al final
+    }
+    selLin = L[(size_t)elegido]; selCol = C[(size_t)elegido];
+    curLin = selLin; curCol = selCol + (int)t.size();
+    haySel = true;
+    undoUltimaOp = 0;
+    AsegurarCursorVisible();
+    g_redraw = true;
+    return true;
+}
+bool IDE::SeleccionEsCoincidencia(const std::string& t, bool mayus) const {
+    if (!haySel || t.empty()) return false;
+    const std::string sel = TextoSeleccionado();
+    return mayus ? (sel == t) : (IdePlegar(sel) == IdePlegar(t));
+}
+int IDE::ReemplazarTodas(const std::string& t, const std::string& por, bool mayus, bool palabra) {
+    std::vector<int> L, C;
+    Coincidencias(t, mayus, palabra, &L, &C);
+    if (L.empty()) return 0;
+    Mutar(0);   // todas juntas: UN paso de deshacer
+    for (int i = (int)L.size() - 1; i >= 0; i--)   // de atras para adelante: las posiciones de antes no se corren
+        lineas[(size_t)L[(size_t)i]].replace((size_t)C[(size_t)i], t.size(), por);
+    haySel = false;
+    if (curCol > (int)lineas[curLin].size()) curCol = (int)lineas[curLin].size();
+    curCol = IdeAlInicioDeLetra(lineas[curLin], curCol);
+    lastLineas = -1;
+    RecalcularBloques();
+    AsegurarCursorVisible();
+    g_redraw = true;
+    return (int)L.size();
 }
 
 // ---------------------------------------------------------------------------
 //  undo: snapshots del buffer entero (los .lua de un juego son chicos), en una
 //  pila AGRUPADA por operacion: una corrida de tipeo = UN undo; backspace
-//  sostenido = UN undo; pegar/cortar/enter = un undo cada uno. Sin redo
-//  (limitacion documentada; el Ctrl+Z global del editor no pasa por aca).
+//  sostenido = UN undo; pegar/cortar/enter = un undo cada uno. Lo deshecho va a
+//  la pila de REHACER, que se vacia con la proxima edicion (el Ctrl+Z global
+//  del editor no pasa por aca).
 // ---------------------------------------------------------------------------
 void IDE::Mutar(int op) {
     if (op == 0 || op != undoUltimaOp || pilaUndo.empty()) {
@@ -439,12 +639,14 @@ void IDE::Mutar(int op) {
         pilaUndo.push_back(e);
         if (pilaUndo.size() > 200) pilaUndo.erase(pilaUndo.begin());
     }
+    pilaRedo.clear();   // una edicion nueva: lo deshecho ya no se puede rehacer
     undoUltimaOp = op;
     sucio = true;
 }
 
 void IDE::DeshacerTexto() {
     if (pilaUndo.empty()) return;
+    { EstadoTexto ahora; ahora.lineas = lineas; ahora.curLin = curLin; ahora.curCol = curCol; pilaRedo.push_back(ahora); }
     EstadoTexto& e = pilaUndo.back();
     lineas = e.lineas;
     curLin = e.curLin; curCol = e.curCol;
@@ -452,6 +654,22 @@ void IDE::DeshacerTexto() {
     haySel = false;
     undoUltimaOp = 0;
     sucio = true; // no se compara contra el disco: deshacer sigue siendo "sin guardar"
+    lastLineas = -1;
+    RecalcularBloques();
+    AsegurarCursorVisible();
+    g_redraw = true;
+}
+
+void IDE::RehacerTexto() {
+    if (pilaRedo.empty()) return;
+    { EstadoTexto ahora; ahora.lineas = lineas; ahora.curLin = curLin; ahora.curCol = curCol; pilaUndo.push_back(ahora); }
+    EstadoTexto e = pilaRedo.back();
+    pilaRedo.pop_back();
+    lineas = e.lineas;
+    curLin = e.curLin; curCol = e.curCol;
+    haySel = false;
+    undoUltimaOp = 0;
+    sucio = true;
     lastLineas = -1;
     RecalcularBloques();
     AsegurarCursorVisible();
@@ -475,6 +693,7 @@ void IDE::CursorA(int lin, int col, bool shift) {
     if (lin >= (int)lineas.size()) lin = (int)lineas.size() - 1;
     if (col < 0) col = 0;
     if (col > (int)lineas[lin].size()) col = (int)lineas[lin].size();
+    col = IdeAlInicioDeLetra(lineas[lin], col);   // nunca a la mitad de una letra de 2+ bytes
     curLin = lin; curCol = col;
     if (!shift) haySel = false;
     if (haySel && selLin == curLin && selCol == curCol) haySel = false;
@@ -485,17 +704,20 @@ void IDE::CursorA(int lin, int col, bool shift) {
 
 void IDE::MoverCursor(int dLin, int dCol, bool shift) {
     int lin = curLin, col = curCol;
-    if (dCol) {
-        col += dCol;
-        if (col < 0) { // cruzar al final de la linea anterior
-            if (lin > 0) { lin--; col = (int)lineas[lin].size(); }
-            else col = 0;
-        } else if (col > (int)lineas[lin].size()) { // cruzar al inicio de la siguiente
-            if (lin + 1 < (int)lineas.size()) { lin++; col = 0; }
-            else col = (int)lineas[lin].size();
-        }
+    if (dCol < 0) {
+        if (col > 0) col = IdeLetraAnt(lineas[lin], col);
+        else if (lin > 0) { lin--; col = (int)lineas[lin].size(); }   // cruzar al final de la linea anterior
+    } else if (dCol > 0) {
+        if (col < (int)lineas[lin].size()) col = IdeLetraSig(lineas[lin], col);
+        else if (lin + 1 < (int)lineas.size()) { lin++; col = 0; }     // cruzar al inicio de la siguiente
     }
-    if (dLin) lin += dLin; // CursorA clampea la columna a la linea nueva
+    if (dLin) {   // arriba/abajo: misma COLUMNA EN PANTALLA (no el mismo byte) en la linea nueva
+        const int vis = IdeColVisual(lineas[lin], col);
+        lin += dLin;
+        if (lin < 0) lin = 0;
+        if (lin >= (int)lineas.size()) lin = (int)lineas.size() - 1;
+        col = IdeByteDeCol(lineas[lin], vis);
+    }
     CursorA(lin, col, shift);
 }
 
@@ -506,7 +728,10 @@ void IDE::PaginaArribaAbajo(int dir, bool shift) {
     const int lh = (RenglonHeightGS > 0) ? RenglonHeightGS : 12;
     int visibles = (height - BarTopOffset()) / lh;
     if (visibles < 1) visibles = 1;
-    CursorA(curLin + dir * visibles, curCol, shift);
+    int lin = curLin + dir * visibles;
+    if (lin < 0) lin = 0;
+    if (lin >= (int)lineas.size()) lin = (int)lineas.size() - 1;
+    CursorA(lin, IdeByteDeCol(lineas[lin], IdeColVisual(lineas[curLin], curCol)), shift);
 }
 
 void IDE::SeleccionarTodo() {
@@ -555,7 +780,11 @@ void IDE::BorrarSeleccion() {
 // ---------------------------------------------------------------------------
 //  edicion
 // ---------------------------------------------------------------------------
-void IDE::InsertarChar(char c) {
+void IDE::InsertarChar(char c) { InsertarTipeado(std::string(1, c)); }
+
+// lo tipeado (una letra, que puede ser de varios bytes UTF-8): agrupa el undo como el tipeo
+void IDE::InsertarTipeado(const std::string& t) {
+    if (t.empty()) return;
     if (haySel) {
         Mutar(0); // reemplazo de la seleccion: UNA operacion
         int l0, c0, l1, c1;
@@ -566,8 +795,8 @@ void IDE::InsertarChar(char c) {
     } else {
         Mutar(1); // tipeo: agrupa la corrida
     }
-    lineas[curLin].insert((size_t)curCol, 1, c);
-    curCol++;
+    lineas[curLin].insert((size_t)curCol, t);
+    curCol += (int)t.size();
     RecalcularBloques();
     AsegurarCursorVisible();
     g_redraw = true;
@@ -611,15 +840,75 @@ void IDE::Enter() {
     g_redraw = true;
 }
 
-void IDE::TabKey() { InsertarTexto("    "); } // 4 espacios (la fuente no tiene tab)
+// espacios al principio de la linea (la sangria)
+static int IdeSangria(const std::string& s) { int n = 0; while (n < (int)s.size() && s[(size_t)n] == ' ') n++; return n; }
+
+// la sangria que dibujan las guias en la linea l: la suya, o si esta en blanco, la menor entre la linea con texto de
+// arriba y la de abajo (asi las guias atraviesan los renglones vacios de adentro de un bloque)
+static int IdeSangriaGuia(const std::vector<std::string>& lineas, int l) {
+    const std::string& ln = lineas[(size_t)l];
+    const int ind = IdeSangria(ln);
+    if (ind < (int)ln.size()) return ind;
+    int arriba = 0, abajo = 0;
+    for (int k = l - 1, m = 0; k >= 0 && m < 300; k--, m++) { const std::string& o = lineas[(size_t)k]; const int q = IdeSangria(o); if (q < (int)o.size()) { arriba = q; break; } }
+    for (int k = l + 1, m = 0; k < (int)lineas.size() && m < 300; k++, m++) { const std::string& o = lineas[(size_t)k]; const int q = IdeSangria(o); if (q < (int)o.size()) { abajo = q; break; } }
+    return (arriba < abajo) ? arriba : abajo;
+}
+
+// TAB como en los editores de codigo:
+//  - sin seleccion (o dentro de una linea): espacios hasta el proximo tope de 4 (la fuente no tiene tabulador)
+//  - con varias lineas seleccionadas: les suma un nivel de sangria a todas
+//  - Shift+Tab: le saca un nivel a la linea del cursor (o a todas las seleccionadas)
+void IDE::TabKey(bool shift) {
+    const bool multi = haySel && selLin != curLin;
+    if (!shift && !multi) {
+        const int vis = haySel ? 0 : IdeColVisual(lineas[curLin], curCol);
+        InsertarTexto(std::string((size_t)(kIdeTab - vis % kIdeTab), ' '));
+        return;
+    }
+    int l0 = curLin, l1 = curLin;
+    if (haySel) {
+        int a0, c0, a1, c1; NormalizarSel(&a0, &c0, &a1, &c1);
+        l0 = a0; l1 = a1;
+        if (l1 > l0 && c1 == 0) l1--;   // la seleccion termina al principio de una linea: esa no entra
+    }
+    Mutar(0);
+    for (int l = l0; l <= l1; l++) {
+        std::string& ln = lineas[(size_t)l];
+        int cambio = 0;
+        if (!shift) {
+            if (ln.empty()) continue;   // las lineas vacias quedan vacias
+            ln.insert(0, (size_t)kIdeTab, ' ');
+            cambio = kIdeTab;
+        } else {
+            const int q = IdeSangria(ln);
+            int n = q % kIdeTab; if (n == 0) n = (q < kIdeTab) ? q : kIdeTab;   // hasta el tope anterior
+            if (n <= 0) continue;
+            ln.erase(0, (size_t)n);
+            cambio = -n;
+        }
+        // el cursor y la punta de la seleccion acompanian al texto (una punta en la columna 0 se queda ahi al sumar)
+        if (curLin == l && (cambio < 0 || curCol > 0)) { curCol += cambio; if (curCol < 0) curCol = 0; }
+        if (haySel && selLin == l && (cambio < 0 || selCol > 0)) { selCol += cambio; if (selCol < 0) selCol = 0; }
+    }
+    lastLineas = -1;
+    RecalcularBloques();
+    AsegurarCursorVisible();
+    g_redraw = true;
+}
 
 void IDE::Backspace() {
     if (haySel) { BorrarSeleccion(); return; }
     if (curCol == 0 && curLin == 0) return;
     Mutar(2); // los backspace seguidos se agrupan
-    if (curCol > 0) {
-        lineas[curLin].erase((size_t)(curCol - 1), 1);
-        curCol--;
+    if (curCol > 0 && IdeSangria(lineas[curLin]) >= curCol) {   // dentro de la sangria: un nivel entero
+        int n = curCol % kIdeTab; if (n == 0) n = kIdeTab; if (n > curCol) n = curCol;
+        lineas[curLin].erase((size_t)(curCol - n), (size_t)n);
+        curCol -= n;
+    } else if (curCol > 0) {   // la letra entera (1 a 4 bytes)
+        const int a = IdeLetraAnt(lineas[curLin], curCol);
+        lineas[curLin].erase((size_t)a, (size_t)(curCol - a));
+        curCol = a;
     } else { // unir con la linea anterior
         curCol = (int)lineas[curLin - 1].size();
         lineas[curLin - 1] += lineas[curLin];
@@ -636,8 +925,8 @@ void IDE::DelForward() {
     if (haySel) { BorrarSeleccion(); return; }
     if (curCol >= (int)lineas[curLin].size() && curLin + 1 >= (int)lineas.size()) return;
     Mutar(3); // los delete seguidos se agrupan
-    if (curCol < (int)lineas[curLin].size()) {
-        lineas[curLin].erase((size_t)curCol, 1);
+    if (curCol < (int)lineas[curLin].size()) {   // la letra entera
+        lineas[curLin].erase((size_t)curCol, (size_t)(IdeLetraSig(lineas[curLin], curCol) - curCol));
     } else { // unir con la linea siguiente
         lineas[curLin] += lineas[curLin + 1];
         lineas.erase(lineas.begin() + curLin + 1);
@@ -668,12 +957,8 @@ void IDE::Pegar() {
     std::string t = w3dEngine::W3dClipboardGet(); // el clipboard del SISTEMA (de cualquier programa: navegador, notas)
     if (t.empty()) t = gIDEClipInterno; // headless / si el sistema no dio nada
     if (t.empty()) return;
-    // solo ASCII imprimible + saltos (la fuente pixel del editor es ASCII)
-    std::string filtrado;
-    for (size_t i = 0; i < t.size(); i++) {
-        char c2 = t[i];
-        if (c2 == '\n' || c2 == '\t' || (c2 >= 32 && (unsigned char)c2 < 127)) filtrado += c2;
-    }
+    // imprimibles, letras no ASCII (n~, acentos: UTF-8) y saltos; fuera los de control
+    const std::string filtrado = IdeFiltrarTexto(t, true);
     if (!filtrado.empty()) InsertarTexto(filtrado);
 }
 
@@ -690,7 +975,10 @@ bool IDE::TeclaEditor(int tecla, bool repeticion) {
             case W3dK_X: Cortar(); return true;
             case W3dK_V: Pegar(); return true;
             case W3dK_A: SeleccionarTodo(); return true;
-            case W3dK_Z: DeshacerTexto(); return true;             // undo DEL TEXTO, no el global
+            case W3dK_Z: if (shift) RehacerTexto(); else DeshacerTexto(); return true;   // undo/redo DEL TEXTO, no el global
+            case W3dK_Y: RehacerTexto(); return true;
+            case W3dK_F: { extern void IDEAbrirBuscar(IDE*, bool); IDEAbrirBuscar(this, false); return true; }   // Buscar
+            case W3dK_H: { extern void IDEAbrirBuscar(IDE*, bool); IDEAbrirBuscar(this, true);  return true; }   // Reemplazar
             case W3dK_S: GuardarEnProyecto(); return true;         // guarda el .lua (y el .w3d si vive adentro)
             case W3dK_HOME: CursorA(0, 0, shift); return true;     // inicio del archivo
             case W3dK_END:
@@ -710,7 +998,7 @@ bool IDE::TeclaEditor(int tecla, bool repeticion) {
         case W3dK_PGDN:  PaginaArribaAbajo(+1, shift); return true;
         case W3dK_RETURN:
         case W3dK_KP_ENTER: Enter(); return true;
-        case W3dK_TAB:      TabKey(); return true;
+        case W3dK_TAB:      TabKey(shift); return true;   // Shift+Tab = sacar un nivel de sangria
         case W3dK_BACKSPACE: Backspace(); return true;
         case W3dK_DELETE:    DelForward(); return true;
         case W3dK_ESCAPE:
@@ -726,11 +1014,7 @@ bool IDE::TeclaEditor(int tecla, bool repeticion) {
 
 void IDE::TextoTipeado(const char* utf8) {
     if (!utf8) return;
-    for (const char* p = utf8; *p; ++p) {
-        unsigned char c = (unsigned char)*p;
-        if (c >= 32 && c < 127) InsertarChar((char)c);
-        // fuera de ASCII (acentos, multibyte) se ignora: la fuente es ASCII
-    }
+    InsertarTipeado(IdeFiltrarTexto(utf8, false));   // tambien la n~ y los acentos (llegan en UTF-8)
 }
 
 void IDE::event_key_down(int tecla, bool repeticion) {
@@ -750,14 +1034,65 @@ int IDE::GutterW() const {
 
 // click en el CONTENIDO: posiciona el cursor (shift extiende la seleccion) y
 // arma el drag de seleccion. mx/my en coords de VENTANA.
-void IDE::ClickContenido(int mx, int my, bool shift) {
+// pantalla -> renglon y byte
+void IDE::PuntoATexto(int mx, int my, int* lin, int* col) const {
     const int lh = (RenglonHeightGS > 0) ? RenglonHeightGS : 12;
-    int lx = mx - x, ly = my - y;
-    int textX0 = GutterW() + marginGS + PosX;
-    int textY0 = BarTopOffset() + marginGS + PosY;
-    int lin = (ly - textY0) / lh;
-    int col = (lx - textX0 + LetterWidthGS / 2) / (LetterWidthGS > 0 ? LetterWidthGS : 1);
+    const int lx = mx - x, ly = my - y;
+    const int textX0 = GutterW() + marginGS + PosX;
+    const int textY0 = BarTopOffset() + marginGS + PosY;
+    int l = (ly < textY0) ? 0 : (ly - textY0) / lh;
+    if (l >= (int)lineas.size()) l = (int)lineas.size() - 1;
+    if (l < 0) l = 0;
+    int c = (lx - textX0 + LetterWidthGS / 2) / (LetterWidthGS > 0 ? LetterWidthGS : 1);
+    *lin = l;
+    *col = (c < 0) ? 0 : IdeByteDeCol(lineas[(size_t)l], c);
+}
+
+void IDE::TextoAPunto(int lin, int col, int* mx, int* my) const {
+    const int lh = (RenglonHeightGS > 0) ? RenglonHeightGS : 12;
+    const int LW = (LetterWidthGS > 0) ? LetterWidthGS : 6;
+    if (lin < 0) lin = 0; if (lin >= (int)lineas.size()) lin = (int)lineas.size() - 1;
+    *mx = x + GutterW() + marginGS + PosX + IdeColVisual(lineas[(size_t)lin], col) * LW;   // el hueco ANTES de la letra
+    *my = y + BarTopOffset() + marginGS + PosY + lin * lh + lh / 2;
+}
+
+void IDE::SeleccionarPalabra() {
+    const std::string& s = lineas[(size_t)curLin];
+    int a = curCol, b = curCol;
+    while (a > 0 && IdeEsLetraPalabra((unsigned char)s[(size_t)(a - 1)])) a--;
+    while (b < (int)s.size() && IdeEsLetraPalabra((unsigned char)s[(size_t)b])) b++;
+    if (a == b) {   // no es una palabra (espacio, simbolo): la letra de al lado
+        if (b < (int)s.size()) b = IdeLetraSig(s, b); else if (a > 0) a = IdeLetraAnt(s, a);
+    }
+    selLin = curLin; selCol = a; curCol = b;
+    haySel = (a != b);
+    undoUltimaOp = 0;
+    g_redraw = true;
+}
+void IDE::SeleccionarLinea() {
+    selLin = curLin; selCol = 0;
+    if (curLin + 1 < (int)lineas.size()) { curLin++; curCol = 0; }   // con el salto de linea (como los editores de codigo)
+    else curCol = (int)lineas[(size_t)curLin].size();
+    haySel = !(selLin == curLin && selCol == curCol);
+    undoUltimaOp = 0;
+    AsegurarCursorVisible();
+    g_redraw = true;
+}
+
+void IDE::ClickContenido(int mx, int my, bool shift) {
+    int lin = 0, col = 0;
+    PuntoATexto(mx, my, &lin, &col);
+    // DOBLE / TRIPLE toque (o click): rapido y en el mismo lugar
+    const unsigned int ahora = w3dGetTicks();
+    const int cerca = 12 * (GlobalScale > 0 ? GlobalScale : 1);
+    if (!shift && ahora - tUltimoTap < 450 && (mx - ultTapX) * (mx - ultTapX) + (my - ultTapY) * (my - ultTapY) < cerca * cerca)
+        tapsSeguidos++;
+    else
+        tapsSeguidos = 1;
+    tUltimoTap = ahora; ultTapX = mx; ultTapY = my;
     CursorA(lin, col, shift);
+    if (tapsSeguidos == 2) SeleccionarPalabra();
+    else if (tapsSeguidos >= 3) { SeleccionarLinea(); tapsSeguidos = 0; }   // (un 4to toque vuelve a empezar)
     selDrag = true;
     ViewPortClickDown = true; // el drag de seleccion congela el foco por hover
     // TACTIL (Android): el teclado del celular NO aparece solo. En PC SDL deja la entrada de texto prendida desde
@@ -767,6 +1102,82 @@ void IDE::ClickContenido(int mx, int my, bool shift) {
 #endif
     g_redraw = true;
 }
+
+// PULSACION LARGA: la lupa. El cursor va al dedo y lo sigue mientras se arrastra; arriba del dedo se ve el renglon
+// AGRANDADO con el cursor, asi se lo deja justo donde se quiere aunque el dedo tape el texto.
+bool IDE::PulsacionLarga(int mx, int my) {
+    int lin = 0, col = 0;
+    PuntoATexto(mx, my, &lin, &col);
+    CursorA(lin, col, false);
+    gestoTactil = 1; lupaX = mx; lupaY = my;
+    g_redraw = true;
+    return true;
+}
+// las agarraderas cuelgan debajo de las dos puntas de la seleccion
+static int IdeRadioManija() { return 5 * (GlobalScale > 0 ? GlobalScale : 1); }
+int IDE::ManijaEn(int mx, int my) const {
+    if (!haySel || !ToolbarUsaTactil()) return 0;
+    const int lh = (RenglonHeightGS > 0) ? RenglonHeightGS : 12;
+    const int LW = (LetterWidthGS > 0) ? LetterWidthGS : 6;
+    const int textX0 = x + GutterW() + marginGS + PosX, py0 = y + BarTopOffset() + marginGS + PosY;
+    int l0, c0, l1, c1; NormalizarSel(&l0, &c0, &l1, &c1);
+    const int r = IdeRadioManija(), alcance = r * 3;
+    const int ax = textX0 + IdeColVisual(lineas[(size_t)l0], c0) * LW, ay = py0 + l0 * lh + lh + r;
+    const int bx = textX0 + IdeColVisual(lineas[(size_t)l1], c1) * LW, by = py0 + l1 * lh + lh + r;
+    const int da = (mx - ax) * (mx - ax) + (my - ay) * (my - ay), db = (mx - bx) * (mx - bx) + (my - by) * (my - by);
+    // solo DEBAJO del renglon (donde cuelga la agarradera): tocar el texto nunca la agarra
+    const bool okA = (my >= ay - r) && da <= alcance * alcance, okB = (my >= by - r) && db <= alcance * alcance;
+    if (okB && (!okA || db <= da)) return 2;
+    if (okA) return 1;
+    return 0;
+}
+bool IDE::ManijaAgarrar(int mx, int my) {
+    const int m = ManijaEn(mx, my);
+    if (!m) return false;
+    // la punta agarrada pasa a ser el CURSOR y la otra el ancla: arrastrar mueve solo esa punta
+    int l0, c0, l1, c1; NormalizarSel(&l0, &c0, &l1, &c1);
+    if (m == 1) { selLin = l1; selCol = c1; curLin = l0; curCol = c0; }
+    else        { selLin = l0; selCol = c0; curLin = l1; curCol = c1; }
+    gestoTactil = (m == 1) ? 2 : 3; lupaX = mx; lupaY = my;
+    g_redraw = true;
+    return true;
+}
+void IDE::GestoTactilMover(int mx, int my) {
+    if (!gestoTactil) return;
+    lupaX = mx; lupaY = my;
+    const int lh = (RenglonHeightGS > 0) ? RenglonHeightGS : 12;
+    int lin = 0, col = 0;
+    if (gestoTactil == 1) {   // lupa: el cursor donde esta el dedo
+        PuntoATexto(mx, my, &lin, &col);
+        CursorA(lin, col, false);
+        return;
+    }
+    // agarradera: el dedo esta DEBAJO del renglon (la agarradera cuelga), se mide un renglon mas arriba
+    PuntoATexto(mx, my - lh - IdeRadioManija(), &lin, &col);
+    curLin = lin; curCol = col;
+    haySel = !(selLin == curLin && selCol == curCol);
+    undoUltimaOp = 0;
+    AsegurarCursorVisible();
+    g_redraw = true;
+}
+void IDE::GestoTactilFin() { gestoTactil = 0; g_redraw = true; }
+
+// circulo relleno (las agarraderas)
+static void IdeCirculo(float cx, float cy, float r, const float* rgba) {
+    float v[16 * 6];
+    for (int i = 0; i < 16; i++) {
+        const float a0 = (float)i * 6.2831853f / 16.0f, a1 = (float)(i + 1) * 6.2831853f / 16.0f;
+        v[i * 6 + 0] = cx; v[i * 6 + 1] = cy;
+        v[i * 6 + 2] = cx + cosf(a0) * r; v[i * 6 + 3] = cy + sinf(a0) * r;
+        v[i * 6 + 4] = cx + cosf(a1) * r; v[i * 6 + 5] = cy + sinf(a1) * r;
+    }
+    gfx::Color4fv(rgba);
+    gfx::VertexPointer2f(0, v);
+    gfx::DrawTrianglesArray(16 * 3);
+}
+
+static bool gIdeLapiz = false;   // el lapiz del telefono apretado (barra Copiar | Pegar)
+void IDELapizSostenido(bool apretado) { if (gIdeLapiz != apretado) { gIdeLapiz = apretado; g_redraw = true; } }
 
 void IDE::button_left() {
     // agarre de la scrollbar (patron Console; en PC el click de contenido entra
@@ -785,6 +1196,8 @@ void IDE::event_mouse_motion(int mx, int my) {
         int textY0 = BarTopOffset() + marginGS + PosY;
         int lin = (ly - textY0) / lh;
         int col = (lx - textX0 + LetterWidthGS / 2) / (LetterWidthGS > 0 ? LetterWidthGS : 1);
+        { const int lc = (lin < 0) ? 0 : (lin >= (int)lineas.size() ? (int)lineas.size() - 1 : lin);
+          col = (col < 0) ? 0 : IdeByteDeCol(lineas[lc], col); }
         CursorA(lin, col, true);
         g_redraw = true;
     } else if (middleMouseDown) {
@@ -848,7 +1261,7 @@ void IDE::AsegurarCursorVisible() {
     if (cy + PosY < 0) PosY = -cy;
     if (visH > lh && cy + PosY > visH - lh) PosY = visH - lh - cy;
     if (PosY > 0) PosY = 0;
-    int cx = curCol * LetterWidthGS;
+    int cx = IdeColVisual(lineas[curLin], curCol) * LetterWidthGS;
     if (cx + PosX < 0) PosX = -cx;
     if (visW > LetterWidthGS && cx + PosX > visW - LetterWidthGS) PosX = visW - LetterWidthGS - cx;
     if (PosX > 0) PosX = 0;
@@ -923,7 +1336,7 @@ void IDE::Render() {
     // medir el contenido y recalcular el scroll SOLO si cambio (patron Console)
     int maxLen = 0;
     for (int i = 0; i < n; i++)
-        if ((int)lineas[i].size() > maxLen) maxLen = (int)lineas[i].size();
+        { const int lv = IdeColVisual(lineas[i], (int)lineas[i].size()); if (lv > maxLen) maxLen = lv; }
     int maxAncho = gutterW + marginGS + maxLen * LW + marginGS + GlobalScale * 9;
     if (n != lastLineas || maxAncho != lastMaxAncho) {
         lastLineas = n; lastMaxAncho = maxAncho;
@@ -945,15 +1358,53 @@ void IDE::Render() {
             int a = (l == l0) ? c0 : 0;
             int b = (l == l1) ? c1 : (int)lineas[l].size();
             int py = py0 + l * lh;
-            float x0 = (float)(textX0 + a * LW);
-            float x1 = (float)(textX0 + b * LW);
+            float x0 = (float)(textX0 + IdeColVisual(lineas[l], a) * LW);
+            float x1 = (float)(textX0 + IdeColVisual(lineas[l], b) * LW);
             if (b <= (int)lineas[l].size() && a == b) x1 = x0 + LW * 0.4f; // linea vacia: mostrarla igual
             IdeQuad(x0, (float)py, x1, (float)(py + lh), kIdeSeleccion);
         }
     }
+    { // BUSCAR: las coincidencias a la vista, resaltadas (la actual ya se ve como la seleccion)
+        const IdeBusqueda* bq = IDEBusquedaActiva();
+        if (bq && bq->ide == this) {
+            std::vector<int> L, C;
+            Coincidencias(bq->texto, bq->mayus, bq->palabra, &L, &C);
+            for (size_t i = 0; i < L.size(); i++) {
+                const int l = L[i];
+                if (l < primera || l >= ultima) continue;
+                const float x0 = (float)(textX0 + IdeColVisual(lineas[(size_t)l], C[i]) * LW);
+                const float x1 = (float)(textX0 + IdeColVisual(lineas[(size_t)l], C[i] + (int)bq->texto.size()) * LW);
+                IdeQuad(x0, (float)(py0 + l * lh), x1, (float)(py0 + l * lh + lh), kIdeCoincide);
+            }
+        }
+    }
+    { // GUIAS DE SANGRIA: una linea vertical por cada nivel (cada 4 espacios), como los editores de codigo. En las
+      // lineas en blanco de adentro de un bloque siguen de largo (toman la sangria menor entre la de arriba y la de abajo)
+        const float ancho = (GlobalScale > 1) ? (float)GlobalScale * 0.5f : 1.0f;
+        // la guia ACTIVA: la del bloque que contiene al cursor (su nivel, en las lineas de alrededor que estan adentro)
+        int colActiva = -1, actDesde = 0, actHasta = -1;
+        {
+            const int indCur = IdeSangriaGuia(lineas, curLin);
+            if (indCur > 0) {
+                colActiva = ((indCur - 1) / kIdeTab) * kIdeTab;
+                actDesde = curLin; actHasta = curLin;
+                while (actDesde > 0 && curLin - actDesde < 2000 && IdeSangriaGuia(lineas, actDesde - 1) > colActiva) actDesde--;
+                while (actHasta + 1 < n && actHasta - curLin < 2000 && IdeSangriaGuia(lineas, actHasta + 1) > colActiva) actHasta++;
+            }
+        }
+        for (int l = primera; l < ultima; l++) {
+            const int ind = IdeSangriaGuia(lineas, l);
+            const int py = py0 + l * lh;
+            for (int c = 0; c < ind; c += kIdeTab) {
+                const float gx = (float)(textX0 + c * LW);
+                const bool activa = (c == colActiva && l >= actDesde && l <= actHasta);
+                IdeQuad(gx, (float)py, gx + ancho, (float)(py + lh), activa ? kIdeGuiaActiva : kIdeGuia);
+            }
+        }
+    }
     { // caret (sin parpadeo: el render es event-driven). Verde si el foco esta aca.
         int py = py0 + curLin * lh;
-        float cx = (float)(textX0 + curCol * LW);
+        float cx = (float)(textX0 + IdeColVisual(lineas[curLin], curCol) * LW);
         // OJO: Scrollable tiene un MIEMBRO viewPortActive que sombrea al global -> '::'
         const float* cc = (::viewPortActive == (ViewportBase*)this)
                               ? ListaColores[static_cast<int>(ColorID::accent)]
@@ -1002,9 +1453,80 @@ void IDE::Render() {
         while (i < s.size()) {
             size_t j = i;
             while (j < s.size() && tipos[j] == tipos[i]) j++;
-            IdeTexto(textX0 + (int)i * LW, py, s.substr(i, j - i), IdeColorDeTipo(tipos[i]));
+            IdeTexto(textX0 + IdeColVisual(s, (int)i) * LW, py, s.substr(i, j - i), IdeColorDeTipo(tipos[i]));
             i = j;
         }
+    }
+
+    const float* acento = ListaColores[static_cast<int>(ColorID::accent)];
+    // AGARRADERAS de la seleccion (tactil): un palito + un circulo colgando de cada punta
+    if (haySel && ToolbarUsaTactil()) {
+        gfx::Disable(gfx::Texture2D); gfx::DisableArray(gfx::TexCoordArray);
+        int l0, c0, l1, c1; NormalizarSel(&l0, &c0, &l1, &c1);
+        const float r = (float)IdeRadioManija(), g = (float)((GlobalScale > 0) ? GlobalScale : 1);
+        for (int k = 0; k < 2; k++) {
+            const int l = k ? l1 : l0, c = k ? c1 : c0;
+            const float hx = (float)(textX0 + IdeColVisual(lineas[(size_t)l], c) * LW);
+            const float hy = (float)(py0 + l * lh + lh);
+            IdeQuad(hx - g * 0.5f, hy - (float)lh, hx + g * 0.5f, hy + r, acento);
+            IdeCirculo(hx, hy + r, r, acento);
+        }
+        gfx::EnableArray(gfx::TexCoordArray); gfx::Enable(gfx::Texture2D);
+    }
+    // LUPA (pulsacion larga / arrastrando una agarradera): el renglon del cursor agrandado, arriba del dedo
+    if (gestoTactil) {
+        const int zoom = 2;
+        const int bw = 150 * ((GlobalScale > 0) ? GlobalScale : 1) < width - gapGS * 2 ? 150 * ((GlobalScale > 0) ? GlobalScale : 1) : width - gapGS * 2;
+        const int bh = lh * zoom + borderGS * 2;
+        int bx = lupaX - x - bw / 2;
+        if (bx < gapGS) bx = gapGS; if (bx + bw > width - gapGS) bx = width - gapGS - bw;
+        int by = lupaY - y - bh - 24 * ((GlobalScale > 0) ? GlobalScale : 1);   // arriba del dedo
+        if (by < top) by = lupaY - y + 24 * ((GlobalScale > 0) ? GlobalScale : 1);   // sin lugar arriba: abajo
+        gfx::Scissor(x + bx, W3dPantallaAlto - (y + by + bh), bw, bh);
+        gfx::Disable(gfx::Texture2D); gfx::DisableArray(gfx::TexCoordArray);
+        IdeQuad((float)bx, (float)by, (float)(bx + bw), (float)(by + bh), ListaColores[static_cast<int>(ColorID::headerColor)]);
+        const std::string& s = lineas[(size_t)curLin];
+        const int vis = IdeColVisual(s, curCol);
+        const float ox = (float)bx + (float)bw * 0.5f - (float)(vis * LW * zoom);   // el cursor en el centro de la lupa
+        const float oy = (float)(by + borderGS);
+        { const float cx = ox + (float)(vis * LW * zoom), gz = (float)(zoom * ((GlobalScale > 0) ? GlobalScale : 1));
+          IdeQuad(cx, oy, cx + gz, oy + (float)(lh * zoom), acento); }
+        gfx::EnableArray(gfx::TexCoordArray); gfx::Enable(gfx::Texture2D);
+        if (!s.empty()) {
+            bool blq = (curLin < (int)bloqueAlInicio.size()) ? (bloqueAlInicio[(size_t)curLin] != 0) : false;
+            LexLinea(s, &blq, &tipos);
+            gfx::PushMatrix();
+            gfx::Translatef(ox, oy, 0);
+            gfx::Scalef((float)zoom, (float)zoom, 1.0f);
+            size_t i = 0;
+            while (i < s.size()) {
+                size_t j = i;
+                while (j < s.size() && tipos[j] == tipos[i]) j++;
+                IdeTexto(IdeColVisual(s, (int)i) * LW, 0, s.substr(i, j - i), IdeColorDeTipo(tipos[i]));
+                i = j;
+            }
+            gfx::PopMatrix();
+        }
+        // el borde verde de la lupa
+        gfx::Disable(gfx::Texture2D); gfx::DisableArray(gfx::TexCoordArray);
+        { const float g = (float)((GlobalScale > 0) ? GlobalScale : 1);
+          IdeQuad((float)bx, (float)by, (float)(bx + bw), (float)by + g, acento);
+          IdeQuad((float)bx, (float)(by + bh) - g, (float)(bx + bw), (float)(by + bh), acento);
+          IdeQuad((float)bx, (float)by, (float)bx + g, (float)(by + bh), acento);
+          IdeQuad((float)(bx + bw) - g, (float)by, (float)(bx + bw), (float)(by + bh), acento); }
+        gfx::EnableArray(gfx::TexCoordArray); gfx::Enable(gfx::Texture2D);
+    }
+    // TELEFONO: con el lapiz apretado, abajo la barra de las dos softkeys: Copiar (izquierda) | Pegar (derecha)
+    if (gIdeLapiz && ::viewPortActive == (ViewportBase*)this) {
+        const int bh = lh + gapGS * 2, by = height - bh;
+        gfx::Scissor(x, glY, width, height);
+        gfx::Disable(gfx::Texture2D); gfx::DisableArray(gfx::TexCoordArray);
+        IdeQuad(0.0f, (float)by, (float)width, (float)height, ListaColores[static_cast<int>(ColorID::headerColor)]);
+        IdeQuad(0.0f, (float)by, (float)width, (float)(by + ((GlobalScale > 0) ? GlobalScale : 1)), acento);
+        gfx::EnableArray(gfx::TexCoordArray); gfx::Enable(gfx::Texture2D);
+        const std::string izq = T("Copy"), der = T("Paste");
+        IdeTexto(marginGS * 2, by + gapGS, izq, ListaColores[static_cast<int>(ColorID::blanco)]);
+        IdeTexto(width - marginGS * 2 - IdeColVisual(der, (int)der.size()) * LW, by + gapGS, der, ListaColores[static_cast<int>(ColorID::blanco)]);
     }
 
     gfx::Disable(gfx::ScissorTest);

@@ -105,6 +105,14 @@ static Uint16 W3dModsASDL(int m){
 // tecla APRETADA -> la que se mando en su lugar (para que el SOLTAR llegue como la misma tecla que se apreto)
 static std::map<SDL_Keycode, SDL_Keycode> g_teclasTraducidas;
 
+// un popup NO MODAL abierto (Buscar del IDE) con el puntero afuera: el teclado y la rueda siguen yendo al viewport
+static bool PopUpDejaPasar() {
+    if (!PopUpActive) return true;
+    if (!PopUpActive->NoModal()) return false;
+    int mx, my; SDL_GetMouseState(&mx, &my);
+    return !PopUpActive->Contains(mx, my);
+}
+
 static int W3dBotonDesdeSDL(Uint8 b){
     if (b == SDL_BUTTON_LEFT)   return W3dMB_IZQ;
     if (b == SDL_BUTTON_MIDDLE) return W3dMB_MEDIO;
@@ -185,6 +193,8 @@ Uint32 g_lastFingerTicks = 0;       // ultimo evento de DEDO: filtra los mouse F
 // mover = el menu contextual). Mientras tanto, arrastrar el dedo sigue siendo SCROLL (lo normal). El agarre queda en
 // g_outAgarre hasta levantar el dedo: el motion va derecho al outliner (no scrollea) y el up lo suelta ahi.
 static const Uint32 kPulsacionLargaMs = 500;
+// IDE TACTIL: la lupa (pulsacion larga) o una agarradera de la seleccion en curso; mientras dura, el dedo es de el
+static IDE* g_ideGestoVp = NULL;
 static bool g_outAgarre = false;
 static bool g_contentTapTactil = false;   // el toque de contenido pendiente es de un DEDO (el mouse no agarra asi)
 // DOBLE TAP (tactil): dos toques cortos seguidos en el mismo lugar = el doble click (renombrar en el outliner)
@@ -192,6 +202,19 @@ static Uint32 g_ultimoTapTicks = 0;
 static int g_ultimoTapX = -1000, g_ultimoTapY = -1000;
 void ControlesTick() {
     if (!g_contentTapPending || !g_contentTapTactil || g_outAgarre || fingers.size() > 1) return;
+    // IDE: dedo quieto un rato sobre el codigo = la LUPA para poner el cursor justo
+    if (g_barTapView && g_barTapView->isLeaf() && g_barTapView->ViewportKind() == 8) {
+        if (SDL_GetTicks() - g_tapStartTicks < kPulsacionLargaMs) { g_redraw = true; return; }   // (sigue esperando)
+        IDE* ide = (IDE*)g_barTapView;
+        if (ide->PulsacionLarga(g_tapStartX, g_tapStartY)) {
+            g_contentTapPending = false;   // ya no es ni tap ni scroll
+            g_ideGestoVp = ide;
+            viewPortActive = ide;
+            ViewPortClickDown = true;
+            g_redraw = true;
+        }
+        return;
+    }
     if (!g_barTapView || !g_barTapView->isLeaf() || g_barTapView->ViewportKind() != 2) return;
     if (SDL_GetTicks() - g_tapStartTicks < kPulsacionLargaMs) { g_redraw = true; return; }   // (sigue esperando)
     if (LayoutPulsacionLargaUI(g_tapStartX, g_tapStartY)) {
@@ -238,6 +261,7 @@ static void ControlesOlvidarViewport(ViewportBase* vp) {
     if (g_cornerVp == vp)    { g_cornerVp = NULL; g_cornerResizing = false; }
     if (g_tlTapView == vp)   { g_tlTapView = NULL; g_tlTapPending = false; }
     if (g_toqueJuegoVp == vp)  g_toqueJuegoVp = NULL;
+    if ((ViewportBase*)g_ideGestoVp == vp) g_ideGestoVp = NULL;
 }
 struct ControlesEngancharOlvido { ControlesEngancharOlvido() { ViewportOlvidarRegistrar(ControlesOlvidarViewport); } };
 static ControlesEngancharOlvido g_controlesEngancheOlvido;
@@ -343,12 +367,16 @@ void InputUsuarioSDL3(SDL_Event &e){
                 // ese finger-down caeria afuera (en la posicion del item del menu) y lo cerraria. Se ignora.
                 if (g_popupOpenedByMouseDown) { g_popupOpenedByMouseDown = false; break; }
                 int mx, my; FingerPix(e.tfinger, mx, my);
-                leftMouseDown = true; g_popupFinger = true;
-                if (!PopUpActive->Click(mx, my)) {   // afuera del popup -> cerrarlo (como LayoutClickUI)
-                    PopUpActive->Cerrar();
-                    g_popupFinger = false; leftMouseDown = false;
+                if (PopUpActive->NoModal() && !PopUpActive->Contains(mx, my)) {
+                    // popup NO modal (Buscar del IDE): el toque de afuera es del viewport y el popup sigue abierto
+                } else {
+                    leftMouseDown = true; g_popupFinger = true;
+                    if (!PopUpActive->Click(mx, my)) {   // afuera del popup -> cerrarlo (como LayoutClickUI)
+                        PopUpActive->Cerrar();
+                        g_popupFinger = false; leftMouseDown = false;
+                    }
+                    break; // el popup ya lo manejo: no seguir al flujo de gestos de viewport
                 }
-                break; // el popup ya lo manejo: no seguir al flujo de gestos de viewport
             }
             // LOOP CUT en fase de ORIENTACION: el dedo elige la direccion tocando un punto. Igual que el
             // popup, lo maneja el dedo DIRECTO (la sintesis touch->mouse se desincroniza). Si el mouse
@@ -363,6 +391,7 @@ void InputUsuarioSDL3(SDL_Event &e){
                 // 2do dedo -> arranca el gesto de 2 dedos: cortamos el orbit/drag del mouse (1 dedo
                 // sintetizado) y cancelamos el gesto de 1 dedo a medio decidir (tap/scroll/slider).
                 if (g_popupFinger) { if (PopUpActive) PopUpActive->Soltar(); g_popupFinger = false; }
+                if (g_ideGestoVp) { g_ideGestoVp->GestoTactilFin(); g_ideGestoVp = NULL; }   // 2do dedo: era zoom/scroll
                 leftMouseDown = middleMouseDown = ViewPortClickDown = false;
                 g_barTapPending = g_contentTapPending = g_slideNum = false;
                 g_view3dTapPending = false; // 2do dedo (pan/zoom): NO seleccionar al soltar
@@ -496,6 +525,11 @@ void InputUsuarioSDL3(SDL_Event &e){
             extern void SimToquePantalla(ViewportBase*, int, int, bool);
             SimToquePantalla(g_toqueJuegoVp, (int)e.motion.x, (int)e.motion.y, true);
             GuardarMousePos();
+            return;
+        }
+        if (g_ideGestoVp) {     // IDE: la lupa / la agarradera siguen al dedo (nada de scroll)
+            g_ideGestoVp->GestoTactilMover((int)e.motion.x, (int)e.motion.y);
+            g_redraw = true;
             return;
         }
         // 2+ dedos: el mouse lo sintetiza el touch desde 1 dedo -> NO orbitar mientras se hace
@@ -770,7 +804,7 @@ void InputUsuarioSDL3(SDL_Event &e){
     // rueda del mouse (bloqueada con un desplegable abierto)
     if (e.type == SDL_EVENT_MOUSE_WHEEL) {
         if (LoopCutActivo()) { LoopCutWheel(e.wheel.y > 0 ? 1 : -1); return; } // mas/menos cortes
-        if (PopUpActive) {
+        if (PopUpActive && !PopUpDejaPasar()) {
             PopUpActive->Wheel(e.wheel.y); // popup modal (file browser, etc)
         } else if (LayoutMenuAbierto() && MenuAbierto) {
             MenuAbierto->Wheel(e.wheel.y > 0 ? 1 : -1); g_redraw = true; // menu desplegable largo (ej: 129 clips) -> scroll
@@ -942,6 +976,14 @@ void InputUsuarioSDL3(SDL_Event &e){
             // en el down (sino togglea/selecciona apenas apoyas). En PC el mouse usa scrollbar/rueda + el drag
             // numerico clasico (gFloatDrag), asi que ahi NO se difiere. Se decide en el 1er motion (dir) o al
             // soltar (tap). (con un desplegable abierto NO se difiere: el click es del MENU, va a LayoutClickUI.)
+            // IDE TACTIL: una AGARRADERA de la seleccion se agarra al toque (ajusta esa punta de la seleccion)
+            else if (esTouch && !LayoutMenuAbierto() && vpDown && vpDown->isLeaf() && vpDown->ViewportKind() == 8 &&
+                     ((IDE*)vpDown)->ManijaAgarrar((int)e.button.x, (int)e.button.y)) {
+                g_ideGestoVp = (IDE*)vpDown;
+                viewPortActive = vpDown;
+                ViewPortClickDown = true;
+                g_redraw = true;
+            }
             else if (esTouch && !LayoutMenuAbierto() && vpDown &&
                      (vpDown->ViewportKind() == 2 || vpDown->ViewportKind() == 3 ||
                       vpDown->ViewportKind() == 7 || vpDown->ViewportKind() == 8)) {
@@ -1091,6 +1133,15 @@ void InputUsuarioSDL3(SDL_Event &e){
         }
     }
     else if (e.type == SDL_EVENT_MOUSE_BUTTON_UP) {
+        if (g_ideGestoVp) {     // IDE: se solto la lupa / la agarradera (el cursor y la seleccion quedan ahi)
+            g_ideGestoVp->GestoTactilFin();
+            g_ideGestoVp = NULL;
+            leftMouseDown = false;
+            ViewPortClickDown = false;
+            g_contentTapPending = false;
+            GuardarMousePos();
+            return;
+        }
         if (g_toqueJuegoVp) {   // fin del arrastre del juego
             extern void SimToquePantalla(ViewportBase*, int, int, bool);
             SimToquePantalla(g_toqueJuegoVp, (int)e.button.x, (int)e.button.y, false);
@@ -1247,7 +1298,7 @@ void InputUsuarioSDL3(SDL_Event &e){
         // edicion y clipboard). Popups, menus y las cajas de texto clasicas tienen
         // prioridad y siguen su camino de siempre. Va ANTES del Ctrl+S global: sobre el
         // IDE, Ctrl+S guarda EL SCRIPT (no el proyecto).
-        if (!PopUpActive && !LayoutMenuAbierto() && !g_textFieldActivo && !RenameActivo() &&
+        if (PopUpDejaPasar() && !LayoutMenuAbierto() && !g_textFieldActivo && !RenameActivo() &&
             IDETecladoCaptura(W3dTeclaDesdeSDL(e.key.keysym.sym), e.key.repeat != 0)) {
             g_redraw = true;
             return;
@@ -1461,6 +1512,10 @@ void InputUsuarioSDL3(SDL_Event &e){
                 // la X cancela el popup (color picker), como esc
                 if (PopUpActive) lk = LayoutKey::Cancel;
                 break;
+            case SDLK_DELETE:
+                // Supr cierra el popup como Esc (en los paneles: acepta; solo su boton Cancelar deshace)
+                if (PopUpActive && !g_textFieldActivo) lk = LayoutKey::Cancel;
+                break;
         }
         // coords ACTUALES del cursor para el ruteo por hover de la UI compartida: lastMouseX/Y son
         // el ultimo CLICK y quedaban viejos (las flechas iban al panel clickeado, no al hovereado;
@@ -1501,7 +1556,7 @@ void InputUsuarioSDL3(SDL_Event &e){
     else if (e.type == SDL_TEXTINPUT) {
         // el IDE con foco por hover se queda con el texto tipeado (editor de texto lua);
         // una caja de texto enfocada / popup / menu abierto tienen prioridad, como siempre
-        if (!g_textFieldActivo && !PopUpActive && !LayoutMenuAbierto() &&
+        if (!g_textFieldActivo && PopUpDejaPasar() && !LayoutMenuAbierto() &&
             IDETextoTexto(e.text.text)) {
             g_redraw = true;
         }

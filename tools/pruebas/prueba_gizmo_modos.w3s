@@ -1,6 +1,7 @@
 # Gizmo con tres modos (eventos de mouse y de dedo REALES): un click rapido sobre el gizmo pasa al modo siguiente
 # (mover -> rotar -> escalar) sin cambiar nada ni dejar paso de undo; el semicirculo de un eje rota y el punto agarrado
-# sigue al puntero; la punta cuadrada escala solo ese eje; un toque con el dedo tambien cambia de modo.
+# sigue al puntero; la punta cuadrada escala solo ese eje; un toque con el dedo tambien cambia de modo. Un click
+# "torpe" con el mouse (el puntero se corre unos pixeles, queda apretado medio segundo) sigue siendo un click, como el toque.
 # REGRESION: el toggle "vista" (que solo existe en Edit Mode / pintura) prendido NO esconde el gizmo en Object Mode
 # (antes desaparecia y no habia boton para recuperarlo).
 add cube

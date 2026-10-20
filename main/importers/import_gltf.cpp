@@ -347,6 +347,7 @@ static bool MismoMaterialImportado(const Material* viejo, const Material& nuevo,
     if (viejo->reflectMode != nuevo.reflectMode) return false;
     if (!MatCasiIgual(viejo->alphaTest, nuevo.alphaTest)) return false;   // recorte por alfa (glTF MASK)
     if (viejo->texturaB != nuevo.texturaB || !MatCasiIgual(viejo->mezclaB, nuevo.mezclaB)) return false;   // mezcla de texturas
+    if (viejo->toon != nuevo.toon || !MatCasiIgual(viejo->contorno, nuevo.contorno)) return false;   // toon y su borde
     if (MatRutaTextura(viejo) != texPath)        return false;
     // las capas de textura extra (w3d_capas): misma cantidad, misma textura, mezcla y UV
     if (viejo->capas.size() != nuevo.capas.size()) return false;
@@ -374,6 +375,8 @@ static void CopiarCamposMaterial(const Material& src, Material* dst) {
     dst->alphaTest   = src.alphaTest;   // recorte por alfa (glTF MASK / w3d_alfaCorte)
     dst->texturaB    = src.texturaB;    // mezcla de texturas (w3d_texturaB / w3d_mezclaB), como las capas
     dst->mezclaB     = src.mezclaB;
+    dst->toon        = src.toon;        // sombreado toon (w3d_toon / w3d_toonMezcla)
+    dst->contorno    = src.contorno;    // borde del dibujo animado (w3d_contorno)
     dst->capas       = src.capas;
 }
 
@@ -649,6 +652,7 @@ bool ImportGLTF(const std::string& filepath) {
             tmp.normalMap   = ex->getB("w3d_normalMap",   tmp.normalMap);
             tmp.reflectMode = ex->getI("w3d_reflectMode", tmp.reflectMode);
             tmp.shininess   = (float)ex->getN("w3d_shininess", tmp.shininess);
+            tmp.contorno    = (float)ex->getN("w3d_contorno", tmp.contorno);
             // MEZCLA DE TEXTURAS (w3d_texturaB: uri, w3d_mezclaB: 0..1): la textura B se carga sincronica por ruta
             tmp.mezclaB     = (float)ex->getN("w3d_mezclaB", tmp.mezclaB);
             {
@@ -656,6 +660,16 @@ bool ImportGLTF(const std::string& filepath) {
                 if (!tb.empty() && tb.compare(0, 5, "data:") != 0) {
                     tmp.texturaB = TexturaTomar(doc.dir + UrlDecode(tb));
                     if (!tmp.texturaB) w3dLogfW("ImportGLTF: no pude cargar la textura B '%s'", tb.c_str());
+                }
+            }
+            // SOMBREADO TOON (w3d_toon: uri de la rampa; w3d_toonMezcla: "restar" o "multiplicar"): la rampa va en
+            // la texturaB (Materials.h); se carga sincronica por ruta como la textura B
+            {
+                std::string tr = ex->getS("w3d_toon", "");
+                if (!tr.empty() && tr.compare(0, 5, "data:") != 0) {
+                    tmp.texturaB = TexturaTomar(doc.dir + UrlDecode(tr));
+                    if (!tmp.texturaB) w3dLogfW("ImportGLTF: no pude cargar la rampa toon '%s'", tr.c_str());
+                    else tmp.toon = (ex->getS("w3d_toonMezcla", "restar") == "multiplicar") ? 2 : 1;
                 }
             }
             // CAPAS DE TEXTURA extra (w3d_capas): [{"textura": uri, "mezcla": n, "uv": k, "on": bool}]. Se cargan

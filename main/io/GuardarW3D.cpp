@@ -35,6 +35,7 @@
 //  camino de siempre y queda convertido a .w3dm AL GUARDAR. Lo que ya se habia perdido no se
 //  resucita (no existe en el .glb): la migracion corta la perdida hacia adelante.
 // ============================================================================
+#include "io/W3dWeb.h"   // navegador: guardar = descargar
 #include "W3dLang.h"   // T(): los avisos salen en el idioma del editor
 #include "io/GuardarW3D.h"
 #include "io/JsonW3d.h"                // JsonNumTexto: floats con round-trip EXACTO
@@ -737,6 +738,9 @@ static void EscribirMateriales(std::string& s, CtxGuardar* cx) {
         std::string tb = MatTextura(cx, mt->texturaB);
         if (tb.empty() && dz && !dz->texB.empty()) tb = Asset(cx, dz->texB);
         if (!tb.empty()) { s += ",\n      \"texturaB\": "; JEsc(s, tb); s += ", \"mezclaB\": "; JNum(s, mt->mezclaB); }
+        // SOMBREADO TOON: la texturaB es la rampa (solo si no es el default, como el resto de lo opcional)
+        if (mt->toon != 0) { s += ",\n      \"toon\": "; JNum(s, (float)mt->toon); }
+        if (mt->contorno > 0.0f) { s += ",\n      \"contorno\": "; JNum(s, mt->contorno); }
         // capas de textura EXTRA (multi-pass): su textura y como se mezcla con lo de abajo (las
         // dormidas eran las primeras del material: van adelante, como cuando despiertan)
         if (!mt->capas.empty() || (dz && !dz->capas.empty())) {
@@ -3211,6 +3215,7 @@ bool GuardarW3D(const std::string& ruta) {
         } else {
             Notificar(T("Project saved: ") + Base(ruta), false);
         }
+        W3dDescargarSiWeb(ruta);   // navegador: el .w3d guardado baja a la PC (es el unico disco que hay)
         w3dLogf("[W3D] guardado %s (contenedor v4 estilo ODF: mimetype + LEEME.txt + "
                 "proyecto.json + escenas/ + scripts/ + assets)", ruta.c_str());
         return true;

@@ -1,0 +1,28 @@
+# EDITOR DE SCRIPTS (IDE): letras de mas de un byte y el TAB de los editores de codigo.
+#  - la n~ y los acentos se tipean y se pegan (antes solo entraba ASCII); el cursor, Backspace y Supr van por letra
+#  - Tab completa hasta el tope de 4; con varias lineas les suma un nivel; Shift+Tab lo saca; Backspace en la
+#    sangria borra un nivel entero. Las guias verticales de la sangria se ven en la captura de abajo.
+#  - Refresh TRAE el archivo editado afuera (pregunta si hay cambios locales) y Guardar no pisa lo editado afuera
+ideutf8
+iderefresh
+idetab
+vpkind 1 7
+idecargar ide_guias.lua
+idecursor 7 14
+# --- menu Editar (deshacer/rehacer/...) y Buscar / Reemplazar (mayusculas, palabra completa, reemplazar todo = un deshacer)
+idebuscartest
+# --- el panel Buscar NO es modal: Ctrl+F lo abre con el foco en "Buscar"; despues de Enter lo tipeado va al script y el
+#     panel sigue abierto; Esc lo cierra ---
+idecargar ide_guias.lua
+teclareal ide Ctrl+F
+idever 1
+textoreal ide local
+idever 1
+teclareal ide Enter
+textoreal ide ZZ
+idever 1 ZZ
+teclareal ide Esc
+idever 0 ZZ
+# --- TACTIL: doble toque = palabra, triple = renglon, pulsacion larga = lupa que mueve el cursor, agarraderas que
+#     estiran la seleccion (todo por la misma puerta que la pantalla tactil) ---
+idetactil

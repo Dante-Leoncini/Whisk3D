@@ -18,6 +18,7 @@
 #include "gfx/w3dGraphics.h" // gfx::MezclaAdd: la palabra ADITIVO del .mtl
 #include "io/W3dMallaBin.h"       // W3dMallaBinMaterializarEdicion: las caras pendientes de una malla de un recurso
 #include "objects/MallaRecurso.h" // W3dMallaSoltarEdicion: y vuelven a quedar pendientes al terminar
+#include "io/W3dWeb.h"            // W3dDescargarSiWeb: en el navegador las texturas del export bajan a la PC
 
 // formateo de float SIN operator<< ni %f: ambos ROTOS en STLport/Symbian (el export escribia basura tipo
 // 2.31e-307 Y era lentisimo -> el N95 se "colgaba"). Replica de RenderBitmapFloat: entero.fraccion con %d.
@@ -1217,7 +1218,11 @@ static void EscribirMaterialMTL(std::ofstream& mtl, Material* mat, const std::st
     mtl << "Ns " << FloatStr(mat->specular[0] * 1000.0f) << "\n";
     mtl << "d " << FloatStr(mat->diffuse[3]) << "\n";
     if (mat->texture && !mat->texture->path.empty())
+#ifdef __EMSCRIPTEN__
+        mtl << "map_Kd " << BaseNameTex(mat->texture->path) << "\n";   // navegador: la textura bajo AL LADO (ver ExportOBJ)
+#else
         mtl << "map_Kd " << RutaTexturaRelativa(exportDir, mat->texture->path) << "\n";
+#endif
     // extras propios de Whisk3D (los lee LeerMTL)
     if (!mat->culling)    mtl << "BackfaceCullingOff\n";
     if (!mat->depth_test) mtl << "GL_DEPTH_TEST_OFF\n";
@@ -1441,6 +1446,26 @@ bool ExportOBJ(const std::string& filepath, bool selectedOnly, bool applyModifie
         mtl.precision(7);
         mtl << "# creado con Whisk3D\n\n";
         std::string exportDir = DirOf(filepath); // el .mtl y el .obj estan aca -> las texturas se referencian relativas a esto
+#ifdef __EMSCRIPTEN__
+        // navegador: el .obj y el .mtl bajan a la carpeta de descargas de la PC, sin las carpetas del disco virtual.
+        // Cada textura se copia al lado del export y baja tambien (una vez cada una): el .mtl la nombra por basename.
+        std::set<std::string> texBajadas;
+        for (std::set<Material*>::iterator it = matsUsados.begin(); it != matsUsados.end(); ++it) {
+            Material* mt = *it;
+            if (!mt || !mt->texture || mt->texture->path.empty()) continue;
+            const std::string& orig = mt->texture->path;
+            const std::string dest = exportDir + BaseNameTex(orig);
+            if (!texBajadas.insert(dest).second) continue;
+            if (dest != orig) {
+                std::vector<unsigned char> bytes;
+                if (!w3dFileSystem::ReadFileBytes(orig, bytes) || bytes.empty()) { w3dLogfW("ExportOBJ: no pude leer la textura %s", orig.c_str()); continue; }
+                std::ofstream tf(dest.c_str(), std::ios::binary);
+                if (!tf.is_open()) { w3dLogfW("ExportOBJ: no pude copiar la textura a %s", dest.c_str()); continue; }
+                tf.write((const char*)&bytes[0], (std::streamsize)bytes.size()); tf.close();
+            }
+            W3dDescargarSiWeb(dest);
+        }
+#endif
         for (std::set<Material*>::iterator it = matsUsados.begin(); it != matsUsados.end(); ++it)
             EscribirMaterialMTL(mtl, *it, exportDir);
         mtl.close();

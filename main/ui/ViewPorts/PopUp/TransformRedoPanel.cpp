@@ -213,11 +213,12 @@ static const char* NombreEje(int e) {
     switch (e) { case X: return "X"; case Y: return "Y"; case Z: return "Z"; case OrbitalAxis: return "Free"; default: return "View"; }
 }
 TransformRedoPanel::TransformRedoPanel()
-    : PopUpBase(""), grupo(NULL), dragField(NULL), dragMoved(false), lastDragMx(0), listaAbierta(0), listaSel(0), lista(NULL) {
+    : PopUpBase(""), grupo(NULL), dragField(NULL), dragMoved(false), lastDragMx(0), listaAbierta(0), listaSel(0), lista(NULL), marco(NULL) {
     lista = new Card();
+    marco = new Card();
     Armar();
 }
-TransformRedoPanel::~TransformRedoPanel() { delete grupo; delete lista; }
+TransformRedoPanel::~TransformRedoPanel() { delete grupo; delete lista; delete marco; }
 
 void TransformRedoPanel::Armar() {
     delete grupo;
@@ -282,14 +283,16 @@ void TransformRedoPanel::ResizeGrupo() {
     grupo->Resize(w, 0);
     int alto = grupo->height;
     if (listaAbierta) { int lx, ly, lw, lh; ListaRect(lx, ly, lw, lh); if (ly + lh + borderGS > alto) alto = ly + lh + borderGS; }
-    popUpWindow->Resize(w, alto);
+    dz.Medir(alto);                      // mas de media pantalla: se ve la mitad y se desplaza
+    popUpWindow->Resize(w, dz.visible);
 }
 void TransformRedoPanel::Reubicar() {   // abajo a la izquierda del viewport (donde estaba la barra de herramientas)
-    if (!gTRvp) { x = gapGS * 2; y = MenuPantallaH - grupo->height - gapGS * 2; return; }
+    const int alto = dz.visible;
+    if (!gTRvp) { x = gapGS * 2; y = MenuPantallaH - alto - gapGS * 2; return; }
     x = gTRvp->x + gapGS * 2;
-    y = gTRvp->y + gTRvp->height - grupo->height - gapGS * 2;
-    if (PopUpActive && PopUpActive != this && PopUpActive->y < y + grupo->height + gapGS * 2)
-        y = PopUpActive->y - grupo->height - gapGS * 2;   // el teclado numerico abierto encima: el panel sube
+    y = gTRvp->y + gTRvp->height - alto - gapGS * 2;
+    if (PopUpActive && PopUpActive != this && PopUpActive->y < y + alto + gapGS * 2)
+        y = PopUpActive->y - alto - gapGS * 2;   // el teclado numerico abierto encima: el panel sube
     if (y < gTRvp->y + gapGS) y = gTRvp->y + gapGS;
     if (x < gapGS) x = gapGS;
 }
@@ -316,15 +319,26 @@ void TransformRedoPanel::Render() {
     ResizeGrupo(); Reubicar();
     // la lista hacia arriba puede salirse del rect de la tarjeta: la ventana del popup la abarca
     int top = 0;
-    if (listaAbierta) { int lx, ly, lw, lh; ListaRect(lx, ly, lw, lh); if (ly < top) top = ly; }
+    if (listaAbierta) { int lx, ly, lw, lh; ListaRect(lx, ly, lw, lh); if (ly - dz.scroll < top) top = ly - dz.scroll; }
     const int y0 = y; y += top; popUpWindow->Resize(popUpWindow->width, popUpWindow->height - top);
     initView();
     w3dEngine::PushMatrix();
-    w3dEngine::Translatef(0, (GLfloat)(-top), 0);
+    w3dEngine::Translatef(0, (GLfloat)(-top - dz.scroll), 0);
     grupo->Render();
     const float* verde = ListaColores[static_cast<int>(ColorID::accent)];
+    // el borde VERDE va alrededor de lo que se ve (es la ventana con el foco), aunque el contenido este desplazado
+    w3dEngine::PushMatrix();
+    w3dEngine::Translatef(0, (GLfloat)dz.scroll, 0);
     w3dEngine::Color4f(verde[0], verde[1], verde[2], 1.0f);
-    grupo->card->RenderBorder(false);
+    marco->Resize(popUpWindow->width, dz.visible); marco->RenderBorder(false);
+    if (dz.Desplazable()) {   // la barrita que dice cuanto falta
+        const int alto = dz.visible * dz.visible / (dz.total > 0 ? dz.total : 1);
+        const int ty = (dz.total - dz.visible > 0) ? (dz.visible - alto) * dz.scroll / (dz.total - dz.visible) : 0;
+        w3dEngine::Translatef((GLfloat)(popUpWindow->width - 3 * GlobalScale), (GLfloat)ty, 0);
+        SetColorID(ColorID::accent, 0.7f);
+        lista->Resize(2 * GlobalScale, alto); lista->RenderObject(false);
+    }
+    w3dEngine::PopMatrix();
     if (listaAbierta) {
         int lx, ly, lw, lh; ListaRect(lx, ly, lw, lh);
         w3dEngine::PushMatrix();
@@ -361,7 +375,7 @@ static void ElegirDeLista(int cual, int i) {
     if (gTR) gTR->Armar();
 }
 bool TransformRedoPanel::Click(int mx, int my) {
-    const int myL = my - y, lx = mx - x;
+    const int myL = my - y + dz.scroll, lx = mx - x;
     if (listaAbierta) {
         int ax, ay, aw, ah; ListaRect(ax, ay, aw, ah);
         const int cual = listaAbierta; listaAbierta = 0;
@@ -373,18 +387,33 @@ bool TransformRedoPanel::Click(int mx, int my) {
         g_redraw = true;
     }
     if (!Contains(mx, my)) return false;   // afuera: el panel se cierra (acepta) y el click sigue al viewport
+    dz.Abajo(mx, my);
+    if (!dz.Desplazable()) { dz.presionado = false; ClickFila(mx, my, false); return true; }   // entra entero: directo
+    ClickFila(mx, my, true);   // desplazable: solo se arma el arrastre de un valor; lo demas se resuelve al soltar
+    return true;
+}
+// el click sobre una fila. soloArmar: un valor numerico queda listo para arrastrar y nada mas (el resto espera a
+// saber si el gesto es un toque o un desplazamiento)
+void TransformRedoPanel::ClickFila(int mx, int my, bool soloArmar) {
+    const int myL = my - y + dz.scroll, lx = mx - x;
     const int boxStart = grupo->colEtiqueta + 2 * borderGS;
     int yRow = borderGS + RenglonHeightGS + gapGS;
     for (size_t j = 0; j < grupo->properties.size(); j++) {
         PropertieBase* p = grupo->properties[j];
         const int h = p->Resize(grupo->width);
         if (p->Seleccionable() && myL >= yRow && myL < yRow + h) {
-            grupo->selectIndex = (int)j;
             const PropertyType::Enum tipo = p->GetType();
-            g_textFieldActivo = NULL;
             if (tipo == PropertyType::Float) {
+                grupo->selectIndex = (int)j;
+                g_textFieldActivo = NULL;
                 dragField = static_cast<PropFloat*>(p); dragMoved = false; lastDragMx = mx;
-            } else if (tipo == PropertyType::Bool || tipo == PropertyType::Button) {
+                g_redraw = true;
+                return;
+            }
+            if (soloArmar) return;
+            grupo->selectIndex = (int)j;
+            g_textFieldActivo = NULL;
+            if (tipo == PropertyType::Bool || tipo == PropertyType::Button) {
                 p->EditPropertie();
             } else if (tipo == PropertyType::ButtonRow) {
                 PropButtonRow* row = static_cast<PropButtonRow*>(p);
@@ -397,31 +426,45 @@ bool TransformRedoPanel::Click(int mx, int my) {
                     vis++;
                 }
                 if (celda >= 0) { row->activo = celda; if (row->acciones[(size_t)celda]) row->acciones[(size_t)celda](); }
-                return true;
+                return;
             }
             g_redraw = true;
-            return true;
+            return;
         }
         yRow += h;
     }
-    return true;
 }
 bool TransformRedoPanel::Motion(int mx, int my) {
-    (void)my;
+    // arrastre VERTICAL en un panel desplazable: desplaza (y suelta el valor que estaba por arrastrarse)
+    if (!dragMoved && dz.Mover(mx, my)) { dragField = NULL; g_redraw = true; return true; }
+    if (dz.desplazando) return true;
     if (dragField && dragField->value) {
+        // desplazable: el valor recien se arrastra cuando el gesto se va claramente de costado
+        if (dz.Desplazable() && !dragMoved) {
+            const int umbral = 6 * (GlobalScale > 0 ? GlobalScale : 1);
+            if (mx - dz.pressX < umbral && dz.pressX - mx < umbral) return true;
+            lastDragMx = mx;
+        }
         const int dmx = mx - lastDragMx; lastDragMx = mx;
-        if (dmx != 0) { dragMoved = true; dragField->Set(*dragField->value + dmx * dragField->dragStep); g_redraw = true; }
+        if (dmx != 0 || (dz.Desplazable() && !dragMoved)) dragMoved = true;
+        if (dmx != 0) { dragField->Set(*dragField->value + dmx * dragField->dragStep); g_redraw = true; }
     }
     return true;
 }
 void TransformRedoPanel::Soltar() {
-    if (dragField && !dragMoved && dragField->value) {
-        dragField->IniciarEdicionTexto();            // mouse: se escribe el valor exacto
-        if (ToolbarUsaTactil()) NumPadAbrir();       // tactil: el teclado numerico en pantalla
+    const bool toque = dz.Arriba();
+    if (dragField) {
+        if (!dragMoved && dragField->value) {
+            dragField->IniciarEdicionTexto();            // mouse: se escribe el valor exacto
+            if (ToolbarUsaTactil()) NumPadAbrir();       // tactil: el teclado numerico en pantalla
+        }
+        dragField = NULL;
+        return;
     }
-    dragField = NULL;
+    if (toque && dz.Desplazable()) ClickFila(dz.pressX, dz.pressY, false);   // fue un toque: el click de verdad
 }
-bool TransformRedoPanel::Arrastrando() { return dragField != NULL; }
+void TransformRedoPanel::Wheel(int delta) { dz.Rueda(delta); g_redraw = true; }
+bool TransformRedoPanel::Arrastrando() { return dragField != NULL || dz.presionado; }
 bool TransformRedoPanel::Tecla(int tecla) {
     if (!grupo) return true;
     const int n = (int)grupo->properties.size();
@@ -444,6 +487,7 @@ bool TransformRedoPanel::Tecla(int tecla) {
             int s = grupo->selectIndex; if (s < 0) s = (dir > 0) ? -1 : 0;
             for (int k = 0; k < n; k++) { s += dir; if (s < 0) s = n - 1; if (s >= n) s = 0; if (grupo->properties[s]->Seleccionable()) break; }
             grupo->selectIndex = s;
+            dz.AVista(FilaY(s), grupo->properties[(size_t)s]->Resize(grupo->width));   // la fila elegida, a la vista
             break;
         }
         case LayoutKey::Left:
@@ -466,7 +510,7 @@ bool TransformRedoPanel::Tecla(int tecla) {
             else if (sel) sel->EditPropertie();
             break;
         }
-        case LayoutKey::Cancel: Aceptar_(); return true;   // Esc cierra el panel (el cambio queda)
+        case LayoutKey::Cancel: Aceptar_(); return true;   // Esc / Supr / C del telefono: cierra aceptando (solo Cancelar deshace)
     }
     g_redraw = true;
     return true;
@@ -485,3 +529,4 @@ bool TransformRedoFijar(int campo, float valor) {
     return Reaplicar();
 }
 void TransformRedoBoton(bool aceptar) { if (aceptar) Aceptar_(); else Cancelar_(); }
+TransformRedoPanel* TransformRedoPanelActual() { return (gTR && PopUpActive == gTR) ? gTR : NULL; }

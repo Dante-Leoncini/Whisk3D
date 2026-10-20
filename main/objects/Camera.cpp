@@ -568,6 +568,63 @@ bool ProyectarAPantalla(Object* obj, float lienzoW, float lienzoH,
     return true;
 }
 
+// la camara activa como CameraBase + el aspecto del modo juego (lo mismo que usa ProyectarAPantalla)
+bool MatrizPantalla(float lienzoW, float lienzoH, Matrix4* M) {
+    if (!CameraActive) return false;
+    CameraBase cam;
+    cam.pos   = CameraActive->GetGlobalPosition();
+    cam.rot   = CameraActive->Rot();
+    cam.fov   = CameraActive->fov;
+    cam.nearZ = CameraActive->nearClip;
+    cam.farZ  = CameraActive->farClip;
+    float aspect = CameraActive->AspectoDeclarado();
+    if (aspect <= 0.01f) aspect = (g_renderAspect > 1e-4f) ? g_renderAspect
+                                            : ((lienzoH > 0.0f) ? lienzoW / lienzoH : 1.0f);
+    *M = cam.ProjectionMatrix(aspect) * cam.ViewMatrix();
+    return true;
+}
+
+// un punto de mundo -> px del lienzo (centro 0,0) + si esta delante (pantallaPunto)
+bool ProyectarPunto(float x, float y, float z, float lienzoW, float lienzoH, float* sx, float* sy, bool* delante) {
+    Matrix4 M;
+    if (!MatrizPantalla(lienzoW, lienzoH, &M)) return false;
+    const float* m = M.m;
+    float cx = m[0]*x + m[4]*y + m[8]*z  + m[12];
+    float cy = m[1]*x + m[5]*y + m[9]*z  + m[13];
+    float cw = m[3]*x + m[7]*y + m[11]*z + m[15];
+    *delante = cw > 1e-4f;
+    if (cw > -1e-6f && cw < 1e-6f) cw = 1e-6f;
+    *sx =  (cx / cw) * lienzoW * 0.5f;
+    *sy = -(cy / cw) * lienzoH * 0.5f;
+    return true;
+}
+
+// px del lienzo (centro 0,0, y baja) -> rayo de mundo: se des-proyectan los dos extremos (NDC z = -1 y 1) con
+// la inversa de proyeccion * vista; origen = el punto del plano cercano (rayoPantalla)
+bool RayoDesdePantalla(float sx, float sy, float lienzoW, float lienzoH, float* o, float* d) {
+    Matrix4 M;
+    if (lienzoW <= 0.0f || lienzoH <= 0.0f || !MatrizPantalla(lienzoW, lienzoH, &M)) return false;
+    const Matrix4 I = M.Inverse();
+    const float nx = sx / (lienzoW * 0.5f), ny = -sy / (lienzoH * 0.5f);
+    float p[2][3];
+    for (int k = 0; k < 2; k++) {
+        const float nz = k == 0 ? -1.0f : 1.0f;
+        const float* m = I.m;
+        float x = m[0]*nx + m[4]*ny + m[8]*nz  + m[12];
+        float y = m[1]*nx + m[5]*ny + m[9]*nz  + m[13];
+        float z = m[2]*nx + m[6]*ny + m[10]*nz + m[14];
+        float w = m[3]*nx + m[7]*ny + m[11]*nz + m[15];
+        if (w > -1e-9f && w < 1e-9f) return false;
+        p[k][0] = x / w; p[k][1] = y / w; p[k][2] = z / w;
+    }
+    float dx = p[1][0] - p[0][0], dy = p[1][1] - p[0][1], dz = p[1][2] - p[0][2];
+    const float l = sqrtf(dx * dx + dy * dy + dz * dz);
+    if (l < 1e-9f) return false;
+    o[0] = p[0][0]; o[1] = p[0][1]; o[2] = p[0][2];
+    d[0] = dx / l; d[1] = dy / l; d[2] = dz / l;
+    return true;
+}
+
 // El riel llega por OBJETO o por NOMBRE. 'soltar' (el lua paso nil) es el pedido
 // explicito de dejar la camara donde esta; un nombre que no existe es error.
 bool RielSet(Object* camObj, Object* curvaObj, const char* curvaNombre,
@@ -656,6 +713,8 @@ struct InstalarHooksCamara {
     InstalarHooksCamara() {
         W3dCamaraXZHook         = CamaraXZ;
         W3dCamaraProyectarHook  = ProyectarAPantalla;
+        W3dCamaraProyectarPuntoHook = ProyectarPunto;
+        W3dCamaraRayoHook       = RayoDesdePantalla;
         W3dCamaraRielSetHook    = RielSet;
         W3dCamaraRielNodoHook   = RielNodo;
         W3dCamaraRielMiradaHook = RielMirada;

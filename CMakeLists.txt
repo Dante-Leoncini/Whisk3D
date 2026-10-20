@@ -114,6 +114,16 @@ list(APPEND SRC_FILES
     ${CMAKE_SOURCE_DIR}/libs/Whisk3DCore/base/W3dClipboardSDL.cpp
 )
 
+# BACKEND DE SHADERS EN PC (para comparar): -DW3D_PC_GLES2=ON compila el editor de escritorio con el backend que
+# usan la web y Android (gles2/w3dGraphicsGLES2.cpp) en vez del fijo. Asi el harness puede dibujar la MISMA escena
+# con los dos y comparar las capturas (uishot) sin pasar por el navegador ni el telefono. En un build dir aparte.
+option(W3D_PC_GLES2 "PC con el backend de shaders de web/Android (para comparar con el fijo)" OFF)
+if(W3D_PC_GLES2)
+    list(REMOVE_ITEM SRC_FILES ${CMAKE_SOURCE_DIR}/libs/Whisk3DCore/gfx/w3dGraphics.cpp)
+    list(APPEND SRC_FILES ${CMAKE_SOURCE_DIR}/libs/Whisk3DCore/gles2/w3dGraphicsGLES2.cpp)
+    add_compile_definitions(W3D_WEBGL)
+endif()
+
 if(ANDROID)
 
     message(STATUS "Building Whisk3D for Android")

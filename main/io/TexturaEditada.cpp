@@ -1,6 +1,7 @@
 // ============================================================================
 //  TexturaEditada.cpp - texturas editables en memoria (ver TexturaEditada.h).
 // ============================================================================
+#include "io/W3dWeb.h"   // navegador: guardar = descargar
 #include "io/TexturaEditada.h"
 #include "io/W3dContenedor.h"      // contenedor montado / entradas / externas
 #include "objects/Textures.h"
@@ -100,6 +101,7 @@ static bool EscribirDisco(const std::string& ruta, const std::vector<unsigned ch
     FILE* f = fopen(ruta.c_str(), "wb"); if (!f) return false;
     const size_t wr = bytes.empty() ? 0 : fwrite(&bytes[0], 1, bytes.size(), f);
     fclose(f);
+    if (wr == bytes.size()) W3dDescargarSiWeb(ruta);   // navegador: la textura guardada afuera baja a la PC
     return wr == bytes.size();
 }
 bool TexEditGuardar(TexturaEditable* te, std::string& msg) {

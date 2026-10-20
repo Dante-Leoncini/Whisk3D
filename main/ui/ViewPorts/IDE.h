@@ -18,7 +18,9 @@
 enum BarRolIDE {
     BRIDE_Script = 1, // selector desplegable: los .lua del proyecto (marca el abierto)
     BRIDE_Guardar,    // menu ARCHIVO: Guardar (Ctrl+S) / Guardar como... / Guardar en el w3d o fuera del w3d / Cargar .lua
-    BRIDE_Refresh     // guarda + recarga los scripts EN VIVO si el juego corre
+    BRIDE_Refresh,    // TRAE el archivo (lo editado afuera) + recarga los scripts EN VIVO si el juego corre
+    BRIDE_Editar,     // menu EDITAR: deshacer / rehacer / cortar / copiar / pegar / buscar / reemplazar
+    BRIDE_Seleccionar // menu SELECCIONAR: seleccionar todo
 };
 
 // =====================================================================
@@ -32,11 +34,13 @@ enum BarRolIDE {
 //  snapshots del buffer agrupados por operacion), numeros de linea, y
 //  RESALTADO de sintaxis lua por linea (lexer simple, ver LexLinea).
 //
-//  Barra: [selector de script] [Save] [Refresh]. Guardar es ATOMICO
+//  Barra: [selector de script] [Archivo] [Refresh]. Guardar es ATOMICO
 //  (escribe a un .w3dtmp y renombra: el .lua nunca queda a medias).
-//  Refresh con la sim corriendo recarga los lua_State de los objetos que
-//  usan el script editado (SimScriptsCambiados: sus variables arrancan
-//  de cero y corre inicio() de nuevo; el resto del juego NO se reinicia).
+//  Refresh TRAE el archivo (lo que se edito con otro editor); si hay cambios
+//  locales sin guardar, primero pregunta. Guardar y Refresh, con la sim
+//  corriendo, recargan los lua_State de los objetos que usan el script
+//  (SimScriptsCambiados: sus variables arrancan de cero y corre inicio() de
+//  nuevo; el resto del juego NO se reinicia).
 //
 //  El estado de edicion es publico a proposito: el comando de test
 //  'idetest' (main/test/W3dScript.cpp) maneja el buffer por esta API,
@@ -63,6 +67,7 @@ class IDE : public ViewportBase, public WithBorder, public Scrollable {
             int curLin, curCol;
         };
         std::vector<EstadoTexto> pilaUndo;
+        std::vector<EstadoTexto> pilaRedo;   // lo deshecho, para rehacer (se vacia con cualquier edicion nueva)
         int undoUltimaOp;                // ultima op mutante (agrupa el tipeo seguido)
 
         // metricas del ultimo calculo de scroll (recalcular SOLO si cambia algo,
@@ -75,20 +80,35 @@ class IDE : public ViewportBase, public WithBorder, public Scrollable {
 
         // ================= API de edicion (headless: la usa idetest) =================
         bool AbrirArchivo(const std::string& ruta); // lee el .lua al buffer (tabs -> 4 espacios, sin \r)
-        bool Guardar();                             // ATOMICO: tmp + rename. false si fallo
+        // ATOMICO: tmp + rename. false si fallo. Un archivo EXTERNO que cambio en el disco desde que se abrio (lo edito
+        // otro programa) no se pisa sin preguntar; forzar = ya se pregunto.
+        bool Guardar(bool forzar = false);
         // "Guardar" del menu Archivo / Ctrl+S: Guardar() y, si el script vive ADENTRO del proyecto, guarda tambien el
         // proyecto (el .w3d del disco queda con el script nuevo). Sin archivo abre "Guardar como..."
         bool GuardarEnProyecto();
         bool silencioso;                            // Guardar() sin aviso (lo da GuardarEnProyecto al final)
-        void Refresh();                             // guardar + recargar scripts en vivo (ver arriba)
+        // TRAE el archivo (lo editado afuera). Con cambios locales sin guardar pregunta primero; forzar = ya se pregunto.
+        // Lo de antes queda en el deshacer.
+        void Refresh(bool forzar = false);
+        void RehacerTexto();
+        // BUSCAR (el popup de Buscar/Reemplazar, PopUp/BuscarPopup): coincidencias de 't' en el buffer (por linea; byte
+        // de inicio). mayus = distinguir mayusculas; palabra = solo palabras completas.
+        void Coincidencias(const std::string& t, bool mayus, bool palabra, std::vector<int>* lin, std::vector<int>* col) const;
+        bool IrACoincidencia(const std::string& t, bool mayus, bool palabra, int dir);   // selecciona la siguiente/anterior (da la vuelta)
+        bool SeleccionEsCoincidencia(const std::string& t, bool mayus) const;
+        int  ReemplazarTodas(const std::string& t, const std::string& por, bool mayus, bool palabra);   // un solo paso de deshacer
+        void RecargarEnVivo(bool avisarSiNada);     // con el juego corriendo: recarga los objetos que usan este script
+        std::string textoDisco;                     // el archivo como estaba la ultima vez que se leyo o escribio
+        bool hayTextoDisco;
         void SetTexto(const std::string& texto);    // reemplaza el buffer entero (resetea undo)
         std::string GetTexto() const;               // el buffer unido con '\n'
         void InsertarTexto(const std::string& t);   // en el cursor (pisa la seleccion); acepta '\n'
         void InsertarChar(char c);                  // un imprimible (agrupa el undo del tipeo)
+        void InsertarTipeado(const std::string& t); // lo tipeado (letras UTF-8, sin saltos): agrupa el undo del tipeo
         void Backspace();
         void DelForward();
         void Enter();
-        void TabKey();                              // inserta 4 espacios
+        void TabKey(bool shift = false);            // espacios hasta el tope de 4; con varias lineas, sangria (Shift: la saca)
         void CursorA(int lin, int col, bool shift); // mueve el cursor (clampea); shift extiende la seleccion
         void MoverCursor(int dLin, int dCol, bool shift); // flechas (dCol cruza de linea)
         void Home(bool shift);
@@ -135,9 +155,25 @@ class IDE : public ViewportBase, public WithBorder, public Scrollable {
         // abre el PRIMER script del proyecto si hay uno y no hay nada abierto
         void AbrirPrimerScript();
 
+        void NormalizarSel(int* l0, int* c0, int* l1, int* c1) const;   // la seleccion de principio a fin (Buscar la usa)
+
+        // ---- TACTIL: doble toque = palabra, triple = renglon; PULSACION LARGA = lupa para poner el cursor justo; con
+        //      una seleccion, AGARRADERAS en sus dos puntas para ajustarla (las maneja controles.cpp) ----
+        int tapsSeguidos; unsigned int tUltimoTap; int ultTapX, ultTapY;
+        int gestoTactil;                 // 0 = nada, 1 = lupa, 2 = agarradera del principio, 3 = del final
+        int lupaX, lupaY;                // donde esta el dedo (pantalla)
+        void PuntoATexto(int mx, int my, int* lin, int* col) const;   // pantalla -> renglon y byte (al principio de una letra)
+        void TextoAPunto(int lin, int col, int* mx, int* my) const;   // renglon y byte -> donde iria el cursor (pantalla)
+        void SeleccionarPalabra();       // la palabra donde esta el cursor
+        void SeleccionarLinea();         // el renglon del cursor entero
+        bool PulsacionLarga(int mx, int my);   // arranca la lupa (el cursor va al dedo)
+        int  ManijaEn(int mx, int my) const;   // 0 = ninguna, 1 = la del principio, 2 = la del final
+        bool ManijaAgarrar(int mx, int my);    // true = el dedo agarro una agarradera
+        void GestoTactilMover(int mx, int my);
+        void GestoTactilFin();
+
     private:
         void Mutar(int op);              // antes de CADA mutacion: undo + marcar sucio
-        void NormalizarSel(int* l0, int* c0, int* l1, int* c1) const;
         void AsegurarCursorVisible();    // ajusta PosX/PosY para que el cursor se vea
         void RecalcularScroll();         // rango del scrollbar con las metricas actuales
         std::vector<unsigned char> bloqueAlInicio; // estado --[[ ]] al INICIO de cada linea
@@ -146,6 +182,9 @@ class IDE : public ViewportBase, public WithBorder, public Scrollable {
 };
 
 // ---- helpers globales (los usan controles.cpp / LayoutInput.cpp / idetest) ----
+
+// TELEFONO: el lapiz (shift) apretado mientras se edita: abajo aparece la barra "Copiar | Pegar" (las dos softkeys)
+void IDELapizSostenido(bool apretado);
 
 // junta los .lua del proyecto: los referenciados por las escenas cargadas (scriptDatos
 // de todo el arbol) + los *.lua de la carpeta contenido/ del proyecto. Rutas completas,

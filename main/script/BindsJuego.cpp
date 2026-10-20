@@ -1020,6 +1020,8 @@ bool (*W3dCamaraRielEstadoHook)(Object*, const char**, int*, float*, bool*, floa
 bool (*W3dCamaraLenteHook)(Object*, float*, float*, float*) = 0;
 bool (*W3dCamaraSetLenteHook)(Object*, const float*, const float*, const float*) = 0;
 bool (*W3dCamaraXZHook)(float*, float*, float*, float*) = 0;
+bool (*W3dCamaraRayoHook)(float, float, float, float, float*, float*) = 0;
+bool (*W3dCamaraProyectarPuntoHook)(float, float, float, float, float, float*, float*, bool*) = 0;
 Object* (*W3dObjetivoHook)(Object*) = 0;
 static int LEmitir(lua_State* L) {
     Object* o = W3dScriptParamObjeto(L, 1);
@@ -1323,6 +1325,35 @@ static int LCajaUI(lua_State* L) {
 // render (g_renderAspect, los mismos numeros del modo juego; antes del primer
 // render cae al aspecto del lienzo). Sin camara activa devuelve 0, 0, false.
 // OJO: con camara ORTOGRAFICA proyecta con la lente en perspectiva (aproximado).
+// rayoPantalla(x, y) -> ox, oy, oz, dx, dy, dz: el rayo de la camara ACTIVA que pasa por el punto (x, y)
+// del lienzo (px, centro 0,0, y hacia abajo: lo que dan raton() y toque()). Origen en el plano cercano y
+// direccion normalizada, en MUNDO: se le pasa tal cual a colRayo / rayoMalla. Es la "pistola de luz" de un
+// juego de disparos: clic -> rayo -> lo primero que toca. Sin camara activa devuelve nil.
+static int LRayoPantalla(lua_State* L) {
+    float w, h; TamLienzo(&w, &h);
+    float o[3], d[3];
+    if (!W3dCamaraRayoHook || !W3dCamaraRayoHook((float)luaL_checknumber(L, 1), (float)luaL_checknumber(L, 2), w, h, o, d)) {
+        lua_pushnil(L);
+        return 1;
+    }
+    for (int i = 0; i < 3; i++) lua_pushnumber(L, o[i]);
+    for (int i = 0; i < 3; i++) lua_pushnumber(L, d[i]);
+    return 6;
+}
+// pantallaPunto(x, y, z) -> sx, sy, delante: como pantallaDe pero para un PUNTO de mundo (no el origen de un
+// objeto): la mira de un enemigo, un impacto, la esquina de una caja. Mismo espacio que posPx.
+static int LPantallaPunto(lua_State* L) {
+    float w, h; TamLienzo(&w, &h);
+    float sx = 0, sy = 0; bool delante = false;
+    if (!W3dCamaraProyectarPuntoHook || !W3dCamaraProyectarPuntoHook((float)luaL_checknumber(L, 1), (float)luaL_checknumber(L, 2),
+                                                                     (float)luaL_checknumber(L, 3), w, h, &sx, &sy, &delante)) {
+        lua_pushnumber(L, 0); lua_pushnumber(L, 0); lua_pushboolean(L, 0);
+        return 3;
+    }
+    lua_pushnumber(L, sx); lua_pushnumber(L, sy); lua_pushboolean(L, delante ? 1 : 0);
+    return 3;
+}
+
 static int LPantallaDe(lua_State* L) {
     Object* o = W3dScriptParamObjeto(L, 1);
     float w, h; TamLienzo(&w, &h);
@@ -1666,6 +1697,8 @@ void BindsJuegoRegistrar(void* Lv) {
     lua_pushcfunction(L, LFundir);      lua_setglobal(L, "fundir");
     lua_pushcfunction(L, LCajaUI);      lua_setglobal(L, "cajaUI");
     lua_pushcfunction(L, LPantallaDe);  lua_setglobal(L, "pantallaDe");
+    lua_pushcfunction(L, LPantallaPunto); lua_setglobal(L, "pantallaPunto");
+    lua_pushcfunction(L, LRayoPantalla); lua_setglobal(L, "rayoPantalla");
     // el RIEL de la camara, cambiable en juego (area abierta / elevador / sala lateral)
     lua_pushcfunction(L, LSetRiel);     lua_setglobal(L, "setRiel");
     lua_pushcfunction(L, LSetRielNodo); lua_setglobal(L, "setRielNodo");

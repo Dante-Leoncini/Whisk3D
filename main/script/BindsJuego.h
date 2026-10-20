@@ -95,6 +95,13 @@ extern bool (*W3dCamaraSetLenteHook)(Object* cam, const float* fov, const float*
 // instala Camera.cpp. false = no hay camara -> el bind devuelve el default
 // (0,-1, 1,0), NO nil: un juego que lo llama sin guarda no se puede caer.
 extern bool (*W3dCamaraXZHook)(float* fx, float* fz, float* rx, float* rz);
+// PUNTERIA (juegos de disparos, "pistola de luz"): el RAYO de la camara activa por un punto del lienzo
+// (px, centro 0,0, y hacia ABAJO: lo de raton()/toque()) -> origen (en el plano cercano) y direccion
+// normalizada, en MUNDO; y el inverso para un PUNTO suelto (pantallaDe es solo para el origen de un
+// objeto). Los instala Camera.cpp con la MISMA lente y aspecto que proyectar.
+extern bool (*W3dCamaraRayoHook)(float sx, float sy, float lienzoW, float lienzoH, float* o, float* d);
+extern bool (*W3dCamaraProyectarPuntoHook)(float x, float y, float z, float lienzoW, float lienzoH,
+                                           float* sx, float* sy, bool* delante);
 // objetivo(): el target del objeto DUENO del script (el personaje que maneja un
 // objeto Script). Lo instala quien linkee ObjetoScript (main/objects/Gamepad.cpp).
 extern Object* (*W3dObjetivoHook)(Object* duenio);

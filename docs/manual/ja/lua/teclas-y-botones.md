@@ -1,0 +1,17 @@
+# キーとボタンの名前
+
+## `tecla`と`teclaApretada`用
+
+| 環境 | 名前 |
+|---|---|
+| PC、Android、Web | `"a"` … `"z"`（小文字）、`"0"` … `"9"`、`"arriba"`、`"abajo"`、`"izquierda"`、`"derecha"`、`"espacio"`、`"enter"`、`"shift"`、`"ctrl"` |
+| Nokia N95（電話のキーパッド） | `"arriba"`、`"abajo"`、`"izquierda"`、`"derecha"`、`"enter"`（方向キーの中央は`"espacio"`も送ります）、`"softizq"`、`"softder"`、`"0"` … `"9"`、`"*"`、`"#"` |
+
+> [!NOTE]
+> Escの名前はありません：エディターでは、Escはゲームを一時停止してマウスを解放します。FキーとTabもありません。
+
+## `boton`と`botonApretado`用（ゲームパッド）
+
+`"a"`、`"b"`、`"x"`、`"y"`、`"arriba"`、`"abajo"`、`"izquierda"`、`"derecha"`（十字キー）。十字キーは、スティックが動いていないときは`stick("izq")`も動かします。
+
+さらに：`"l1"`、`"r1"`（ショルダーボタン）、`"l2"`、`"r2"`（ボタンとして扱うトリガー：半分以上押し込むと押された扱いになります。アナログ値には`gatillo`を使います）、`"l3"`、`"r3"`（スティックの押し込み）、`"start"`、`"select"`。名前はPlayStationのゲームパッドに合わせています。Xboxのゲームパッドでは、LB / RB、LT / RT、Backです。文字はボタンの刻印ではなく位置を表します：`"a"`は下（×ボタン）、`"b"`は右（○ボタン）、`"x"`は左（□ボタン）、`"y"`は上（△ボタン）です。

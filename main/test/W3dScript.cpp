@@ -1,5 +1,7 @@
 #include "ViewPorts/PopUp/AtajosPopup.h"
 #include "WhiskUI/widgets/PopupMenu.h"
+#include "ViewPorts/PopUp/ConfirmarPopup.h"
+#include "ViewPorts/PopUp/BuscarPopup.h"
 #include "app/W3dAtajos.h"   // atajos reasignables (atajo*, teclareal)
 #include "test/W3dScript.h"
 #include "test/W3dPruebasRecursos.h" // los comandos de recursos/carga/formatos (archivo aparte: compila rapido)
@@ -8035,6 +8037,21 @@ bool W3dRunCommand(const std::string& linea, std::string& err) {
         if (n.empty()) { err = "teclajuego: falta el nombre de la tecla"; return false; }
         W3dScriptTecla(n.c_str(), e != "off");
         printf("      [teclajuego] '%s' %s\n", n.c_str(), e != "off" ? "on" : "off");
+        return true;
+    }
+    // ---- toquejuego <x> <y> on|off : el clic / dedo 1 del juego (toque() y dedo(1) en lua) en px del LIENZO (centro 0,0,
+    //      y hacia abajo), el mismo camino que SimToquePantalla. ratonjuego <x> <y> [0|1] : la posicion del mouse (raton()) ----
+    if (cmd == "toquejuego") {
+        float x = 0, y = 0; std::string e; ss >> x >> y >> e;
+        extern void W3dScriptToque(float, float, bool);
+        W3dScriptToque(x, y, e != "off");
+        printf("      [toquejuego] %.1f %.1f %s\n", x, y, e != "off" ? "on" : "off");
+        return true;
+    }
+    if (cmd == "ratonjuego") {
+        float x = 0, y = 0; int d = 1; ss >> x >> y >> d;
+        extern void W3dScriptRaton(float, float, bool);
+        W3dScriptRaton(x, y, d != 0);
         return true;
     }
     // ---- ratonrel <dx> <dy> : inyecta movimiento de mouse CAPTURADO (lo que main.cpp saca de SDL_GetRelativeMouseState)
@@ -23737,6 +23754,110 @@ bool W3dRunCommand(const std::string& linea, std::string& err) {
     //      con keyword + string + numero + comentario), la barra por ROLES con el
     //      camino REAL del click (LayoutClickBarraIDE abre el selector y marca el
     //      abierto) y el round-trip del LAYOUT (guardar .w3d con un IDE y reabrirlo). ----
+    // ---- ideutf8 : el editor de scripts con letras de mas de un byte (n~, acentos). Se tipean, el cursor salta la
+    //      letra ENTERA, Backspace/Supr borran la letra entera, arriba/abajo conserva la columna en pantalla y pegar
+    //      las deja pasar (antes el editor descartaba todo lo que no fuera ASCII) ----
+    if (cmd == "ideutf8") {
+        IDE* ide = new IDE();
+        ide->x = 0; ide->y = 0; ide->Resize(900, 600);
+        bool ok = true;
+        #define IDEUTF8_VER(cond, que) do { const bool _c = (cond); printf("      [ideutf8] %-46s %s\n", que, _c ? "OK" : "MAL"); if (!_c) ok = false; } while (0)
+        ide->SetTexto("a\nb");
+        ide->CursorA(0, 1, false);
+        ide->TextoTipeado("\xc3\xb1");                         // n~ (UTF-8)
+        IDEUTF8_VER(ide->GetTexto() == "a\xc3\xb1\nb" && ide->curCol == 3, "tipear la n~ (2 bytes, el cursor despues)");
+        ide->TextoTipeado("\xc3\xb3");                         // o con acento
+        ide->MoverCursor(0, -1, false);
+        IDEUTF8_VER(ide->curCol == 3, "flecha izquierda salta la letra entera");
+        ide->Backspace();                                       // borra la n~ entera
+        IDEUTF8_VER(ide->GetTexto() == "a\xc3\xb3\nb" && ide->curCol == 1, "Backspace borra la letra entera");
+        ide->DelForward();                                      // borra la o con acento entera
+        IDEUTF8_VER(ide->GetTexto() == "a\nb", "Supr borra la letra entera");
+        ide->SetTexto("\xc3\xb1" "and" "\xc3\xba" "\nabcdef");             // "n~andu'" / "abcdef"
+        ide->CursorA(0, 0, false);
+        for (int k = 0; k < 3; k++) ide->MoverCursor(0, +1, false);   // 3 letras: n~, a, n
+        IDEUTF8_VER(ide->curCol == 4, "tres flechas = tres letras (4 bytes)");
+        ide->MoverCursor(+1, 0, false);
+        IDEUTF8_VER(ide->curLin == 1 && ide->curCol == 3, "abajo conserva la columna en pantalla");
+        ide->SetTexto("");
+        ide->InsertarTexto("a\xc3\xb1o\tz");                      // lo que pega Pegar (ya filtrado)
+        IDEUTF8_VER(ide->GetTexto() == "a\xc3\xb1o    z", "insertar texto con n~ (el tab pasa a 4 espacios)");
+        ide->SetTexto("x");
+        ide->CursorA(0, 1, false);
+        ide->TextoTipeado("\x01\xc2\xbfqu\xc3\xa9?");             // un caracter de control + "?que'?" invertido
+        IDEUTF8_VER(ide->GetTexto() == "x\xc2\xbfqu\xc3\xa9?", "los de control se descartan, los acentos no");
+        #undef IDEUTF8_VER
+        delete ide;
+        if (!ok) { err = "ideutf8: el editor no maneja bien las letras UTF-8"; return false; }
+        return true;
+    }
+    // ---- idetab : el TAB del editor de scripts como en los editores de codigo (tope de 4, sangria de varias lineas,
+    //      Shift+Tab, Backspace por nivel dentro de la sangria) ----
+    if (cmd == "idetab") {
+        IDE* ide = new IDE();
+        ide->x = 0; ide->y = 0; ide->Resize(900, 600);
+        bool ok = true;
+        #define IDETAB_VER(cond, que) do { const bool _c = (cond); printf("      [idetab] %-50s %s\n", que, _c ? "OK" : "MAL"); if (!_c) ok = false; } while (0)
+        ide->SetTexto("ab"); ide->CursorA(0, 2, false); ide->TabKey(false);
+        IDETAB_VER(ide->GetTexto() == "ab  " && ide->curCol == 4, "Tab completa hasta el tope de 4");
+        ide->SetTexto("a\nb\n\nc"); ide->CursorA(0, 0, false); ide->CursorA(3, 1, true); ide->TabKey(false);
+        IDETAB_VER(ide->GetTexto() == "    a\n    b\n\n    c", "Tab con varias lineas: un nivel mas (las vacias no)");
+        ide->TabKey(true);
+        IDETAB_VER(ide->GetTexto() == "a\nb\n\nc", "Shift+Tab lo saca");
+        ide->SetTexto("      x"); ide->CursorA(0, 7, false); ide->TabKey(true);
+        IDETAB_VER(ide->GetTexto() == "    x" && ide->curCol == 5, "Shift+Tab en una linea: hasta el tope anterior");
+        ide->SetTexto("      x"); ide->CursorA(0, 6, false); ide->Backspace();
+        IDETAB_VER(ide->GetTexto() == "    x", "Backspace en la sangria borra hasta el tope");
+        ide->Backspace();
+        IDETAB_VER(ide->GetTexto() == "x", "otro Backspace: un nivel entero");
+        ide->SetTexto("ab x"); ide->CursorA(0, 4, false); ide->Backspace();
+        IDETAB_VER(ide->GetTexto() == "ab ", "fuera de la sangria borra una sola letra");
+        #undef IDETAB_VER
+        delete ide;
+        if (!ok) { err = "idetab: el tab del editor no quedo como se pidio"; return false; }
+        return true;
+    }
+    // ---- iderefresh : Refresh TRAE el archivo (lo editado con otro editor) y Guardar no pisa lo editado afuera sin
+    //      preguntar. Con un .lua externo de verdad en /tmp que se cambia "desde afuera" entre paso y paso. ----
+    if (cmd == "iderefresh") {
+        const char* ruta = "/tmp/w3d_prueba_refresh.lua";
+        struct F { static void Escribir(const char* r, const char* t) { FILE* f = fopen(r, "wb"); if (f) { fputs(t, f); fclose(f); } }
+                   static std::string Leer(const char* r) { std::string o; FILE* f = fopen(r, "rb"); if (f) { char b[256]; size_t n; while ((n = fread(b, 1, sizeof b, f)) > 0) o.append(b, n); fclose(f); } return o; } };
+        F::Escribir(ruta, "a = 1");
+        IDE* ide = new IDE();
+        ide->x = 0; ide->y = 0; ide->Resize(900, 600);
+        bool ok = true;
+        #define IDEREF_VER(cond, que) do { const bool _c = (cond); printf("      [iderefresh] %-58s %s\n", que, _c ? "OK" : "MAL"); if (!_c) ok = false; } while (0)
+        ide->AbrirArchivo(ruta);
+        F::Escribir(ruta, "a = 2");                                    // otro editor lo cambia
+        ide->Refresh();
+        IDEREF_VER(ide->GetTexto() == "a = 2" && F::Leer(ruta) == "a = 2", "sin cambios locales: trae lo editado afuera");
+        ide->CursorA(0, 5, false); ide->InsertarTexto(" -- local");
+        F::Escribir(ruta, "a = 3");
+        ide->Refresh();
+        IDEREF_VER(PopUpActive == confirmarPopup && ide->GetTexto() == "a = 2 -- local" && F::Leer(ruta) == "a = 3",
+                   "con cambios locales: pregunta y no toca nada");
+        PopUpActive = NULL;
+        ide->Refresh(true);                                            // "Si, descartarlos"
+        IDEREF_VER(ide->GetTexto() == "a = 3" && !ide->sucio && F::Leer(ruta) == "a = 3", "confirmado: trae el archivo (no lo pisa)");
+        ide->DeshacerTexto();
+        IDEREF_VER(ide->GetTexto() == "a = 2 -- local", "Ctrl+Z recupera lo local descartado");
+        ide->Refresh(true);
+        ide->CursorA(0, 5, false); ide->InsertarTexto(" -- mio");
+        F::Escribir(ruta, "a = 4");                                    // otro editor lo cambia mientras tanto
+        const bool guardo = ide->Guardar();
+        IDEREF_VER(!guardo && PopUpActive == confirmarPopup && F::Leer(ruta) == "a = 4", "Guardar: si cambio afuera, pregunta antes de pisar");
+        PopUpActive = NULL;
+        ide->Guardar(true);                                            // "Si, sobrescribir"
+        IDEREF_VER(F::Leer(ruta) == "a = 3 -- mio", "confirmado: guarda lo del editor");
+        ide->InsertarTexto("!");
+        IDEREF_VER(ide->Guardar() && F::Leer(ruta) == "a = 3 -- mio!", "sin cambios afuera: guarda sin preguntar");
+        #undef IDEREF_VER
+        delete ide;
+        PopUpActive = NULL;
+        if (!ok) { err = "iderefresh: Refresh / Guardar no se comportan como se pidio"; return false; }
+        return true;
+    }
     if (cmd == "idetest") {
         extern PopupMenu* MenuAbierto;
         bool ok = true;
@@ -29794,6 +29915,120 @@ bool W3dRunCommand(const std::string& linea, std::string& err) {
         if (ve != esp) { err = "menuatajo: " + hint + " muestra '" + ve + "', se esperaba '" + esp + "'"; return false; }
         return true;
     }
+    // ---- textoreal <vista> <texto> : texto TIPEADO por la misma puerta que el teclado (SDL_TEXTINPUT), con el foco en
+    //      el viewport <vista> (3d uv timeline outliner 2d props ide) ----
+    if (cmd == "textoreal") {
+        std::string vista; ss >> vista;
+        std::string t; std::getline(ss, t); while (!t.empty() && t[0] == ' ') t.erase(0, 1);
+        const int kind = vista == "3d" ? 1 : vista == "outliner" ? 2 : vista == "props" ? 3 : vista == "uv" ? 4 : vista == "timeline" ? 5 : vista == "2d" ? 6 : vista == "ide" ? 8 : -1;
+        struct VK { static ViewportBase* Buscar(ViewportBase* n, int k) { if (!n) return NULL; if (n->isLeaf()) return n->ViewportKind() == k ? n : NULL;
+                        ViewportBase* a = Buscar(((ViewportColumn*)n)->childA, k); if (a) return a; return Buscar(((ViewportColumn*)n)->childB, k); } };
+        ViewportBase* vp = VK::Buscar(rootViewport, kind);
+        if (!vp) { err = "textoreal: no hay un viewport '" + vista + "'"; return false; }
+        const bool congelado = ViewPortClickDown;
+        viewPortActive = vp; ViewPortClickDown = true;
+        extern void InputUsuarioSDL3(SDL_Event&);
+        SDL_Event ev; memset(&ev, 0, sizeof(ev)); ev.type = SDL_TEXTINPUT;
+        strncpy(ev.text.text, t.c_str(), sizeof(ev.text.text) - 1);
+        InputUsuarioSDL3(ev);
+        if (!congelado) ViewPortClickDown = false;
+        if (rootViewport) rootViewport->Render();
+        if (PopUpActive) PopUpActive->Render();
+        printf("      [textoreal] %s '%s'\n", vista.c_str(), t.c_str());
+        return true;
+    }
+    // ---- idever <buscarAbierto 0|1> <texto que tiene que contener el script> ----
+    // ---- idetactil : el editor de scripts con el DEDO, por la misma puerta que la pantalla tactil (botones con
+    //      which = SDL_TOUCH_MOUSEID): doble toque = palabra, triple = renglon, pulsacion larga = lupa que mueve el
+    //      cursor, y las agarraderas de la seleccion se arrastran ----
+    if (cmd == "idetactil") {
+        struct VK { static ViewportBase* Buscar(ViewportBase* n, int k) { if (!n) return NULL; if (n->isLeaf()) return n->ViewportKind() == k ? n : NULL;
+                        ViewportBase* a = Buscar(((ViewportColumn*)n)->childA, k); if (a) return a; return Buscar(((ViewportColumn*)n)->childB, k); } };
+        IDE* ide = (IDE*)VK::Buscar(rootViewport, 8);
+        if (!ide) { err = "idetactil: no hay IDE en el layout (vpkind 1 7)"; return false; }
+        struct Ev {
+            static void Boton(Uint32 tipo, int x, int y) { extern void InputUsuarioSDL3(SDL_Event&);
+                SDL_Event ev; memset(&ev, 0, sizeof(ev)); ev.type = tipo; ev.button.button = SDL_BUTTON_LEFT; ev.button.which = SDL_TOUCH_MOUSEID;
+                ev.button.x = x; ev.button.y = y; ev.button.clicks = 1; ev.button.state = (tipo == SDL_MOUSEBUTTONDOWN) ? SDL_PRESSED : SDL_RELEASED;
+                InputUsuarioSDL3(ev); }
+            static void Mover(int x, int y) { extern void InputUsuarioSDL3(SDL_Event&);
+                SDL_Event ev; memset(&ev, 0, sizeof(ev)); ev.type = SDL_MOUSEMOTION; ev.motion.which = SDL_TOUCH_MOUSEID; ev.motion.state = SDL_BUTTON_LMASK;
+                ev.motion.x = x; ev.motion.y = y; InputUsuarioSDL3(ev); }
+            static void Toque(int x, int y) { Boton(SDL_MOUSEBUTTONDOWN, x, y); Boton(SDL_MOUSEBUTTONUP, x, y); }
+        };
+        extern Uint32 g_lastFingerTicks; g_lastFingerTicks = SDL_GetTicks();   // la pantalla es tactil
+        bool ok = true;
+        #define ITC_VER(cond, que) do { const bool _c = (cond); printf("      [idetactil] %-52s %s\n", que, _c ? "OK" : "MAL"); if (!_c) ok = false; } while (0)
+        ide->SetTexto("local velocidad = 10\nprint(velocidad)\nfin");
+        rootViewport->Render();
+        int px, py;
+        ide->TextoAPunto(0, 9, &px, &py);                     // adentro de "velocidad"
+        Ev::Toque(px, py); Ev::Toque(px, py);
+        ITC_VER(ide->TextoSeleccionado() == "velocidad", "doble toque: la palabra");
+        Ev::Toque(px, py);
+        ITC_VER(ide->TextoSeleccionado() == "local velocidad = 10\n", "triple toque: el renglon");
+        SDL_Delay(500);                                        // (que el proximo toque no cuente como cuarto)
+        // pulsacion larga: la lupa; el cursor sigue al dedo (antes, un toque suelto saca la seleccion)
+        ide->TextoAPunto(1, 12, &px, &py); Ev::Toque(px, py);   // (lejos de las agarraderas, que cuelgan sobre el renglon de abajo)
+        SDL_Delay(500);
+        ide->TextoAPunto(1, 2, &px, &py);
+        Ev::Boton(SDL_MOUSEBUTTONDOWN, px, py);
+        SDL_Delay(600);
+        extern void ControlesTick(); ControlesTick();
+        ITC_VER(ide->gestoTactil == 1 && ide->curLin == 1 && ide->curCol == 2, "pulsacion larga: la lupa, el cursor en el dedo");
+        rootViewport->Render();
+        int qx, qy; ide->TextoAPunto(1, 8, &qx, &qy);
+        Ev::Mover(qx, qy);
+        ITC_VER(ide->curCol == 8, "arrastrando: el cursor sigue al dedo (no desplaza)");
+        Ev::Boton(SDL_MOUSEBUTTONUP, qx, qy);
+        ITC_VER(ide->gestoTactil == 0 && ide->curCol == 8 && !ide->haySel, "al soltar el cursor queda ahi");
+        SDL_Delay(500);
+        // agarraderas: se selecciona "print" y se estira la punta del final hasta "print(velocidad"
+        ide->TextoAPunto(1, 2, &px, &py);
+        Ev::Toque(px, py); Ev::Toque(px, py);
+        ITC_VER(ide->TextoSeleccionado() == "print", "doble toque en 'print'");
+        const int lh = (RenglonHeightGS > 0) ? RenglonHeightGS : 12, r = 5 * GlobalScale;
+        int ex, ey; ide->TextoAPunto(1, 5, &ex, &ey);         // la punta del final
+        ITC_VER(ide->ManijaEn(ex, ey + lh / 2 + r) == 2, "se ve la agarradera del final");
+        Ev::Boton(SDL_MOUSEBUTTONDOWN, ex, ey + lh / 2 + r);
+        int fx, fy; ide->TextoAPunto(1, 15, &fx, &fy);
+        Ev::Mover(fx, fy + lh / 2 + r);
+        Ev::Boton(SDL_MOUSEBUTTONUP, fx, fy + lh / 2 + r);
+        ITC_VER(ide->TextoSeleccionado() == "print(velocidad", "arrastrar la agarradera estira la seleccion");
+        g_lastFingerTicks = 0;
+        #undef ITC_VER
+        if (!ok) { err = "idetactil: el tactil del editor no se comporta como se pidio"; return false; }
+        return true;
+    }
+    // ---- idevista <lupa lin col | sel lin0 col0 lin1 col1 | lapiz 0|1> : deja el IDE en un estado para mirarlo (capturas) ----
+    if (cmd == "idevista") {
+        std::string que; ss >> que;
+        struct VK { static ViewportBase* Buscar(ViewportBase* n, int k) { if (!n) return NULL; if (n->isLeaf()) return n->ViewportKind() == k ? n : NULL;
+                        ViewportBase* a = Buscar(((ViewportColumn*)n)->childA, k); if (a) return a; return Buscar(((ViewportColumn*)n)->childB, k); } };
+        IDE* ide = (IDE*)VK::Buscar(rootViewport, 8);
+        if (!ide) { err = "idevista: no hay IDE en el layout"; return false; }
+        extern Uint32 g_lastFingerTicks; g_lastFingerTicks = SDL_GetTicks();   // pantalla tactil (las agarraderas se ven)
+        rootViewport->Render();
+        if (que == "lupa") { int l = 0, c = 0; ss >> l >> c; int px, py; ide->TextoAPunto(l, c, &px, &py); ide->PulsacionLarga(px, py); }
+        else if (que == "sel") { int l0 = 0, c0 = 0, l1 = 0, c1 = 0; ss >> l0 >> c0 >> l1 >> c1; ide->CursorA(l0, c0, false); ide->CursorA(l1, c1, true); ide->gestoTactil = 0; }
+        else if (que == "lapiz") { int v = 1; ss >> v; viewPortActive = ide; IDELapizSostenido(v != 0); }
+        else { err = "idevista: lupa / sel / lapiz"; return false; }
+        return true;
+    }
+    if (cmd == "idever") {
+        int abierto = -1; ss >> abierto;
+        std::string t; std::getline(ss, t); while (!t.empty() && t[0] == ' ') t.erase(0, 1);
+        struct VK { static ViewportBase* Buscar(ViewportBase* n, int k) { if (!n) return NULL; if (n->isLeaf()) return n->ViewportKind() == k ? n : NULL;
+                        ViewportBase* a = Buscar(((ViewportColumn*)n)->childA, k); if (a) return a; return Buscar(((ViewportColumn*)n)->childB, k); } };
+        IDE* ide = (IDE*)VK::Buscar(rootViewport, 8);
+        if (!ide) { err = "idever: no hay IDE en el layout"; return false; }
+        if (PopUpActive) PopUpActive->Render();   // (el panel se sincroniza al dibujarse, como en cada cuadro del editor)
+        const std::string txt = ide->GetTexto();
+        printf("      [idever] buscar abierto=%d | cuenta '%s' | primera linea: '%s'\n", (int)IDEBuscarAbierto(), IDEBuscarCuenta().c_str(), txt.substr(0, txt.find('\n')).c_str());
+        if (abierto >= 0 && (int)IDEBuscarAbierto() != abierto) { err = "idever: el panel Buscar no esta como se esperaba"; return false; }
+        if (!t.empty() && txt.find(t) == std::string::npos) { err = "idever: el script no contiene '" + t + "'"; return false; }
+        return true;
+    }
     if (cmd == "objvisible") {
         int v = 1; ss >> v;
         if (!ObjActivo) { err = "objvisible: no hay objeto activo"; return false; }
@@ -31017,6 +31252,83 @@ bool W3dRunCommand(const std::string& linea, std::string& err) {
     if (cmd == "trpanel") { std::string v; ss >> v; extern bool g_transformRedoAuto; g_transformRedoAuto = (v != "off" && v != "0"); return true; }
     if (cmd == "trfijar") { int c = 0; float v = 0; ss >> c >> v; if (!TransformRedoFijar(c, v)) { err = "trfijar: el panel no esta abierto"; return false; } return true; }
     if (cmd == "trboton") { int a = 1; ss >> a; TransformRedoBoton(a != 0); return true; }
+    // ---- trpanelscroll : el panel de la ultima transformacion en una pantalla BAJA (se achica MenuPantallaH): se ve a la
+    //      mitad del alto, un arrastre vertical lo desplaza sin tocar las opciones, un toque sigue siendo un click, las
+    //      flechas llevan la fila elegida a la vista, y Esc / Supr cierran ACEPTANDO (el cambio queda) ----
+    if (cmd == "trpanelscroll") {
+        extern TransformRedoPanel* TransformRedoPanelActual();
+        TransformRedoPanel* tp = TransformRedoPanelActual();
+        if (!tp) { err = "trpanelscroll: el panel no esta abierto"; return false; }
+        const int altoAntes = MenuPantallaH;
+        bool ok = true;
+        #define TRS_VER(cond, que) do { const bool _c = (cond); printf("      [trpanelscroll] %-56s %s\n", que, _c ? "OK" : "MAL"); if (!_c) ok = false; } while (0)
+        MenuPantallaH = 300 * GlobalScale / 3;              // pantalla chica: la mitad no alcanza para todas las filas
+        if (rootViewport) rootViewport->Render();
+        tp->Render();
+        TRS_VER(tp->dz.Desplazable() && tp->popUpWindow->height <= MenuPantallaH / 2 + 1, "mas alto que media pantalla: se recorta a la mitad");
+        const int cx = tp->x + tp->popUpWindow->width / 2, cy = tp->y + tp->dz.visible / 2;
+        const int selAntes = tp->grupo->selectIndex;
+        tp->Click(cx, cy); tp->Motion(cx, cy - 40 * GlobalScale); tp->Soltar();
+        TRS_VER(tp->dz.scroll > 0, "arrastre vertical: desplaza");
+        TRS_VER(TransformRedoTipo() >= 0, "...sin cerrar ni tocar las opciones");
+        (void)selAntes;
+        tp->dz.scroll = 0; tp->Render();
+        for (int k = 0; k < 12; k++) tp->Tecla(LayoutKey::Down);
+        tp->Render();
+        { const int s = tp->grupo->selectIndex; const int fy = tp->FilaY(s);
+          TRS_VER(fy >= tp->dz.scroll && fy < tp->dz.scroll + tp->dz.visible, "flechas: la fila elegida queda a la vista"); }
+        tp->Tecla(LayoutKey::Cancel);                        // Esc / Supr / C del telefono
+        TRS_VER(TransformRedoTipo() < 0, "Esc cierra el panel");
+        MenuPantallaH = altoAntes;
+        #undef TRS_VER
+        if (!ok) { err = "trpanelscroll: el panel no se comporta como se pidio"; return false; }
+        return true;
+    }
+    // ---- idebuscartest : el menu Editar del IDE y el panel Buscar / Reemplazar ----
+    if (cmd == "idebuscartest") {
+        IDE* ide = new IDE();
+        ide->x = 0; ide->y = 0; ide->Resize(900, 600);
+        bool ok = true;
+        #define IBT_VER(cond, que) do { const bool _c = (cond); printf("      [idebuscartest] %-52s %s\n", que, _c ? "OK" : "MAL"); if (!_c) ok = false; } while (0)
+        extern void LayoutIDEEditarAccion(IDE*, int);
+        // Editar: deshacer / rehacer
+        ide->SetTexto("abc"); ide->CursorA(0, 3, false); ide->InsertarTexto("d");
+        LayoutIDEEditarAccion(ide, 1);   // deshacer
+        IBT_VER(ide->GetTexto() == "abc", "Editar > Deshacer");
+        LayoutIDEEditarAccion(ide, 2);   // rehacer
+        IBT_VER(ide->GetTexto() == "abcd", "Editar > Rehacer");
+        LayoutIDEEditarAccion(ide, 8);   // seleccionar todo
+        IBT_VER(ide->TextoSeleccionado() == "abcd", "Seleccionar > Todo");
+        // Buscar / Reemplazar
+        ide->SetTexto("local a\xc3\xb1o = 1\nlocal A\xc3\xb1o = a\xc3\xb1o + 2\nprint(a\xc3\xb1o)");
+        ide->CursorA(0, 0, false);
+        LayoutIDEEditarAccion(ide, 7);   // Reemplazar...
+        IBT_VER(IDEBuscarAbierto(), "Editar > Reemplazar abre el panel");
+        const std::string de = std::string(" ") + T("of") + " ";
+        IDEBuscarFijar("a\xc3\xb1o", "anio", 0, 0);           // sin distinguir mayusculas: 4 (incluye "An~o")
+        IBT_VER(IDEBuscarCuenta() == "1" + de + "4", "buscar sin distinguir mayusculas (la N~ tambien)");
+        IDEBuscarBoton(1);
+        IBT_VER(IDEBuscarCuenta() == "2" + de + "4", "Siguiente");
+        IDEBuscarBoton(0);
+        IBT_VER(IDEBuscarCuenta() == "1" + de + "4", "Anterior");
+        IDEBuscarFijar("a\xc3\xb1o", "anio", 1, 0);           // distinguiendo mayusculas: 3
+        IBT_VER(IDEBuscarCuenta() == "1" + de + "3", "Mayusculas y minusculas");
+        IDEBuscarBoton(2);                                       // reemplaza la actual y pasa a la siguiente
+        IBT_VER(ide->GetTexto().substr(0, 14) == "local anio = 1", "Reemplazar (la actual)");
+        IDEBuscarBoton(3);                                       // reemplazar todo
+        IBT_VER(ide->GetTexto() == "local anio = 1\nlocal A\xc3\xb1o = anio + 2\nprint(anio)", "Reemplazar todo");
+        ide->DeshacerTexto();
+        IBT_VER(ide->GetTexto() == "local anio = 1\nlocal A\xc3\xb1o = a\xc3\xb1o + 2\nprint(a\xc3\xb1o)", "Reemplazar todo es UN paso de deshacer");
+        IDEBuscarFijar("a", "", 0, 1);                           // palabra completa: ninguna "a" suelta
+        IBT_VER(IDEBuscarCuenta() == T("No results"), "Palabra completa");
+        IDEBuscarBoton(4);
+        IBT_VER(!IDEBuscarAbierto(), "Cerrar");
+        #undef IBT_VER
+        delete ide;
+        PopUpActive = NULL;
+        if (!ok) { err = "idebuscartest: Editar / Buscar no se comportan como se pidio"; return false; }
+        return true;
+    }
     if (cmd == "trinfo") {
         std::string e; ss >> e;
         const int t = TransformRedoTipo();
@@ -31143,6 +31455,23 @@ bool W3dRunCommand(const std::string& linea, std::string& err) {
         EV::Boton(SDL_MOUSEBUTTONDOWN, X0, Y0, SDL_TOUCH_MOUSEID); EV::Boton(SDL_MOUSEBUTTONUP, X0, Y0, SDL_TOUCH_MOUSEID);
         printf("      [gizmomodos] toque -> modo=%d (mover=0)\n", GizmoModo());
         if (GizmoModo() != GizmoModoMover) ok = false;
+        // (5) un click "torpe" con el mouse (como con el touchpad): el puntero se corre unos pixeles y queda apretado
+        //     medio segundo. Sigue siendo un click: modo siguiente, sin mover nada ni dejar paso de undo
+        rootViewport->Render();
+        GizmoManijaEnPantalla(vp, GizmoCentro, sx, sy);
+        X0 = vp->x + (int)sx; Y0 = vp->y + (int)sy;
+        {
+            const Vector3 posT = ObjActivo->pos; const void* undoT = UndoUltimo();
+            const int corr = 6 * (GlobalScale > 0 ? GlobalScale : 1);
+            EV::Mover(X0, Y0); EV::Boton(SDL_MOUSEBUTTONDOWN, X0, Y0, 0);
+            EV::Mover(X0 + corr / 2, Y0); EV::Mover(X0 + corr, Y0);
+            SDL_Delay(500);
+            EV::Boton(SDL_MOUSEBUTTONUP, X0 + corr, Y0, 0);
+            const bool quietoT = (ObjActivo->pos - posT).Length() < 1e-5f && UndoUltimo() == undoT;
+            printf("      [gizmomodos] click torpe (%d px, 500 ms) -> modo=%d (rotar=1) sin cambios=%d\n", corr, GizmoModo(), quietoT);
+            if (GizmoModo() != GizmoModoRotar || !quietoT) ok = false;
+            GizmoSetModo(GizmoModoMover);
+        }
         if (!ok) { err = "gizmomodos: el gizmo no se comporto como se esperaba"; return false; }
         return true;
 #else
@@ -31376,6 +31705,17 @@ bool W3dRunCommand(const std::string& linea, std::string& err) {
     }
     // ---- idecargar ruta.lua [esperado] : "Load .lua..." del primer IDE del layout; con 'esperado' la ruta abierta tiene que
     //      ser esa (p.ej. scripts/x.lua = quedo importado adentro del proyecto). Imprime la ruta y la primera linea ----
+    // ---- idecursor <linea> <columna> : pone el cursor del IDE del layout (lineas y columnas desde 0) ----
+    if (cmd == "idecursor") {
+        int lin = 0, col = 0; ss >> lin >> col;
+        struct VK { static ViewportBase* Buscar(ViewportBase* n, int k) { if (!n) return NULL; if (n->isLeaf()) return n->ViewportKind() == k ? n : NULL;
+                        ViewportBase* a = Buscar(((ViewportColumn*)n)->childA, k); if (a) return a; return Buscar(((ViewportColumn*)n)->childB, k); } };
+        IDE* ide = (IDE*)VK::Buscar(rootViewport, 8);
+        if (!ide) { err = "idecursor: no hay IDE en el layout"; return false; }
+        ide->CursorA(lin, col, false);
+        printf("      [idecursor] linea %d, columna %d\n", ide->curLin, ide->curCol);
+        return true;
+    }
     if (cmd == "idecargar") {
         std::string ruta, esperado; ss >> ruta >> esperado;
         struct VK { static ViewportBase* Buscar(ViewportBase* n, int k) { if (!n) return NULL; if (n->isLeaf()) return n->ViewportKind() == k ? n : NULL;
