@@ -5,7 +5,8 @@
 #
 #  Una curva HORNEADA (frames regulares, la misma interpolacion y el mismo tipo de handle en todas, los
 #  handles guardados en cero: lo que trae un glTF importado, un keyframe por frame) leida de un .w3da queda
-#  COMPACTA: ~4 B por clave en vez de los 32 de un keyFrame. Se prueba:
+#  COMPACTA: ~4 B por clave en vez de los 32 de un keyFrame. Una con los frames IRREGULARES y lo demas igual (la
+#  horneada y reducida) tambien: ~8 B por clave (su frame y su valor). Se prueba:
 #    - al abrir quedan compactas (menos de 5 B por clave) y no se expande ninguna; copiar (la VARIANTE de
 #      un esqueleto con los huesos en otro orden, el copy-on-write del que edita) las copia compactas;
 #    - evaluar da LO MISMO, bit a bit: la foto de la pose (editor y cabezal continuo del juego) con las
@@ -30,21 +31,21 @@ posefoto claves_comunes.pose juego 1
 animsetsw3d /tmp/w3d_claves_v.w3d animsets 2 clips 4 armatures 3
 animsetapuntar /tmp/w3d_claves_v.w3d /tmp/w3d_claves_a.w3d Invertido Horneado
 
-# ---- B) al abrir quedan COMPACTAS: 38 curvas (22 de "Largo" + 16 de "Corto"), UNA copia para los dos
-#         "Horneado", y otras 38 en la VARIANTE de "Invertido" (la copia reindexada se copia compacta), a
-#         menos de 5 B por clave. Ninguna se expande. ----
+# ---- B) al abrir quedan COMPACTAS: 39 curvas (23 de "Largo" -22 regulares y la irregular- + 16 de "Corto"), UNA
+#         copia para los dos "Horneado", y otras 39 en la VARIANTE de "Invertido" (la copia reindexada se copia
+#         compacta), a menos de 5 B por clave. Ninguna se expande. ----
 abrirw3d /tmp/w3d_claves_a.w3d
-clavesinfo marca compactas 76 maxbpc 5
+clavesinfo marca compactas 78 maxbpc 5
 animsetinfo vivos 1 refs 3 clips 2 variantes 1 clipsvariante 2
 meminfo
 # la MISMA pose, bit a bit, en el editor y con el cabezal continuo del juego
 posefoto claves_compactas.pose juego 1
 posefotoigual claves_comunes.pose claves_compactas.pose
 # cada curva contra la evaluacion de antes (y contra una copia comun con las mismas claves): mirar no expande
-clavescomparar Horneado compactas 38
-clavescomparar Horneado.001 compactas 38 paso 0.0625
-clavescomparar Invertido compactas 38
-clavesinfo nuevas 0 compactas 76
+clavescomparar Horneado compactas 39
+clavescomparar Horneado.001 compactas 39 paso 0.0625
+clavescomparar Invertido compactas 39
+clavesinfo nuevas 0 compactas 78
 animsetsellos clips 4
 
 # ---- C) JUGAR: modo juego, unos cuadros simulados y dibujados, la pose de todos los clips en el cabezal del
@@ -56,16 +57,16 @@ simplay 7
 glaudit 2
 posefoto claves_juego.pose juego 1
 juego off
-clavesinfo nuevas 0 compactas 76
+clavesinfo nuevas 0 compactas 78
 posefoto claves_despues.pose juego 1
 posefotoigual claves_comunes.pose claves_despues.pose
 
 # ---- D) guardar SIN editar: los mismos bytes del .w3da (escrito desde las compactas, sin expandirlas) ----
 guardarw3d /tmp/w3d_claves_b.w3d
 w3diguales /tmp/w3d_claves_a.w3d /tmp/w3d_claves_b.w3d animaciones/
-clavesinfo nuevas 0 compactas 76
+clavesinfo nuevas 0 compactas 78
 abrirw3d /tmp/w3d_claves_b.w3d
-clavesinfo marca compactas 76
+clavesinfo marca compactas 78
 guardarw3d /tmp/w3d_claves_c.w3d
 w3diguales /tmp/w3d_claves_b.w3d /tmp/w3d_claves_c.w3d
 clavesinfo nuevas 0
@@ -79,8 +80,8 @@ animsetarm Horneado compartido 0
 animsetarm Horneado.001 compartido 1
 # los clips de los otros armatures siguen compactos y sellados
 animsetsellos clips 4
-clavescomparar Horneado.001 compactas 38
-clavescomparar Invertido compactas 38
+clavescomparar Horneado.001 compactas 39
+clavescomparar Invertido compactas 39
 # el dope sheet de verdad (mover / borrar / Ctrl+Z) sobre una curva compacta: anda como siempre
 animsetdope Horneado.001 1 mover compartido 0 copias 1
 animsetdope Horneado.001 1 undo compartido 0

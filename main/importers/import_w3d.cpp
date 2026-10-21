@@ -1513,6 +1513,8 @@ void BuildScene(Node* root){
     }
     w3dEngine::SetTexturas16Siempre(root->props.count("texturas16") &&
                                     (w3dMapAt(root->props, "texturas16") == "true" || w3dMapAt(root->props, "texturas16") == "1"));
+    w3dEngine::SetTexturas16Movil(root->props.count("texturas16Movil") &&
+                                  (w3dMapAt(root->props, "texturas16Movil") == "true" || w3dMapAt(root->props, "texturas16Movil") == "1"));
     w3dEngine::SetTexturasMitadDesde(GetIntOrDefault(root->props, "texturasMitadDesde", 0));   // (en el N95)
     // MALLAS SOLO EN GPU (ausente = false): las que solo dibujan rutinas sueltan su RAM al quedar en VBO (MallaRecurso.h)
     W3dMallasSoloGPUActivar(root->props.count("mallasSoloGPU") &&
@@ -4395,6 +4397,7 @@ static bool AbrirEscenaJson(const char* datos, size_t n, const std::string& base
     { JVal* jm = JHijo(raiz, "mipmaps", 3); if (jm) w3dEngine::SetMipmapsGlobal(jm->b); }
     // TEXTURAS DE 16 BITS (ausente = solo las exactas). Antes de la cola diferida: gobierna esta carga
     { JVal* j16 = JHijo(raiz, "texturas16", 3); w3dEngine::SetTexturas16Siempre(j16 && j16->b); }
+    { JVal* j16 = JHijo(raiz, "texturas16Movil", 3); w3dEngine::SetTexturas16Movil(j16 && j16->b); }
     // TEXTURAS A LA MITAD EN EL N95 (ausente = 0, ninguna): un lado mayor a este se sube a la mitad. Idem: antes de la cola
     w3dEngine::SetTexturasMitadDesde(JI(raiz, "texturasMitadDesde", 0));
     // MALLAS SOLO EN GPU (ausente = false): las que solo dibujan rutinas sueltan su RAM al quedar en VBO (MallaRecurso.h)
