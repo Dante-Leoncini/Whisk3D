@@ -218,6 +218,10 @@ static void PlanoAEspacioLocal(const Matrix4& W, const float* mundo, float* out)
 // ---------------------------------------------------------------------------
 bool Mirror::TargetSeRefleja(Object* tg) const {
     if (!tg || !tg->visible) return false;
+    // una malla que dibuja una RUTINA: se refleja solo si la rutina la dibujo en este cuadro o en el anterior (paso su
+    // prueba de visibilidad). Lo que esta lejos no se refleja (ni se marca el estencil por el)
+    if (tg->getType() == ObjectType::mesh && ((Mesh*)tg)->soloRutina && g_w3dPase - ((Mesh*)tg)->paseDibujado > 1)
+        return false;
     if (!Recorta()) return true;    // espejo sin recorte: todo target visible se refleja
 
     // NADA de descartar por el rectangulo: un espejo refleja tambien lo que
@@ -290,6 +294,8 @@ bool Mirror::TargetSeRefleja(Object* tg) const {
 void Mirror::RenderObject() {
     namespace gfx = w3dEngine;
     if (TargetsVivos() == 0 || (!mirrorX && !mirrorY && !mirrorZ)) return;
+    // ningun objetivo para reflejar (todos lejos u ocultos): ni el estencil
+    { bool alguno = false; for (int t = 0; t < TargetsVivos() && !alguno; t++) alguno = TargetSeRefleja(TargetVivo(t)); if (!alguno) return; }
 
     Matrix4 W; GetWorldMatrix(W);
     Matrix4 Winv; bool hayInv = Matrix4::InvertirAfin(W, Winv);
@@ -500,6 +506,7 @@ void Mirror::RenderObject() {
     // y fuera de la mascara.
     const bool decalInlineAntes = w3dDecalesInline;
     w3dDecalesInline = true;
+    w3dReflejando = true;   // (un objetivo soloRutina: Mesh::RenderSoloRutinaReflejo)
 
     const int nT = TargetsVivos();
     for (int t = 0; t < nT; t++) {
@@ -532,6 +539,7 @@ void Mirror::RenderObject() {
     }
 
     w3dDecalesInline = decalInlineAntes;
+    w3dReflejando = false;
     if (nPlanos > 0) gfx::PlanosRecorte(0, NULL);
     if (!zNormal && sinProfundidad) {
         gfx::w3dPaseEspejoSinZ = false;

@@ -4944,9 +4944,11 @@ void Mesh::AplicarCapasAlRender() {
 // los de la 1, ... (cada cara en su orden de faces3d), y despues Forsyth por parte. grupoDe[f] =
 // la parte de la cara f (-1 = la cara no entra). Lo usan ReagruparMeshParts (la malla viva) y
 // W3dMallaIndicesCanonicos (el .w3db, sin tocar la malla): el MISMO codigo da el MISMO buffer.
+// 'optimizar' = false: los triangulos quedan en el orden de las caras (una malla cuyos ids de triangulo son un contrato:
+// la oclusion por triangulo, ver OrdenEsContrato)
 static void ArmarIndicesPorParte(const float* vertex, int nV, const std::vector<MeshFace>& caras,
                                  const std::vector<int>& grupoDe, int nGrupos, std::vector<MeshIndex>& tris,
-                                 std::vector<int>& ini, std::vector<int>& cnt) {
+                                 std::vector<int>& ini, std::vector<int>& cnt, bool optimizar) {
     tris.clear(); ini.assign((size_t)nGrupos, 0); cnt.assign((size_t)nGrupos, 0);
     for (int gi=0; gi<nGrupos; gi++){
         ini[(size_t)gi] = (int)tris.size();
@@ -4955,8 +4957,15 @@ static void ArmarIndicesPorParte(const float* vertex, int nV, const std::vector<
         cnt[(size_t)gi] = (int)tris.size() - ini[(size_t)gi];
     }
     // reordena los triangulos de cada mesh part para el cache de vertices (no cambia la geometria)
-    if (nGrupos > 0 && !tris.empty())
+    if (optimizar && nGrupos > 0 && !tris.empty())
         OptimizarCacheIndices(&tris[0], (int)tris.size(), &ini[0], &cnt[0], nGrupos, nV);
+}
+
+// el ORDEN de los triangulos es un contrato: los .w3dvis / .pvs.json del modificador Oclusion nombran triangulos por su
+// lugar en el .obj de origen (y una malla noEditable es un escenario que viene con ellos). Reordenarlos para el cache de
+// vertices (Forsyth) al guardar el v4 hacia que la oclusion eligiera triangulos de otro lado del nivel
+static bool OrdenEsContrato(const Mesh* m) {
+    return m->noEditable || PVSModDe(const_cast<Mesh*>(m)) != NULL;
 }
 
 // ---------------------------------------------------------------------------
@@ -4981,7 +4990,7 @@ void W3dMallaIndicesCanonicos(const Mesh* m, W3dMallaBinIndices& out) {
         const int g = m->faces3d[f].mat;
         grupoDe[f] = (g < 0 || g >= nGrupos) ? 0 : g;
     }
-    ArmarIndicesPorParte(m->vertex, nV, m->faces3d, grupoDe, nGrupos, out.idx, out.inicio, out.cantidad);
+    ArmarIndicesPorParte(m->vertex, nV, m->faces3d, grupoDe, nGrupos, out.idx, out.inicio, out.cantidad, !OrdenEsContrato(m));
 }
 
 // Reconstruye el index buffer (faces[]) AGRUPANDO los triangulos por material POR-CARA (mf.mat), y
@@ -5000,7 +5009,7 @@ void Mesh::ReagruparMeshParts() {
     std::vector<MeshIndex> tris; // MeshIndex: en PC los indices pueden pasar 65535 (no truncar a 16 bits)
     std::vector<int> grupoDe(faces3d.size()), ini, cnt;
     for (size_t f=0;f<faces3d.size();f++) grupoDe[f] = faces3d[f].mat;
-    ArmarIndicesPorParte(vertex, vertexSize, faces3d, grupoDe, (int)materialsGroup.size(), tris, ini, cnt);
+    ArmarIndicesPorParte(vertex, vertexSize, faces3d, grupoDe, (int)materialsGroup.size(), tris, ini, cnt, !OrdenEsContrato(this));
     for (size_t gi=0; gi<materialsGroup.size(); gi++){
         materialsGroup[gi].startDrawn = ini[gi];
         materialsGroup[gi].indicesDrawnCount = cnt[gi];

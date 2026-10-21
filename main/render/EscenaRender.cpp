@@ -93,6 +93,9 @@ void W3dEscena3DCamara(const W3dVista3D& v, const Vector3& luzPos, const Vector3
 // ---------------------------------------------------------------------------
 void W3dEscena3DLuces(int vista) {
     const RenderType::Enum v = (RenderType::Enum)vista;
+    // un proyecto con CONSTRUCTOR (el modo avanzado) en Rendered: las luces son de sus rutinas (rutinas.md), el pase no
+    // las toca. Apagar las 8 en cada cuadro eran 8 llamadas por cuadro despues de cualquier Invalidate
+    if (v == RenderType::Rendered && W3dHayConstructor()) return;
     // apagar los 8 GL lights: si una luz de escena cambio de slot, el viejo quedaba
     // prendido (luz "fantasma"). Cada Light enciende el suyo al dibujarse.
     for (int i = 0; i < MAX_LIGHTS; i++) gfx::SetLightEnabled(GL_LIGHT0 + i, false);
@@ -139,6 +142,7 @@ void W3dEscena3DModo(int vista) {
 // ---------------------------------------------------------------------------
 void W3dEscena3DPasada() {
     if (!SceneCollection || !W3dEscena3DActiva()) return;
+    g_w3dPase++;   // (Mesh::paseDibujado: lo que una rutina dibujo en este cuadro)
     gfx::StatScope cat(gfx::StatCatEscena);   // (el contador de llamadas: esto es la escena)
     // por si un pase anterior dejo anotados sin dibujar
     W3dParticulasLimpiarPendientes();

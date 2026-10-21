@@ -588,7 +588,10 @@ bool Culling::RielAplicarNodo(int nodo) {
         }
     }
     if (!visHijos.Valido()) { nodoAplicado = -1; return false; }
-    if (nodo < 1 || nodo > visHijos.nCeldas) { nodoAplicado = -1; listaRender.clear(); return false; }
+    if (nodo < 1 || nodo > visHijos.nCeldas) {
+        for (size_t c = 0; c < Childrens.size(); c++) if (Childrens[c]) Childrens[c]->listadoRiel = 255;
+        nodoAplicado = -1; listaRender.clear(); return false;
+    }
     if (nodo == nodoAplicado) return false;
     // paso +-1 con lista vigente = UN delta; salto = decode desde la celda-clave
     bool ok;
@@ -601,8 +604,12 @@ bool Culling::RielAplicarNodo(int nodo) {
     nodoAplicado = nodo;
     listaRender.clear();
     listaRender.reserve(visHijosLista.size());
+    for (size_t c = 0; c < Childrens.size(); c++) if (Childrens[c]) Childrens[c]->listadoRiel = 0;
     for (size_t k = 0; k < visHijosLista.size(); k++)
-        if (visHijosLista[k] < Childrens.size()) listaRender.push_back(Childrens[visHijosLista[k]]);
+        if (visHijosLista[k] < Childrens.size()) {
+            listaRender.push_back(Childrens[visHijosLista[k]]);
+            if (Childrens[visHijosLista[k]]) Childrens[visHijosLista[k]]->listadoRiel = 1;
+        }
     return true;
 }
 

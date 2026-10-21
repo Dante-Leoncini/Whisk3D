@@ -747,11 +747,11 @@ static void SincronizarMirrorTarget(Properties* p){
 }
 
 // ---- tarjeta FISICA (cuerpo rigido): acciones de sus botones ---------------
-// el boton de tipo CICLA (Dynamic -> Static -> Character): en el telefono un
-// dropdown de 3 opciones es mas lento que tres taps
+// el boton de tipo CICLA (Dynamic -> Static -> Character -> Mesh): en el telefono
+// un dropdown de 4 opciones es mas lento que cuatro taps
 static void AccionFisTipoCiclar(){
     if (!ObjActivo || !ObjActivo->fisica) return;
-    ObjActivo->fisica->tipo = (ObjActivo->fisica->tipo + 1) % 3;
+    ObjActivo->fisica->tipo = (ObjActivo->fisica->tipo + 1) % 4;
     g_redraw = true;
 }
 static void AccionFisQuitar(){
@@ -10903,7 +10903,7 @@ void Properties::ActualizarPestanias(){
         propFisica->visible = (fd != NULL);
         if (propFisTipo && fd) {
             const char* tn = (fd->tipo == 0) ? "Static"
-                           : (fd->tipo == 2) ? "Character" : "Dynamic";
+                           : (fd->tipo == 2) ? "Character" : (fd->tipo == 3) ? "Mesh" : "Dynamic";
             if (propFisTipo->button->text != T(tn)) { propFisTipo->button->text = T(tn); g_redraw = true; }
         }
         if (propFisMasa)     propFisMasa->value     = fd ? &fd->masa : NULL;

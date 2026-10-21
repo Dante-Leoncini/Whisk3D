@@ -984,6 +984,7 @@ Object* CreateObjectFromNode(Node* n, Object* parent){
             std::cerr << "[Wobj] Se importo mal el wobj!\n";
             return NULL;
         }
+        mesh->soloRutina = GetBoolOrDefault(n->props, "soloRutina", false);   // la dibuja una rutina (Mesh.h)
 
 
         for (size_t _ci=0; _ci<n->children.size(); _ci++) {
@@ -1762,7 +1763,7 @@ static void JsonComunes(JVal* j, Object* o) {
     if (jf) {
         W3dRigidoDef* d = o->fisica ? o->fisica : new W3dRigidoDef();
         const std::string t = JS(jf, "tipo", "dinamico");
-        d->tipo = (t == "estatico") ? 0 : ((t == "personaje") ? 2 : 1);
+        d->tipo = (t == "estatico") ? 0 : (t == "personaje") ? 2 : (t == "malla") ? 3 : 1;
         d->masa     = JF(jf, "masa", d->masa);
         d->friccion = JF(jf, "friccion", d->friccion);
         d->rebote   = JF(jf, "rebote", d->rebote);
@@ -2835,6 +2836,7 @@ static Object* JsonObjetoCrear(JVal* j, Object* parent, const std::string& base)
         // la pida. "geometria" (una entrada propia del objeto) es el formato anterior.
         const std::string nomMalla = NombreRecursoJson(JS(j, "malla", ""));   // (con el prefijo de su libreria)
         Mesh* mesh = new Mesh(parent, Vector3(0, 0, 0));
+        mesh->soloRutina = JB(j, "soloRutina", false);   // la dibuja una rutina (Mesh.h)
         std::vector<unsigned char> datos;
         W3dMallaInfo info;
         bool cargo = false;

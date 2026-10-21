@@ -60,7 +60,7 @@ static bool PunterosAlDiaTodo(Rutina* r) {
                 if (!W3dMallaRecursoVivo(m) || m->nombre != p.ref) return false;
                 continue;
             }
-            const Object* o = (const Object*)p.ptr;
+            Object* o = (Object*)p.ptr;
             if (!W3dObjetoVivo(o) || o->name != p.ref) return false;
         }
     return true;
@@ -338,6 +338,27 @@ static int Profundidad(Rutina* r, std::vector<W3dPaso>& L, std::string& motivo, 
         case PasoDibujar:
             if (!DibujarOk(p, num, pu, motivo)) return -1;
             break;
+        case PasoPunteroPose: case PasoDibujarVisibles: {
+            // un OBJETO malla con su recurso: la pose tiene sus vertices (paralela al recurso) y la lista visible son
+            // triangulos de el. La pose cuenta como el puntero de vertices; el dibujo, como "Draw elements" de todo
+            Object* o = (Object*)p.ptr;
+            const Mesh* me = (o && o->getType() == ObjectType::mesh) ? (const Mesh*)o : NULL;
+            if (!me || !me->malla) {
+                snprintf(buf, sizeof buf, "step %d (%s): '%s' is not a mesh object with a library mesh", num,
+                         W3dPasoEtiqueta(p.tipo), p.ref.c_str());
+                motivo = buf; return -1;
+            }
+            if (p.tipo == PasoPunteroPose) {
+                const int k = (p.modo >= 0 && p.modo < 4) ? p.modo : 0;
+                pu.m[k] = me->malla; pu.conocido[k] = true;
+                if (k == 2) { pu.uvNormales = false; pu.uvCapa = 0; }
+                break;
+            }
+            W3dPaso q = W3dPasoNuevo(PasoDibujar);
+            q.ptr = me->malla; q.ref = me->malla->nombre;
+            if (!DibujarOk(q, num, pu, motivo)) return -1;
+            break;
+        }
         case PasoHijos:
             // los hijos ponen SUS punteros y prenden o apagan arrays: despues hay que volver a apuntar (y fijar los arrays)
             for (int k = 0; k < 4; k++) { pu.m[k] = 0; pu.conocido[k] = true; pu.on[k] = -1; }
@@ -363,7 +384,7 @@ static int Profundidad(Rutina* r, std::vector<W3dPaso>& L, std::string& motivo, 
             if (d + sub > maxd) maxd = d + sub;
             break;
         }
-        case PasoSaltarSi: case PasoSaltarOculto: case PasoSaltarSiNinguna:
+        case PasoSaltarSi: case PasoSaltarOculto: case PasoSaltarSiNinguna: case PasoSaltarFuera: case PasoSaltarRiel: case PasoSaltarNoListado:
             if (p.entero < 0 || i + (size_t)p.entero >= L.size()) {
                 snprintf(buf, sizeof buf, "step %d: skips %d steps but only %d follow", num, p.entero, (int)(L.size() - i - 1));
                 motivo = buf; return -1;
@@ -476,6 +497,8 @@ int W3dRutinaPasoIcono(int tipo) {
     switch (tipo) {
     case PasoArray:           return (int)IconType::lista;
     case PasoPunteroVertices: return (int)IconType::selVertex;
+    case PasoPunteroPose:     return (int)IconType::selVertex;
+    case PasoDibujarVisibles: return (int)IconType::visible;
     case PasoPunteroNormales: return (int)IconType::normalVertex;
     case PasoPunteroUV:       return (int)IconType::textura;
     case PasoPunteroColores:  return (int)IconType::material;

@@ -52,6 +52,10 @@
 //        ("juez") y en el log, y pide salir() cuando termina.
 //    juegohitboxlog <carpeta> <nombre>
 //        corre el binario compilado y lee el veredicto del juez en su whisk3d.log.
+//    fisicamallatest
+//        cuerpos rigidos de tipo MALLA (W3dRigido + la grilla de W3dColMalla), sin Play: una caja
+//        que cae sobre un plano malla queda apoyada; otra sobre una RAMPA de 30 grados baja sin
+//        atravesarla; una lanzada contra una PARED malla no la cruza; fisicaRayo toca la malla.
 // ============================================================================
 #include "test/W3dPruebasHitbox.h"
 #include "test/W3dScript.h"            // W3dRunCommand("juego3dmin ...")
@@ -61,6 +65,8 @@
 #include "objects/ObjectMode.h"        // W3dDuplicarUno
 #include "physics/W3dHitbox.h"
 #include "physics/W3dRigido.h"
+#include "physics/W3dColMalla.h"
+#include "objects/Mesh.h"
 #include "script/W3dScript.h"
 #include "animation/Animation.h"       // la animacion de escena del juego de prueba
 #include "config/W3dProfile.h"         // W3dNowMs
@@ -829,6 +835,76 @@ static Empty* HbEmpty(const char* nombre, const Vector3& pos) {
     return e;
 }
 
+// un plano (2x2, la primitiva) escalado y girado, con fisica de tipo malla
+static Object* FmPlano(const char* nombre, const Vector3& pos, float escala, const Vector3& eje, float grados) {
+    Object* o = NewMesh(MeshType(MeshType::plane), NULL, false);
+    if (!o) return NULL;
+    o->SetNameObj(nombre);
+    o->pos = pos;
+    o->scale = Vector3(escala, escala, escala);
+    if (grados != 0.0f) o->SetRotAxisAngle(eje, grados);
+    o->fisica = new W3dRigidoDef();
+    o->fisica->tipo = 3;
+    return o;
+}
+
+static Empty* FmCaja(const char* nombre, const Vector3& pos) {
+    Empty* e = HbEmpty(nombre, pos);
+    e->fisica = new W3dRigidoDef();   // dinamica, caja de 1 m
+    e->fisica->friccion = 0.2f;
+    return e;
+}
+
+static bool CmdFisicaMallaTest(std::istringstream&, std::string& err) {
+    W3dRigidosLimpiar();
+    W3dColLimpiar();
+    // piso plano en y=0, rampa de 30 grados (sube hacia -z) y una pared vertical en x=60
+    Object* piso   = FmPlano("FmPiso",   Vector3(0, 0, 0),  10.0f, Vector3(1, 0, 0), 0.0f);
+    Object* rampa  = FmPlano("FmRampa",  Vector3(30, 0, 0), 10.0f, Vector3(1, 0, 0), 30.0f);
+    Object* pared  = FmPlano("FmPared",  Vector3(60, 0, 0), 10.0f, Vector3(0, 0, 1), 90.0f);
+    Object* sueloP = FmPlano("FmSueloP", Vector3(55, 0, 0), 10.0f, Vector3(1, 0, 0), 0.0f);
+    if (!piso || !rampa || !pared || !sueloP) { err = "fisicamallatest: NewMesh fallo"; return false; }
+    Empty* cPiso  = FmCaja("FmCajaPiso",  Vector3(0, 3, 0));
+    Empty* cRampa = FmCaja("FmCajaRampa", Vector3(30, 3, 0));
+    Empty* cPared = FmCaja("FmCajaPared", Vector3(55, 0.6f, 0));
+    W3dRigidosAsegurar(SceneCollection);
+    W3dRigidoSetVel(cPiso, Vector3(0, -0.1f, 0));
+    W3dRigidoSetVel(cRampa, Vector3(0, -0.1f, 0));
+    W3dRigidoSetVel(cPared, Vector3(12, 0, 0));
+    float minDistRampa = 1e30f;
+    // la rampa: su normal y su eje a lo largo (la del plano Y-up y su Z, giradas). La distancia al plano se mide
+    // mientras la caja esta ENCIMA (la rampa mide 20 m: en 4 s se desliza hasta el borde y cae)
+    const Vector3 nr = rampa->Rot() * Vector3(0, 1, 0), lr = rampa->Rot() * Vector3(0, 0, 1);
+    for (int i = 0; i < 120; i++) {
+        W3dRigidosPaso(1.0f / 30.0f);
+        if (fabsf(lr.Dot(cRampa->pos - rampa->pos)) > 9.0f) continue;
+        const float d = nr.Dot(cRampa->pos - rampa->pos);
+        if (d < minDistRampa) minDistRampa = d;
+    }
+    bool ok = true;
+    char buf[512];
+    // 1) apoyada en el piso: el centro de la caja de 1 m a 0.5 (el slop de la penetracion tolera 1-2 cm)
+    snprintf(buf, sizeof(buf), "      [fisicamallatest] piso y=%.3f | rampa: min dist al plano %.3f, z=%.2f | pared x=%.3f\n",
+             cPiso->pos.y, minDistRampa, cRampa->pos.z, cPared->pos.x);
+    printf("%s", buf);
+    if (fabsf(cPiso->pos.y - 0.5f) > 0.05f) { err = "fisicamallatest: la caja no quedo apoyada en el piso malla"; ok = false; }
+    // 2) la rampa: nunca la atraveso (el centro siempre a ~0.5 o mas del plano) y bajo por ella
+    if (ok && minDistRampa < 0.4f) { err = "fisicamallatest: la caja atraveso la rampa malla"; ok = false; }
+    if (ok && fabsf(cRampa->pos.z) < 0.5f) { err = "fisicamallatest: la caja no se deslizo por la rampa"; ok = false; }
+    // 3) la pared en x=60: el centro no pasa de 59.5
+    if (ok && cPared->pos.x > 59.55f) { err = "fisicamallatest: la caja cruzo la pared malla"; ok = false; }
+    // 4) el rayo: de (0,5,0) hacia abajo toca la caja apoyada (a ~3.5) y, ignorandola, el piso malla a 5
+    if (ok) {
+        Vector3 n; Object* t = NULL;
+        const float d = W3dRigidosRayo(Vector3(0, 5, 0), Vector3(0, -1, 0), 20.0f, cPiso, &n, &t);
+        printf("      [fisicamallatest] rayo: d=%.3f n=(%.2f %.2f %.2f) %s\n", d, n.x, n.y, n.z, t ? t->name.c_str() : "-");
+        if (fabsf(d - 5.0f) > 0.01f || t != piso || n.y < 0.99f) { err = "fisicamallatest: fisicaRayo no toco el piso malla"; ok = false; }
+    }
+    W3dRigidosLimpiar();
+    W3dColLimpiar();
+    return ok;
+}
+
 static bool CmdJuegoHitboxMin(std::istringstream& ss, std::string& err) {
     std::string dir; ss >> dir;
     if (dir.empty()) { err = "juegohitboxmin: uso: juegohitboxmin <carpeta>"; return false; }
@@ -944,6 +1020,7 @@ bool W3dPruebasHitboxCmd(const std::string& cmd, std::istringstream& ss, std::st
     if (cmd == "hitboxlimpiar")  { W3dHitboxLimpiar(); return true; }
     if (cmd == "juegohitboxmin") return CmdJuegoHitboxMin(ss, err);
     if (cmd == "juegohitboxlog") return CmdJuegoHitboxLog(ss, err);
+    if (cmd == "fisicamallatest") return CmdFisicaMallaTest(ss, err);
     manejado = false;
     return false;
 }

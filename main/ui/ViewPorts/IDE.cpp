@@ -878,7 +878,7 @@ void IDE::TabKey(bool shift) {
         int cambio = 0;
         if (!shift) {
             if (ln.empty()) continue;   // las lineas vacias quedan vacias
-            ln.insert(0, (size_t)kIdeTab, ' ');
+            ln.insert((std::string::size_type)0, (std::string::size_type)kIdeTab, ' ');   // posicion explicita: con 0 a secas STLport ve tambien la sobrecarga por iterador
             cambio = kIdeTab;
         } else {
             const int q = IdeSangria(ln);

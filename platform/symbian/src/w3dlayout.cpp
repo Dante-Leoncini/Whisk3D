@@ -49,6 +49,7 @@ extern bool MouseWheel;
 #include "w3dlog.h"
 #include "w3dnewscene.h" // mundo nuevo (Fase 3c-2)
 #include "ViewPorts/LayoutInput.h" // ruteo COMPARTIDO (menus/barras/paneles)
+#include "ViewPorts/LayoutArbol.h" // LayoutRaizCompleta: el arbol entero aunque haya un viewport maximizado
 #include "render/OpcionesRender.h"      // g_redraw (render event-driven)
 #include <GLES/gl.h>
 #include <stdio.h>     // sprintf para formatear los valores
@@ -319,8 +320,22 @@ void W3dLayoutBuild(CWhisk3D* aWhisk, TInt aWidth, TInt aHeight) {
 
     // el layout NO se rebuildea al rotar/redimensionar: se resize SIEMPRE el MISMO (asi los viewports no
     // "saltan" de lugar). El tamano de pantalla elige el arbol UNA sola vez (la primera, sin gRoot todavia).
+    // Con MAXIMIZAR (o el modo juego, que maximiza el 3D) lo que se DIBUJA es rootViewport (el viewport
+    // maximizado), no el arbol completo: hay que redimensionar los dos. Antes solo se hacia gRoot->Resize y al
+    // rotar maximizado el viewport visible quedaba con el tamano viejo (franja negra); peor, al des-maximizar
+    // LayoutMaximizar restaura el arbol con el tamano del maximizado -> el tamano viejo quedaba pegado para siempre.
+    // Primero el arbol completo (reparte el espacio entre sus hojas, incluida la maximizada) y despues el
+    // maximizado a pantalla completa, en ese orden. Mismo criterio que PC (main.cpp: rootViewport->Resize).
     if (gRoot) {
-        gRoot->Resize(aWidth, aHeight);
+        ViewportBase* completa = LayoutRaizCompleta();
+        if (!completa) completa = gRoot;
+        completa->x = 0; completa->y = 0;
+        completa->Resize(aWidth, aHeight);
+        if (rootViewport && rootViewport != completa) {
+            rootViewport->x = 0; rootViewport->y = 0;
+            rootViewport->Resize(aWidth, aHeight);
+        }
+        w3dLogf("layout resize: %dx%d maximizado=%d", aWidth, aHeight, (int)(rootViewport != completa));
         return;
     }
 

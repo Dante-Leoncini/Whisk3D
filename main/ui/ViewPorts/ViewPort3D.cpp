@@ -1502,12 +1502,12 @@ double W3dTexPaint3DTrazoMs(Viewport3D* vp, int n, float radio) {
     Mesh* m = (ObjActivo && ObjActivo->getType() == ObjectType::mesh) ? (Mesh*)ObjActivo : NULL;
     if (!vp || !m || n < 1 || !WP3DTexTrazoIniciar(m)) return -1.0;
     const float cx = (float)(vp->x + vp->width / 2), cy = (float)(vp->y + vp->height / 2);
-    const Uint32 t0 = SDL_GetTicks();
+    const unsigned int t0 = WP3DTicksMs();   // portable: SDL en PC, NTickCount en Symbian
     for (int i = 0; i < n; i++) {
         const float a = (float)i * 0.15f;
         WP3DPintarTextura(vp, (int)(cx + cosf(a) * radio), (int)(cy + sinf(a) * radio));
     }
-    const double ms = (double)(SDL_GetTicks() - t0);
+    const double ms = (double)(WP3DTicksMs() - t0);
     TexEditFinTrazo(g_wpTexEd); UndoTexturaConfirmar(g_wpTexCambio); g_wpTexEd = NULL; g_wpTexCambio = false;
     return ms;
 }
@@ -2943,6 +2943,7 @@ void Viewport3D::RenderUI() {
               if (Viewport3DActive == this) UI2D_OverrideVentana(this, sw, sh);
               UI2D_OverrideVentanaScope ventana(this, sw, sh);
               hudX0 = sx0; hudY0 = sy0; hudW = sw; hudH = sh; hudEsc = 1.0f; hudOverride = true;
+              { extern float g_hudMargenX, g_hudMargenY; if (Viewport3DActive == this) g_hudMargenX = g_hudMargenY = 0.0f; }
               UI2D_DibujarOverlay(sx0, sy0, sw, sh, 1.0f, g_hudCapturaPos, true);
           } else {
               // 2b) lienzo con tamano propio, o EDICION (el lienzo sigue siendo el del
@@ -2956,6 +2957,10 @@ void Viewport3D::RenderUI() {
               float dw = lw * esc, dh = lh * esc;
               float dx0 = sx0 + (sw - dw) * 0.5f, dy0 = sy0 + (sh - dh) * 0.5f;
               hudX0 = dx0; hudY0 = dy0; hudW = dw; hudH = dh; hudEsc = esc; hudOverride = false;
+              // (margenPantalla() de lua) cuanto se extiende el viewport mas alla del HUD encajado, en unidades del
+              // LIENZO: en vertical con el lienzo 4:3, la franja de abajo donde un texto "de abajo" se tiene que pegar
+              { extern float g_hudMargenX, g_hudMargenY;
+                if (Viewport3DActive == this) { g_hudMargenX = (sw - dw) * 0.5f / esc; g_hudMargenY = (sh - dh) * 0.5f / esc; } }
               UI2D_DibujarOverlay(dx0, dy0, dw, dh, esc, g_hudCapturaPos, true);
           } }
         // MODO JUEGO PURO (VERDE+0): el HUD del juego ya se dibujo; todo lo que

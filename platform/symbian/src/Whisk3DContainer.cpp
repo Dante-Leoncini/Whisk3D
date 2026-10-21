@@ -1079,6 +1079,11 @@ int CWhisk3DContainer::DrawCallBack( TAny* aInstance )
 
     // toasts de export/import (y demas notificaciones): expira las de exito + corre su timer. Va FUERA del
     // bloque de render (como PC) para que, mientras hay un toast, mantenga g_redraw y se siga dibujando.
+    // el TIEMPO REAL de este cuadro (las tiras UV de las frutas y los flipbooks lo usan: con el 1/60 fijo de antes, a
+    // 48 fps giraban al 80% de su velocidad y mas lento en los cuadros pesados). Acotado como el de la simulacion
+    float dtFrame = timeSecs - instance->iLastFrameTimeSecs;
+    if (dtFrame > 0.1f)   dtFrame = 0.1f;
+    if (dtFrame < 0.001f) dtFrame = 0.001f;
     { extern void NotificacionesTick(float); NotificacionesTick(timeSecs - instance->iLastFrameTimeSecs); }
 
     // Set the current time to be the last frame time for the upcoming frame
@@ -1113,8 +1118,8 @@ int CWhisk3DContainer::DrawCallBack( TAny* aInstance )
     { extern int ActiveAnimKind;
       if (!(AnimEsJuego && !PlayAnimation) && ActiveAnimKind != 3) {
           UpdateAnimatedMaterials();
-          extern bool UpdateUVAnims(float); if (UpdateUVAnims(1.0f / 60.0f)) g_redraw = true;
-          extern bool UpdateFlipbooks(float); if (UpdateFlipbooks(1.0f / 60.0f)) g_redraw = true;
+          extern bool UpdateUVAnims(float); if (UpdateUVAnims(dtFrame)) g_redraw = true;
+          extern bool UpdateFlipbooks(float); if (UpdateFlipbooks(dtFrame)) g_redraw = true;
           extern bool W3dOclusionTick(); if (W3dOclusionTick()) g_redraw = true;   // oclusion por nodos (.w3dnodos)
       }
     }

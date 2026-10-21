@@ -148,6 +148,7 @@ SOURCEPATH      ..\..\..\main\app
 SOURCE          variables.cpp
 SOURCE          W3dInitUI.cpp // init de UI compartido
 SOURCE          W3dAtajos.cpp // atajos de teclado reasignables (la tabla + el traductor + atajos.ini)
+SOURCE          W3dTeclado.cpp // teclado en pantalla (Android); en Symbian son stubs vacios
 SOURCEPATH      ..\..\..\main\config
 SOURCE          W3dLang.cpp   // idiomas del editor (T() + deteccion del idioma del telefono)
 SOURCE          W3dConfigGuardar.cpp // escribe el config.ini (la tarjeta "Ajustes" de Properties)

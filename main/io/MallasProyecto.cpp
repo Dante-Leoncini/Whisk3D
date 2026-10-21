@@ -530,6 +530,7 @@ Mesh* W3dMallaDuplicarVinculado(Mesh* src) {
     // ...y la geometria pasa a ser la del recurso (comparte arrays y VBO). Su edicion es una
     // copia de la de src, que coincide con el recurso: se conserva si la hay.
     d->noEditable = src->noEditable;
+    d->soloRutina = src->soloRutina;
     if (!W3dMallaVincular(d, src->malla, TieneEdicion(d))) {
         W3dAvisof(true, "No pude vincular la copia de '%s' a su malla", W3dNombreCorto(src->name).c_str());
     }
@@ -551,6 +552,7 @@ Mesh* W3dMallaDuplicarConRecursoPropio(Mesh* src) {
     W3dMallaRecursoPonerBytes(nuevo, b);
     MaterialesDe(src, nuevo->materiales);
     d->noEditable = src->noEditable;
+    d->soloRutina = src->soloRutina;
     W3dMallaVincular(d, nuevo, TieneEdicion(d));
     if (!d->modificadores.empty()) d->GenerarMallaModificada();
     return d;

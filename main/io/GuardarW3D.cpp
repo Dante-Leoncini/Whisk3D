@@ -361,7 +361,7 @@ static void CamposComunes(std::string& s, int ind, Object* o) {
     if (o->fisica) {
         const W3dRigidoDef* d = o->fisica;
         JSang(s, ind); s += "\"fisica\": { \"tipo\": ";
-        s += (d->tipo == 0) ? "\"estatico\"" : (d->tipo == 2 ? "\"personaje\"" : "\"dinamico\"");
+        s += (d->tipo == 0) ? "\"estatico\"" : (d->tipo == 2) ? "\"personaje\"" : (d->tipo == 3) ? "\"malla\"" : "\"dinamico\"";
         s += ", \"masa\": "; JNum(s, d->masa);
         s += ", \"caja\": ["; JNum(s, d->caja[0]); s += ", "; JNum(s, d->caja[1]); s += ", "; JNum(s, d->caja[2]);
         s += "], \"centro\": ["; JNum(s, d->centro[0]); s += ", "; JNum(s, d->centro[1]); s += ", "; JNum(s, d->centro[2]);
@@ -2169,6 +2169,7 @@ static void EscribirObjeto(std::string& s, Object* o, int ind, CtxGuardar* cx, b
         // ESCENARIO CERRADO A EDICION: sin esto el reabrir recalculaba bordes
         // (edges 0 -> N) y la malla dejaba de ser identica a la original.
         if (m->noEditable) { s += ",\n"; JSang(s, ind + 1); s += "\"noEditable\": true"; }
+        if (m->soloRutina) { s += ",\n"; JSang(s, ind + 1); s += "\"soloRutina\": true"; }
         if (!m->origen.empty()) {
             // el .obj/.fbx del usuario lo edita OTRO programa: es suyo y queda EXTERNO
             // (listado en EXTERNOS.txt). Ya no es de donde carga la malla.

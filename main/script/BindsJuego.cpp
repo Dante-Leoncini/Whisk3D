@@ -251,6 +251,13 @@ static bool CajaHitLienzo(Object* o, float* cx, float* cy, float* hw, float* hh)
 // ---------------------------------------------------------------------------
 //  BINDS (coordenadas en px de lienzo, centro 0,0).
 // ---------------------------------------------------------------------------
+// margenPantalla() -> mx, my: cuanto se extiende la pantalla MAS ALLA del lienzo del HUD encajado (letterbox), por lado,
+// en unidades del lienzo. 0, 0 si el HUD llena la pantalla. Un elemento anclado abajo que se quiere pegar al borde REAL
+// (en vertical, con el lienzo 4:3 centrado) se corre 'my' hacia abajo
+float g_hudMargenX = 0.0f, g_hudMargenY = 0.0f;
+static int LMargenPantalla(lua_State* L) {
+    lua_pushnumber(L, g_hudMargenX); lua_pushnumber(L, g_hudMargenY); return 2;
+}
 static int LPantalla(lua_State* L) {
     float w, h; TamLienzo(&w, &h);
     lua_pushnumber(L, w); lua_pushnumber(L, h); return 2;
@@ -492,6 +499,17 @@ static int LSetTexto(lua_State* L) {
 // (ReadFileBytes la resuelve por el montaje, mismo contrato que el resto de los assets).
 // El decode ya se cachea POR RUTA (Textura2DObtener, fallos incluidos): ciclar 14 PNG de una
 // animacion decodifica cada una UNA vez y despues es solo un bind.
+// ---- dibujado(obj): una malla que dibuja una RUTINA (Mesh::soloRutina) se dibujo en este cuadro o en el anterior
+//      (paso su prueba de visibilidad). Lo que no se ve no necesita su tick visual (girar, recolorear, bobbear).
+//      Cualquier otro objeto: true (no se sabe: el que pregunta hace lo de siempre) ----
+static int LDibujado(lua_State* L) {
+    Object* o = W3dScriptParamObjeto(L, 1);
+    bool d = (o != NULL);
+    if (o && o->getType() == ObjectType::mesh && ((Mesh*)o)->soloRutina)
+        d = (g_w3dPase - ((Mesh*)o)->paseDibujado) <= 1u;
+    lua_pushboolean(L, d ? 1 : 0);
+    return 1;
+}
 static int LSetTextura(lua_State* L) {
     Object* o = W3dScriptParamObjeto(L, 1);
     const char* s = lua_tostring(L, 2);
@@ -1644,6 +1662,7 @@ void BindsJuegoRegistrar(void* Lv) {
     W3dFisicaSetAdaptador2D(FisicaLienzo, FisicaTam2D, FisicaCajaUI,
                             FisicaPosCruda);   // idempotente (se llama por cada lua_State)
     lua_pushcfunction(L, LPantalla);    lua_setglobal(L, "pantalla");
+    lua_pushcfunction(L, LMargenPantalla); lua_setglobal(L, "margenPantalla");
     lua_pushcfunction(L, LResolucion);  lua_setglobal(L, "resolucion");
     lua_pushcfunction(L, LSetMemoria);  lua_setglobal(L, "setMemoria");
     lua_pushcfunction(L, LMemoria);     lua_setglobal(L, "memoria");
@@ -1657,6 +1676,7 @@ void BindsJuegoRegistrar(void* Lv) {
     lua_pushcfunction(L, LSetTamPx);    lua_setglobal(L, "setTamPx");
     lua_pushcfunction(L, LSetTexto);    lua_setglobal(L, "setTexto");
     lua_pushcfunction(L, LSetTextura);  lua_setglobal(L, "setTextura");
+    lua_pushcfunction(L, LDibujado);    lua_setglobal(L, "dibujado");
     lua_pushcfunction(L, LSetFlipbook); lua_setglobal(L, "setFlipbook");
     lua_pushcfunction(L, LSetUVRect);   lua_setglobal(L, "setUVRect");
     lua_pushcfunction(L, LSonido);      lua_setglobal(L, "sonido");

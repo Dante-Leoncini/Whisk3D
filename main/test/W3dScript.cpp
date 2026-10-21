@@ -6736,6 +6736,19 @@ bool W3dRunCommand(const std::string& linea, std::string& err) {
     //      Play del editor: el primer tick carga los scripts, resuelve refs/valores y llama
     //      inicio()). Deja la sim ANDANDO (el compartido() se puede inspeccionar); cerrarla
     //      con simstop, que ademas restaura la escena del editor. ----
+    // ---- luacorrer "<objeto>" <codigo...> : corre codigo lua en el script de ese objeto (el juego tiene que estar
+    //      corriendo: simplay). Para llevar al personaje a un lugar o a un estado y medir / capturar ahi ----
+    if (cmd == "luacorrer") {
+        std::string resto; std::getline(ss, resto);
+        size_t a = resto.find('"'), b2 = (a == std::string::npos) ? a : resto.find('"', a + 1);
+        if (b2 == std::string::npos) { err = "luacorrer: el objeto va entre comillas"; return false; }
+        const std::string nom = resto.substr(a + 1, b2 - a - 1), codigo = resto.substr(b2 + 1);
+        Object* o = SceneCollection ? FindObjectByName(SceneCollection, nom) : NULL;
+        if (!o) { err = "luacorrer: no hay un objeto '" + nom + "'"; return false; }
+        std::string e;
+        if (!W3dScriptEjecutar(o, codigo.c_str(), e)) { err = "luacorrer: " + e; return false; }
+        return true;
+    }
     if (cmd == "simplay") {
         int n = 1; ss >> n; if (n < 1) n = 1;
         extern void SimTickPlay(float); extern bool SimActiva();
@@ -6755,6 +6768,10 @@ bool W3dRunCommand(const std::string& linea, std::string& err) {
             // solo con el juego REPRODUCIENDO (en pausa lo hace TickReal por su cuenta,
             // asi que nunca se avanza dos veces).
             if (PlayAnimation) UpdateAnimations(1.0f / 30.0f);
+            // ...las animaciones de UV (la tira de una wumpa, los banderines: el primer cuadro lo aplica este tick; sin
+            // el, la captura mostraba las UV base de la tira) y la OCLUSION del riel (el nodo de la camara), como el main loop
+            if (PlayAnimation) { UpdateUVAnims(1.0f / 30.0f); UpdateFlipbooks(1.0f / 30.0f); }
+            { extern bool W3dOclusionTick(); W3dOclusionTick(); }
         }
         printf("      [simplay] %d tick(s); sim %s\n", n, SimActiva() ? "activa" : "SIN scripts (no arranco)");
         return true;

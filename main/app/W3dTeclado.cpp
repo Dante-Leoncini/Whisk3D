@@ -85,4 +85,11 @@ void W3dPantallaCompletaAuto(SDL_Window* win) {
     if (!notch && win) { SDL_SetWindowFullscreen(win, SDL_WINDOW_FULLSCREEN_DESKTOP); gFullAuto = true; }
 #endif
 }
+#else
+// Symbian (N95): no hay teclado en pantalla ni ventana SDL; el teclado es fisico. Los campos de texto del
+// editor (IDE, Properties, popups) igual llaman a W3dTecladoAbrir: sin estos stubs el link falla (L6218E).
+bool W3dTecladoVisible() { return false; }
+void W3dTecladoAbrir() {}
+void W3dTecladoRedimension(int, int) {}
+void W3dPantallaCompletaAuto(SDL_Window*) {}
 #endif // !W3D_SYMBIAN

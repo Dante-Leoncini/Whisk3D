@@ -7,6 +7,8 @@
 #include "w3dGraphics.h"
 #include "io/JsonW3d.h"            // JVal / JsonNumTexto: los campos del .w3d
 #include "animation/Animation.h"   // AnimPaso: los pasos se animan (g_animPasoHook)
+#include "animation/VertexAnimation.h"   // W3dPoseAlDia: la pose pendiente de "Object pointer"
+#include "objects/Camera.h"              // "Skip if camera riel": el riel de la camara activa
 #include <map>
 #include <math.h>                  // cosf / sinf (el giro de "Matriz del objeto")
 #include <stdlib.h>
@@ -93,6 +95,11 @@ static const PasoInfo kPasos[PasoN] = {
     { "lua",             "Call Lua",          GrupoControl,     0, RefFuncion, EnteroNada,   OpcNada,          false, 0, { 0 } },
     { "mezclaTexturas",  "Texture mix",       GrupoTextura,     1, RefTextura, EnteroCapaUV, OpcMezclaTex,     true,  "On", { "Mix" } },
     { "saltarSiNinguna", "Skip if no flag",   GrupoControl,     2, RefNada,    EnteroCuenta, OpcNada,          false, 0, { "Ranges (memory)", "Flags (memory)" } },
+    { "punteroPose",     "Object pointer",    GrupoDibujar,     0, RefObjeto,  EnteroNada,   OpcArray,         false, 0, { 0 } },
+    { "dibujarVisibles", "Draw visible",      GrupoDibujar,     0, RefObjeto,  EnteroNada,   OpcNada,          false, 0, { 0 } },
+    { "saltarFuera",     "Skip if outside",   GrupoControl,     4, RefObjeto,  EnteroCuenta, OpcNada,          false, 0, { "Min X", "Max X", "Min Z", "Max Z" } },
+    { "saltarRiel",      "Skip if camera riel", GrupoControl,   0, RefObjeto,  EnteroCuenta, OpcRiel,          false, 0, { 0 } },
+    { "saltarNoListado", "Skip if not listed", GrupoControl,    0, RefObjeto,  EnteroCuenta, OpcNada,          false, 0, { 0 } },
 };
 static const char* const kGrupos[GrupoN] = { "Transform", "Draw", "Texture", "Fog", "Lights", "Alpha test", "Color",
                                              "Depth & clear", "Blending", "Face culling", "Control" };
@@ -114,6 +121,7 @@ static const char* const kOpcMatComp[] = { "Ambient", "Diffuse", "Specular", "Em
 static const char* const kOpcArray[]   = { "Vertices", "Normals", "UV", "Colors" };                 // W3dArrayRutina
 static const char* const kOpcMatriz[]  = { "Multiply", "Load (camera x object)" };
 static const char* const kOpcMezclaTex[] = { "Interpolate (mix)", "Multiply (lightmap)", "Multiply 2x" };   // gfx::MezclaTexturas modo
+static const char* const kOpcRiel[] = { "The camera rides it", "The camera does not ride it" };   // PasoSaltarRiel
 struct OpcInfo { const char* titulo; const char* const* opciones; int n; };
 static const OpcInfo kOpc[OpcN] = {
     { "", NULL, 0 },
@@ -130,6 +138,7 @@ static const OpcInfo kOpc[OpcN] = {
     { "Array",     kOpcArray,   (int)ArrayN },
     { "Mode",      kOpcMatriz,  2 },
     { "Mode",      kOpcMezclaTex, 3 },
+    { "Skip when", kOpcRiel, 2 },
 };
 // la primitiva en el .w3d (por nombre: un numero no dice nada al leer el archivo)
 static const char* const kPrimNombre[RPrimN] = { "puntos", "lineas", "tiraLineas", "lazoLineas", "triangulos", "tira",
@@ -200,7 +209,7 @@ W3dPaso W3dPasoNuevo(int tipo) {
     case PasoTamPunto:       p.n[0].v = 4.0f; break;
     case PasoAnchoLinea:     p.n[0].v = 1.0f; break;
     case PasoSesgoZ:         p.n[0].v = -1.0f; p.n[1].v = -4.0f; break;              // acerca (calcomanias)
-    case PasoSaltarSi: case PasoSaltarOculto: case PasoSaltarSiNinguna: p.entero = 1; break;
+    case PasoSaltarSi: case PasoSaltarOculto: case PasoSaltarSiNinguna: case PasoSaltarFuera: case PasoSaltarRiel: case PasoSaltarNoListado: p.entero = 1; break;
     case PasoVisible:        p.entero = -1; break;                                    // la malla entera
     case PasoArray:          p.modo = ArrayNormales; break;
     default: break;
@@ -265,6 +274,8 @@ Rutina::Rutina(Object* parent, const std::string& nombre)
 Rutina::~Rutina() {
     for (size_t i = 0; i < retenidas.size(); i++) W3dMallaRecursoSoltar(retenidas[i]);
     retenidas.clear();
+    for (size_t i = 0; i < texRetenidas.size(); i++) TexturaSoltar(texRetenidas[i]);
+    texRetenidas.clear();
 }
 
 int Rutina::ModoActual() {
@@ -295,16 +306,23 @@ static Texture* BuscarTextura(const std::string& ref) {
 
 // resuelve UN paso (nombres -> punteros). 'desde' = donde se buscan los objetos. Las mallas se retienen en
 // 'retener' (el que llama suelta las viejas DESPUES: si es la misma, no se descarga para volver a cargarla)
-static void ResolverPaso(W3dPaso& p, Object* desde, Object* noSoy, std::vector<MallaRecurso*>* retener) {
+static void ResolverPaso(W3dPaso& p, Object* desde, Object* noSoy, std::vector<MallaRecurso*>* retener,
+                         std::vector<Texture*>* texRetener) {
     for (int k = 0; k < 5; k++) p.n[k].p = p.n[k].ref.empty() ? NULL : W3dMemoriaRef(p.n[k].ref);
     p.ptr = NULL; p.ptr2 = NULL;
     if (!p.ref2.empty()) p.ptr2 = W3dBuscarNombreDesde(desde, p.ref2);
     const int rt = W3dPasoRef(p.tipo);
     if (rt == RefNada || rt == RefFuncion || p.ref.empty()) return;
     if (rt == RefTextura) {
-        // si ningun material la usa todavia, la carga el cache (una vez; la rutina la toma)
-        p.ptr = BuscarTextura(p.ref);
-        if (!p.ptr) p.ptr = TexturaTomar(p.ref);
+        // LA RUTINA RETIENE SUS TEXTURAS (como sus mallas): una referencia propia sobre la que ya este cargada (la de
+        // un material, encontrada por sufijo: la MISMA, sin otra copia) o, si nadie la cargo, la que trae el cache.
+        // Sin la referencia, un material que el streaming duerme liberaba la textura que la rutina sigue nombrando;
+        // y la que la rutina cargaba por su cuenta (TexturaTomar) no se soltaba nunca: quedaba en la GPU hasta cerrar
+        Texture* t = BuscarTextura(p.ref);
+        if (t) TexturaRetener(t);
+        else t = TexturaTomar(p.ref);
+        if (t) texRetener->push_back(t);
+        p.ptr = t;
         return;
     }
     if (rt == RefMalla) {
@@ -353,12 +371,13 @@ void Rutina::Resolver() {
             for (size_t i = 0; i < listas[m].size(); i++) if (!listas[m][i].id) listas[m][i].id = (unsigned short)++mx;
     }
     std::vector<MallaRecurso*> nuevas;
+    std::vector<Texture*> nuevasTex;
     for (int m = 0; m < ModoN; m++) {
         conHijos[m] = false;
         for (size_t i = 0; i < listas[m].size(); i++) {
             W3dPaso& p = listas[m][i];
             if (p.tipo == PasoHijos) conHijos[m] = true;
-            ResolverPaso(p, this, this, &nuevas);
+            ResolverPaso(p, this, this, &nuevas, &nuevasTex);
         }
         // (version 1) el "Array on" de un puntero viejo: si la malla no tiene ese array, queda apagado (como antes)
         for (size_t i = 0; i + 1 < listas[m].size(); i++) {
@@ -371,6 +390,9 @@ void Rutina::Resolver() {
     }
     for (size_t i = 0; i < retenidas.size(); i++) W3dMallaRecursoSoltar(retenidas[i]);
     retenidas.swap(nuevas);
+    // (las texturas igual: las nuevas ya se retuvieron, recien ahora se sueltan las viejas -la misma no se descarga-)
+    for (size_t i = 0; i < texRetenidas.size(); i++) TexturaSoltar(texRetenidas[i]);
+    texRetenidas.swap(nuevasTex);
     sucia = false;
 }
 
@@ -390,6 +412,10 @@ static Rutina* gEnCurso = NULL;        // la rutina cuya lista se esta ejecutand
 // objeto carga camara x objeto (una llamada en vez de apilar + multiplicar + desapilar) y al terminar se repone
 static Matrix4 gBaseMV;
 static bool gBaseMVLeida = false, gMVCargada = false;
+// la camara sola: una rutina ANIDADA en un objeto con transformacion (la de un prefab, adentro de su instancia)
+// arranca con la matriz del padre ya aplicada; "cargar" es camara x objeto, asi que la del padre se saca una vez
+static Matrix4 gCamMV;
+static Rutina* gRaizCorrida = NULL;   // la rutina que abrio la corrida (la de un paso "rutina" corre en la misma)
 static void ReponerMV() { if (gMVCargada) { gfx::LoadMatrix(gBaseMV.m); gMVCargada = false; } }
 // CACHE DE PUNTEROS: la malla a la que apunta cada array (vertices, normales, uv, colores). Apuntar de nuevo al mismo
 // array no llama al driver (63 instancias de la misma pieza: sus punteros se ponen una vez). Se olvida al empezar
@@ -510,6 +536,76 @@ static void Dibujar(const W3dPaso& p) {
     }
 }
 
+// el objeto malla de un paso (NULL si el nombre no es de una malla)
+static Mesh* MallaObjeto(const W3dPaso& p) {
+    Object* o = (Object*)p.ptr;
+    return (o && o->getType() == ObjectType::mesh) ? (Mesh*)o : NULL;
+}
+// "Object pointer": un array del OBJETO. La capa que sigue compartida con su malla de la biblioteca va por el VBO de la
+// malla (como "Vertex pointer" de esa malla: el mismo cache); la que el objeto copio (la pose de su vertex anim, los
+// colores que le cambio lua, las UV de su animacion de UV) va de su RAM: un puntero de cliente no re-especifica ningun
+// buffer. La pose pendiente de una vertex anim se calcula aca (W3dPoseAlDia): lo que no se dibuja no interpola
+static void PunteroPose(const W3dPaso& p) {
+    Mesh* m = MallaObjeto(p);
+    if (!m) return;
+    const int k = (p.modo >= 0 && p.modo < ArrayN) ? p.modo : ArrayVertices;
+    if (k == ArrayVertices || k == ArrayNormales || k == ArrayUV) W3dPoseAlDia(m);
+    if (k == ArrayVertices) m->paseDibujado = g_w3dPase;   // (se dibuja este cuadro: un espejo la puede reflejar)
+    const bool skin = (m->skinArmature != NULL);
+    { static int dbg = 0; if (k == ArrayUV && (m->name == "Wumpa_22" || m->name == "Banderines") && dbg++ < 4)
+        printf("DBGUV %s comp=%u uv=%p rec=%p uv0=%f,%f rec0=%f,%f flip=%p\n", m->name.c_str(), (unsigned)m->datosComp, (void*)m->uv,
+               (void*)(m->malla ? m->malla->uv : 0), m->uv ? m->uv[0] : -1.f, m->uv ? m->uv[1] : -1.f,
+               (m->malla && m->malla->uv) ? m->malla->uv[0] : -1.f, (m->malla && m->malla->uv) ? m->malla->uv[1] : -1.f, (void*)m->flipbook); }
+    if (m->malla && (m->datosComp & kArrayMascara[k]) && !skin) {
+        W3dPaso q = p;
+        q.ptr = m->malla;
+        Puntero(PasoPunteroVertices + k, q);
+        return;
+    }
+    gPtrMalla[k] = NULL;   // (el proximo puntero de malla tiene que volver a apuntar)
+    switch (k) {
+    case ArrayVertices: { const GLfloat* v = (skin && m->skinVertex) ? m->skinVertex : m->vertex; if (v) gfx::VertexPointer3f(0, v); break; }
+    case ArrayNormales: { const GLbyte* n = (skin && m->skinNormals) ? m->skinNormals : m->normals; if (n) gfx::NormalPointer3b(n); break; }
+    case ArrayUV:       if (m->uv) gfx::TexCoordPointer2f(0, m->uv); break;
+    default:            if (m->vertexColor) gfx::ColorPointer4ub(m->vertexColor); break;
+    }
+}
+// "Draw visible": la lista de la celda del modificador Oclusion (indices de cliente, como el dibujo clasico: cambiar
+// de celda no sube nada) o, sin lista, la malla entera desde el IBO de su recurso
+static void DibujarVisibles(const W3dPaso& p) {
+    Mesh* m = MallaObjeto(p);
+    if (!m) return;
+    if (m->pvsFaces) {
+        if (m->pvsGroups.size() != m->materialsGroup.size()) return;
+        // los rangos seguidos van en UNA llamada (una malla de una textura: una sola)
+        int a = -1, n = 0;
+        for (size_t g = 0; g < m->pvsGroups.size(); g++) {
+            const MaterialGroup& grp = m->pvsGroups[g];
+            if (grp.indicesDrawnCount <= 0) continue;
+            if (a >= 0 && grp.startDrawn == a + n) { n += grp.indicesDrawnCount; continue; }
+            if (a >= 0) gfx::DrawTrianglesClientIdx(n, &m->pvsFaces[a]);
+            a = grp.startDrawn; n = grp.indicesDrawnCount;
+        }
+        for (size_t r = 0; r < m->pvsRuns.size(); r++) {
+            const Mesh::PvsRun& run = m->pvsRuns[r];
+            if (run.count <= 0) continue;
+            if (a >= 0 && run.start == a + n) { n += run.count; continue; }
+            if (a >= 0) gfx::DrawTrianglesClientIdx(n, &m->pvsFaces[a]);
+            a = run.start; n = run.count;
+        }
+        if (a >= 0) gfx::DrawTrianglesClientIdx(n, &m->pvsFaces[a]);
+        gIboActual = 0;   // (los indices de cliente dejaron el ELEMENT_ARRAY en 0)
+        return;
+    }
+    MallaRecurso* r = m->malla;
+    W3dFlujo f;
+    if (r && W3dMallaRecursoAsegurarVBO(r) && W3dMallaFlujo(r, -1, RPrimTriangulos, f)) { Mandar(f, 0, -1); return; }
+    if (m->faces && m->facesSize >= 3) {
+        gfx::DrawTrianglesClientIdx(m->facesSize, m->faces);
+        gIboActual = 0;
+    }
+}
+
 // los planos de la camara los da Culling.cpp por hook (lo instala su constructor estatico): un juego 2D compila la
 // Rutina sin el pase 3D (BindsJuego usa sus memorias) y sin hook "Test de visibilidad" no corta nada
 bool (*g_rutinaPlanosHook)(float planos[24], float* posCamara) = 0;
@@ -574,12 +670,17 @@ static int LlamadasGL() {
 // UN paso. 'i' es el indice en la lista (Saltar si lo avanza). 'yo' = la rutina duenia de la lista
 static void EjecutarPasoCrudo(W3dPaso& p, size_t& i, Rutina* yo);
 static void EjecutarPaso(W3dPaso& p, size_t& i, Rutina* yo) {
+#ifndef W3D_SYMBIAN
+    // (harness 'gltraza sec') de quien es cada draw de una rutina: el nombre de lo que dibuja
+    if (gfx::g_trazaGLSec && (p.tipo == PasoDibujar || p.tipo == PasoDibujarVisibles || p.tipo == PasoMatrizObjeto))
+        printf("      [glsec] -- %s:%s\n", W3dPasoNombre(p.tipo), p.ref.c_str());
+#endif
     if (!g_rutinaPerfil) { EjecutarPasoCrudo(p, i, yo); return; }
     const int antes = LlamadasGL();
     const bool anida = (p.tipo == PasoRutina || p.tipo == PasoHijos || p.tipo == PasoLua);
     // el tiempo, solo de los DIBUJAR (ahi trabaja el driver): leer el reloj en los ~2000 pasos chicos de un cuadro costaba
     // mas que ellos (en el N95 cada lectura es una llamada al kernel). Lo que no es dibujar sale de la rutina entera
-    const bool medir = (p.tipo == PasoDibujar);
+    const bool medir = (p.tipo == PasoDibujar || p.tipo == PasoDibujarVisibles);
     const double t0 = medir ? RelojPerfil() : 0.0;
     EjecutarPasoCrudo(p, i, yo);
     g_rutinaPerfilVeces[p.tipo]++;
@@ -607,8 +708,16 @@ static void EjecutarPasoCrudo(W3dPaso& p, size_t& i, Rutina* yo) {
             w = w * ry;
         }
         if (p.modo == 0) { gfx::MultMatrix(w.m); break; }
-        if (!gBaseMVLeida) { gfx::GetMatrix(gfx::ModelView, gBaseMV.m); gBaseMVLeida = true; }
-        Matrix4 m = gBaseMV * w;
+        if (!gBaseMVLeida) {
+            gfx::GetMatrix(gfx::ModelView, gBaseMV.m); gBaseMVLeida = true;
+            gCamMV = gBaseMV;
+            Object* padre = gRaizCorrida ? gRaizCorrida->Parent : NULL;
+            if (padre && padre != SceneCollection) {
+                Matrix4 wp, inv; padre->GetWorldMatrix(wp);
+                if (Matrix4::InvertirAfin(wp, inv)) gCamMV = gBaseMV * inv;
+            }
+        }
+        Matrix4 m = gCamMV * w;
         gfx::LoadMatrix(m.m); gMVCargada = true;
         break;
     }
@@ -617,7 +726,9 @@ static void EjecutarPasoCrudo(W3dPaso& p, size_t& i, Rutina* yo) {
     case PasoPunteroVertices: case PasoPunteroNormales: case PasoPunteroUV: case PasoPunteroColores:
         Puntero(p.tipo, p); break;
     case PasoDibujar: Dibujar(p); break;
-    case PasoTamPunto:   gfx::PointSize(p.n[0].Valor()); break;
+    case PasoPunteroPose: PunteroPose(p); break;
+    case PasoDibujarVisibles: DibujarVisibles(p); break;
+    case PasoTamPunto:  gfx::PointSize(p.n[0].Valor()); break;
     case PasoAnchoLinea: gfx::LineWidth(p.n[0].Valor()); break;
     case PasoHijos:
         if (yo) {
@@ -765,6 +876,24 @@ static void EjecutarPasoCrudo(W3dPaso& p, size_t& i, Rutina* yo) {
         break;
     }
     case PasoVisible: *(float*)p.n[0].p = Visible(p) ? 1.0f : 0.0f; break;
+    case PasoSaltarNoListado: {
+        const Object* o = (const Object*)p.ptr;
+        if (o && o->listadoRiel == 0) i += (size_t)(p.entero > 0 ? p.entero : 0);
+        break;
+    }
+    case PasoSaltarRiel: {
+        const bool va = CameraActive && CameraActive->Riel && (Object*)CameraActive->Riel == (Object*)p.ptr;
+        if (va == (p.modo == 0)) i += (size_t)(p.entero > 0 ? p.entero : 0);
+        break;
+    }
+    case PasoSaltarFuera: {
+        const Object* o = (const Object*)p.ptr;
+        if (!o) break;
+        const Vector3 w = o->GetGlobalPosition();
+        if (w.x < p.n[0].Valor() || w.x > p.n[1].Valor() || w.z < p.n[2].Valor() || w.z > p.n[3].Valor())
+            i += (size_t)(p.entero > 0 ? p.entero : 0);
+        break;
+    }
     case PasoLua:
         // la funcion del script de la RUTINA, o del objeto que eligio el paso
         W3dScriptEvento(p.ptr2 ? (Object*)p.ptr2 : (Object*)yo, p.ref.c_str(), (Object* const*)NULL, 0, (const float*)NULL, 0);
@@ -819,6 +948,7 @@ void Rutina::RenderObject() {
     const double t0 = g_rutinaPerfil ? RelojPerfil() : 0.0;
     const long tris0 = (long)gfx::g_statTrisOpacos + gfx::g_statTrisBlend;
     AbrirCorrida();
+    if (gProf == 1) gRaizCorrida = this;
     Rutina* antes = gEnCurso; gEnCurso = this;
     int veces = (int)(repetir + 0.5f); if (veces < 1) veces = 1; if (veces > 100000) veces = 100000;
     if (veces == 1) Ejecutar(ListaActual());
@@ -927,7 +1057,15 @@ bool W3dRutinaPasoDesdeLua(W3dPaso& p, std::string& error) {
         p.ptr = r;
         p.ptr2 = p.ref2.empty() ? NULL : W3dBuscarNombreDesde(gEnCurso, p.ref2);
     } else {
-        ResolverPaso(p, gEnCurso, gEnCurso, NULL);
+        // (una textura que paso() pide y nadie tenia cargada queda retenida por la rutina que lo llama: se suelta con
+        //  ella. Si ya la tenia, la referencia de mas se devuelve)
+        std::vector<Texture*> tex;
+        ResolverPaso(p, gEnCurso, gEnCurso, NULL, &tex);
+        for (size_t k = 0; k < tex.size(); k++) {
+            bool ya = false;
+            for (size_t j = 0; j < gEnCurso->texRetenidas.size() && !ya; j++) ya = (gEnCurso->texRetenidas[j] == tex[k]);
+            if (ya) TexturaSoltar(tex[k]); else gEnCurso->texRetenidas.push_back(tex[k]);
+        }
         if (rt != RefNada && rt != RefFuncion && !p.ptr) { error = "no se encontro '" + p.ref + "'"; return false; }
     }
     if (p.tipo == PasoVisible && !p.n[0].p) { error = "visible: el destino tiene que ser una memoria (@nombre[i])"; return false; }
@@ -1032,6 +1170,16 @@ void RutinaEscribirCampos(std::string& s, int ind, Rutina* r, std::string (*emit
         RuEsc(s, kModos[m]); s += ": "; RuEsc(s, kModos[(int)r->usar[m]]);
     }
     if (hayU) s += "}";
+    if (!r->memoriasIniciales.empty()) {
+        s += ",\n"; RuSang(s, ind); s += "\"memorias\": {";
+        for (size_t i = 0; i < r->memoriasIniciales.size(); i++) {
+            s += i ? ",\n" : "\n"; RuSang(s, ind + 1); RuEsc(s, r->memoriasIniciales[i].first); s += ": [";
+            const std::vector<float>& v = r->memoriasIniciales[i].second;
+            for (size_t k = 0; k < v.size(); k++) { char b[32]; snprintf(b, sizeof b, "%s%g", k ? ", " : "", v[k]); s += b; }
+            s += "]";
+        }
+        s += "\n"; RuSang(s, ind); s += "}";
+    }
 }
 // un paso de un tipo con UN numero (copiado de otro): los pasos viejos se parten en estos
 static W3dPaso PasoConNumero(int tipo, const W3dNum& n) {
@@ -1181,6 +1329,17 @@ void RutinaLeerCampos(JVal* j, Rutina* r, std::string (*refTextura)(const std::s
         const int m = ModoDesdeNombre(it->first);
         const int u = (it->second->tipo == 2) ? ModoDesdeNombre(it->second->str) : -1;
         if (m > 0) r->usar[m] = (signed char)(u > 0 ? u : -1);
+    }
+    // las memorias iniciales (hasta 256 floats cada una): se escriben ya, antes del primer cuadro
+    r->memoriasIniciales.clear();
+    JVal* ms = JHijo(j, "memorias", 4);
+    if (ms) for (std::map<std::string, JVal*>::iterator it = ms->obj.begin(); it != ms->obj.end(); ++it) {
+        if (!it->second || it->second->tipo != 5) continue;
+        std::vector<float> v;
+        for (size_t k = 0; k < JFilaLen(it->second) && k < (size_t)W3D_MEMORIA_TAM; k++) v.push_back(JFilaNum(it->second, k, 0.0f));
+        float* m = W3dMemoria(it->first);
+        for (size_t k = 0; k < v.size(); k++) m[k] = v[k];
+        r->memoriasIniciales.push_back(std::make_pair(it->first, v));
     }
     // (sin transformacion: lo que traiga el archivo no cuenta)
     r->pos = Vector3(0, 0, 0); r->scale = Vector3(1, 1, 1); r->SetRot(Quaternion());

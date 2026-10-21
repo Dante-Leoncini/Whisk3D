@@ -44,6 +44,8 @@
 #include <map>
 #include <utility>
 
+class Texture;
+
 // los TIPOS de paso. El .w3d guarda el NOMBRE (W3dPasoNombre), no el numero: el orden del enum se puede cambiar.
 enum W3dPasoTipo {
     // transformar (la matriz MODELVIEW)
@@ -86,6 +88,19 @@ enum W3dPasoTipo {
     PasoSaltarSiNinguna,// si NINGUNA bandera de un array de rangos esta prendida (los mismos n[0] = rangos y n[1] = banderas
                         // que un "Dibujar elementos" por array), saltea los proximos N pasos: el estado y el dibujo de una
                         // parte sin ninguna pieza visible no cuestan nada
+    PasoPunteroPose,    // un puntero (el array del campo 'modo': W3dArrayRutina) a los arrays de un OBJETO malla: si el objeto
+                        // todavia COMPARTE esa capa con su malla de la biblioteca, el VBO de la malla (subido una vez); si
+                        // tiene la suya (su vertex anim lo poso, lua le cambio colores, una animacion de UV), su copia de RAM.
+                        // Animar no re-especifica ningun buffer (el stall del tiler MBX)
+    PasoDibujarVisibles,// los triangulos VISIBLES de un objeto malla: la lista de la celda del modificador Oclusion (indices
+                        // de cliente) o, sin oclusion, la malla entera desde el IBO de su recurso. Con los punteros que haya
+    PasoSaltarFuera,    // si el objeto esta FUERA del rectangulo XZ (n0..n3 = min X, max X, min Z, max Z), saltea N pasos
+                        // (un reflejo que solo existe sobre su charco)
+    PasoSaltarRiel,     // saltea N pasos segun el RIEL por el que va la camara activa ('ref' = la curva): modo 0 = si va
+                        // por el, 1 = si NO va. El escenario con la oclusion de OTRO riel (el viaje al bonus) se dibuja
+                        // solo mientras la camara va por ese riel
+    PasoSaltarNoListado,// si el objeto NO esta en la lista del nodo actual de su Culling de riel (Object::listadoRiel == 0:
+                        // la SLST del original dice que desde aca no se ve), saltea N pasos
     PasoN
 };
 
@@ -105,6 +120,7 @@ enum W3dArrayRutina { ArrayVertices = 0, ArrayNormales, ArrayUV, ArrayColores, A
 enum W3dPasoOpciones { OpcNada = 0, OpcNieblaModo, OpcTexturaModo, OpcFuncionZ, OpcMezclaModo, OpcLuzComponente,
                        OpcLuzTipo, OpcPrimitiva, OpcFiltro, OpcRepetir, OpcMaterialComp, OpcArray, OpcMatriz,
                        OpcMezclaTex,   // "Texture mix": Interpolate / Multiply (lightmap) / Multiply 2x
+                       OpcRiel,        // "Skip if camera riel": si va por el / si no va
                        OpcN };
 // el RANGO de "Dibujar elementos" (campo 'sub'): la parte entera, triangulos a mano o los rangos de un array
 enum W3dDibujarRango { RangoParte = 0, RangoManual, RangoArray };
@@ -190,8 +206,12 @@ public:
     // "@bucle[0]" (y el total en "@bucle[1]") para que los pasos varien. Al terminar la corrida la matriz se repone
     // como siempre. float para el PropFloat entero del panel. 1 = una rutina comun.
     float repetir;
+    // MEMORIAS INICIALES: lo que el .w3d trae escrito en memorias (las cajas de las celdas de un nivel, una tabla): se
+    // cargan al leer la rutina (W3dMemoria) y se guardan con ella. Lua puede pisarlas como cualquier memoria
+    std::vector<std::pair<std::string, std::vector<float> > > memoriasIniciales;
     unsigned genHecha;     // (constructor) la generacion en la que ya corrio (g_w3dConstructorGen)
     std::vector<MallaRecurso*> retenidas;   // las mallas que dibuja (cargadas mientras la rutina las nombre)
+    std::vector<Texture*> texRetenidas;     // y sus texturas (una referencia por paso que la nombra)
     // (editor) como estaban los arrays (vertices, normales, uv, colores: 1/0/-1) cuando EMPEZO a dibujarse en el ultimo
     // cuadro: la validacion arranca de ahi (tambien la del panel, que corre fuera del dibujo). Sin cuadro: no se sabe
     signed char arraysInicio[4];
