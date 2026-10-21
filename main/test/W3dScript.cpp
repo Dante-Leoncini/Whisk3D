@@ -12,6 +12,7 @@
 #include "W3dLang.h"
 #include "W3dLangTabla.h"
 #include <cmath>               // sqrt (skindump)
+#include "audio/W3dAudio.h"   // audiograbar / audionivel: el mixer sin dispositivo
 #include <ctime>               // nombresperf: clock() para la cota de tiempo
 #include <thread>              // compjobs: hardware_concurrency (la cota del -j del build)
 #include "objects/Objects.h"   // ObjActivo, g_editMesh, EditSelectMode, Sel*, DeseleccionarTodo
@@ -6961,6 +6962,82 @@ bool W3dRunCommand(const std::string& linea, std::string& err) {
         lua_close(L);
         printf("      [sonidotest] sonido() x5 sobre '%s' (real/cache/pitch) y '%s' (faltante)"
                " sin romper; proyecto='%s'\n", wav.c_str(), falta.c_str(), g_w3dDirProyecto.c_str());
+        return true;
+    }
+
+    // ---- audiograbar <seg> <salida.wav|-> <lua...> : GRABA lo que suena sin dispositivo. Pone el mixer en pausa (la
+    //      salida no avanza nada), corre el lua (sonido(), reverb()... con la carpeta del proyecto), mezcla <seg>
+    //      segundos con W3dAudioGrabar, corta todo y apaga la reverb. Imprime el RMS cada 100 ms y lo guarda para
+    //      audionivel. Sin mixer abierto (sin dispositivo de audio) lo dice y no falla.
+    // ---- audionivel <desde_ms> <hasta_ms> <min> <max> : el RMS (0..1, el promedio de los dos canales) de esa ventana
+    //      de la ultima grabacion tiene que estar entre min y max ----
+    if (cmd == "audiograbar" || cmd == "audionivel") {
+        static std::vector<short> gGrab;   // la ultima grabacion (estereo)
+        static int gGrabRate = 0;
+        if (cmd == "audionivel") {
+            float a = 0, b = 0, mn = 0, mx = 1;
+            ss >> a >> b >> mn >> mx;
+            if (!gGrabRate) { printf("      [audionivel] sin grabacion (sin audio): salteado\n"); return true; }
+            int i0 = (int)(a * 0.001f * gGrabRate), i1 = (int)(b * 0.001f * gGrabRate);
+            const int n = (int)gGrab.size() / 2;
+            if (i0 < 0) i0 = 0; if (i1 > n) i1 = n;
+            double e = 0; int k = 0;
+            for (int i = i0; i < i1; i++, k++) {
+                const double v = ((double)gGrab[i * 2] + (double)gGrab[i * 2 + 1]) * 0.5 / 32768.0;
+                e += v * v;
+            }
+            const float rms = k ? (float)sqrt(e / k) : 0.0f;
+            printf("      [audionivel] %.0f..%.0f ms: rms %.4f (entre %.4f y %.4f)\n", a, b, rms, mn, mx);
+            if (rms < mn || rms > mx) { err = "audionivel: el nivel no es el esperado"; return false; }
+            return true;
+        }
+        float seg = 1.0f; std::string salida;
+        ss >> seg >> salida;
+        std::string prog; std::getline(ss, prog);
+        const int rate = w3dEngine::W3dAudioRate();
+        if (!rate) { gGrabRate = 0; printf("      [audiograbar] SIN AUDIO (el mixer no abrio): salteado\n"); return true; }
+        const bool pausa = w3dEngine::W3dAudioPaused();
+        w3dEngine::W3dAudioPause(true);
+        lua_State* L = luaL_newstate();
+        luaL_openlibs(L);
+        BindsJuegoRegistrar(L);
+        const bool ok = luaL_dostring(L, prog.c_str()) == 0;
+        if (!ok) err = std::string("audiograbar: ") + (lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
+        lua_close(L);
+        const int frames = (int)(seg * rate);
+        gGrab.assign((size_t)frames * 2, 0);
+        for (int i = 0; ok && i < frames; i += 1024)
+            w3dEngine::W3dAudioGrabar(&gGrab[(size_t)i * 2], frames - i < 1024 ? frames - i : 1024);
+        gGrabRate = rate;
+        w3dEngine::W3dSoundStopAll();
+        w3dEngine::W3dAudioReverb(0.5f, 0.5f, 0.0f);
+        w3dEngine::W3dAudioPause(pausa);
+        if (!ok) return false;
+        std::string lin;
+        for (int v = 0; v * rate / 10 < frames; v++) {
+            const int i0 = v * rate / 10, i1 = (v + 1) * rate / 10 < frames ? (v + 1) * rate / 10 : frames;
+            double e = 0;
+            for (int i = i0; i < i1; i++) { const double x = ((double)gGrab[i * 2] + gGrab[i * 2 + 1]) * 0.5 / 32768.0; e += x * x; }
+            char b[16]; snprintf(b, sizeof b, " %.3f", i1 > i0 ? sqrt(e / (i1 - i0)) : 0.0);
+            lin += b;
+        }
+        printf("      [audiograbar] %.2f s a %d Hz; rms cada 100 ms:%s\n", seg, rate, lin.c_str());
+        if (!salida.empty() && salida != "-") {
+            FILE* f = fopen(salida.c_str(), "wb");
+            if (!f) { err = "audiograbar: no pude escribir " + salida; return false; }
+            const unsigned datos = (unsigned)frames * 4;
+            unsigned char h[44] = { 'R','I','F','F', 0,0,0,0, 'W','A','V','E', 'f','m','t',' ', 16,0,0,0, 1,0, 2,0,
+                                    0,0,0,0, 0,0,0,0, 4,0, 16,0, 'd','a','t','a', 0,0,0,0 };
+            const unsigned riff = 36 + datos, bps = (unsigned)rate * 4;
+            for (int k = 0; k < 4; k++) {
+                h[4 + k] = (unsigned char)(riff >> (8 * k)); h[24 + k] = (unsigned char)((unsigned)rate >> (8 * k));
+                h[28 + k] = (unsigned char)(bps >> (8 * k)); h[40 + k] = (unsigned char)(datos >> (8 * k));
+            }
+            fwrite(h, 1, 44, f);
+            fwrite(&gGrab[0], 2, gGrab.size(), f);   // (PCM 16 LE: el harness corre en PC little-endian)
+            fclose(f);
+            printf("      [audiograbar] -> %s\n", salida.c_str());
+        }
         return true;
     }
 
@@ -31722,6 +31799,45 @@ bool W3dRunCommand(const std::string& linea, std::string& err) {
     }
     // ---- idecargar ruta.lua [esperado] : "Load .lua..." del primer IDE del layout; con 'esperado' la ruta abierta tiene que
     //      ser esa (p.ej. scripts/x.lua = quedo importado adentro del proyecto). Imprime la ruta y la primera linea ----
+    // ---- idegrande : un script con un renglon ENORME (las tablas que inyecta un conversor: ~800000 letras en un
+    //      renglon) se dibuja sin colgarse. El IDE recorta en alto Y en ancho: los dibujos por cuadro no dependen del
+    //      largo del renglon (antes media cada tramo desde el principio del renglon: cuadratico, colgaba la PC). Mide
+    //      al principio, en el medio y al final del renglon, y que Buscar siga contando en el texto entero ----
+    if (cmd == "idegrande") {
+        namespace gfx = w3dEngine;
+        double W3dNowMs();
+        std::string t = "-- idegrande\nlocal T = {";
+        int esperadas = 0;
+        for (int i = 0; (int)t.size() < 800000; i++) {
+            char b[16]; sprintf(b, "%d, ", i % 997); t += b;
+            if (i % 997 == 996) esperadas++;
+        }
+        t += "0}\nprint(\"fin\")";
+        IDE* ide = new IDE();
+        ide->x = 0; ide->y = 0; ide->Resize(900, 600);
+        ide->SetTexto(t);
+        bool ok = true;
+        const int cols[3] = { 0, 400000, 800000 };
+        for (int k = 0; k < 3; k++) {
+            ide->CursorA(1, cols[k], false);
+            ide->Render();   // (el primer cuadro acomoda el scroll)
+            gfx::StatsReset();
+            const double t0 = W3dNowMs();
+            ide->Render(); gfx::Finish();
+            const double ms = W3dNowMs() - t0;
+            const long dc = gfx::g_statDrawTris;
+            printf("      [idegrande] renglon de %d letras, columna %d: %ld dibujos, %.2f ms\n",
+                   (int)ide->lineas[1].size(), ide->curCol, dc, ms);
+            if (dc > 1000 || ms > 200.0) ok = false;
+        }
+        std::vector<int> L, C;
+        ide->Coincidencias("996, ", true, false, &L, &C);
+        printf("      [idegrande] Buscar '996, ': %d (esperadas %d)\n", (int)L.size(), esperadas);
+        if ((int)L.size() != esperadas) ok = false;
+        delete ide;
+        if (!ok) { err = "idegrande: el IDE dibuja de mas (o no encuentra) con un renglon enorme"; return false; }
+        return true;
+    }
     // ---- idecursor <linea> <columna> : pone el cursor del IDE del layout (lineas y columnas desde 0) ----
     if (cmd == "idecursor") {
         int lin = 0, col = 0; ss >> lin >> col;

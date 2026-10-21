@@ -47,7 +47,7 @@ extern "C" {
 
 // audio del Core, forward-decl (evita el include del dir de audio, como en W3dScript.cpp).
 // Sin -DW3D_ENABLE_AUDIO son stubs no-op -> sonido() no hace nada y no rompe.
-namespace w3dEngine { class W3dSound; W3dSound* W3dSoundLoad(const char*); void W3dSoundFree(W3dSound*); int W3dSoundPlayPitch(W3dSound*, float, bool, float); int W3dSoundPlayPitchPan(W3dSound*, float, bool, float, float); void W3dSoundStopFade(int, float); int W3dSoundPlayAt(W3dSound*, float, bool, float, float, double); void W3dSoundStopFadeAt(int, float, double); double W3dAudioReloj(); void W3dSoundStopAll(); void W3dSoundSetVolume(int, float); void W3dSoundSetPitch(int, float); float W3dSoundPos(int); }
+#include "audio/W3dAudio.h"   // el mixer: sonido(), la envolvente y la reverb
 
 // ---------------------------------------------------------------------------
 //  TAMANO del lienzo del juego: el MISMO que ve el render del overlay
@@ -616,7 +616,7 @@ static int LSetUVRect(lua_State* L) {
     }
     return 0;
 }
-// sonido("sonidos/bip.wav" [, vol [, pitch [, loop [, pan]]]]): reproduce un WAV. La ruta relativa
+// sonido("sonidos/bip.wav" [, vol [, pitch [, loop [, pan]]]]) o sonido(ruta, {opciones}) (ver LSonido): reproduce un WAV. La ruta relativa
 // cuelga de la carpeta del PROYECTO (g_w3dDirProyecto, la del .w3d abierto); vol 0..1 (default 1);
 // pitch 1 = normal (paso fraccional en la voz, W3dSoundPlayPitch). El WAV se carga UNA vez y se
 // cachea por ruta resuelta (NULL tambien: un archivo que falta no reintenta cada frame). No
@@ -671,12 +671,38 @@ void W3dSonidosLiberar() {
 int W3dSonidosCacheados() { return (int)gSonidos.size(); }
 bool W3dSonidoCacheado(const std::string& ruta) { return gSonidos.find(ruta) != gSonidos.end(); }
 
+// sonido(ruta, {vol=, tono=, loop=, pan=, en=, ataque=, decaimiento=, sostenido=, caida=, liberacion=, duracion=,
+// reverb=}): lo mismo con NOMBRES, mas la ENVOLVENTE (segundos y nivel 0..1, ver W3dEnvolvente en W3dAudio.h) y el
+// ENVIO a la reverb global (reverb(), 0..1). Lo que no se pone queda como en la forma con posiciones
+static float CampoNum(lua_State* L, int t, const char* k, float defecto, bool* hay = 0) {
+    lua_getfield(L, t, k);
+    float v = defecto;
+    if (lua_isnumber(L, -1)) { v = (float)lua_tonumber(L, -1); if (hay) *hay = true; }
+    lua_pop(L, 1);
+    return v;
+}
 static int LSonido(lua_State* L) {
     const char* ruta = luaL_checkstring(L, 1);
-    float vol   = (float)luaL_optnumber(L, 2, 1.0);
-    float pitch = (float)luaL_optnumber(L, 3, 1.0);
-    bool  loop  = lua_toboolean(L, 4) != 0;   // arg 4 opcional: true = sample en LOOP (nota sostenida)
-    float pan   = (float)luaL_optnumber(L, 5, 0.0);   // arg 5 opcional: paneo -1 (izq) .. 0 .. 1 (der)
+    const bool opciones = lua_istable(L, 2);
+    float vol   = opciones ? CampoNum(L, 2, "vol", 1.0f) : (float)luaL_optnumber(L, 2, 1.0);
+    float pitch = opciones ? CampoNum(L, 2, "tono", CampoNum(L, 2, "pitch", 1.0f)) : (float)luaL_optnumber(L, 3, 1.0);
+    bool  loop  = false;   // arg 4 opcional: true = sample en LOOP (nota sostenida)
+    if (opciones) { lua_getfield(L, 2, "loop"); loop = lua_toboolean(L, -1) != 0; lua_pop(L, 1); }
+    else loop = lua_toboolean(L, 4) != 0;
+    float pan   = opciones ? CampoNum(L, 2, "pan", 0.0f) : (float)luaL_optnumber(L, 5, 0.0);   // -1 (izq) .. 0 .. 1 (der)
+    // la envolvente (solo si se pidio algo) y el envio a la reverb
+    w3dEngine::W3dEnvolvente env;
+    bool conEnv = false;
+    float envio = 0.0f;
+    if (opciones) {
+        env.ataque      = CampoNum(L, 2, "ataque", 0.0f, &conEnv);
+        env.decaimiento = CampoNum(L, 2, "decaimiento", 0.0f, &conEnv);
+        env.sostenido   = CampoNum(L, 2, "sostenido", 1.0f, &conEnv);
+        env.caida       = CampoNum(L, 2, "caida", 0.0f, &conEnv);
+        env.liberacion  = CampoNum(L, 2, "liberacion", 0.0f, &conEnv);
+        env.duracion    = CampoNum(L, 2, "duracion", 0.0f, &conEnv);
+        envio           = CampoNum(L, 2, "reverb", 0.0f);
+    }
     if (vol < 0.0f) vol = 0.0f; if (vol > 1.0f) vol = 1.0f;
     if (w3dEngine::ConfigMudo()) return 0;   // mute global del Core (mismo criterio que beep()); nil = no sono
     // resolver la ruta: absoluta queda tal cual; una ENTRADA del contenedor v4 montado queda
@@ -702,8 +728,8 @@ static int LSonido(lua_State* L) {
     // 32 voces ocupadas). El handle se le pasa a pararSonido(h [, fadeSeg]) — es lo que
     // necesita el secuenciador de musica en lua (notas sostenidas: loop=true + release).
     // arg 6 opcional: el momento EXACTO en el reloj del mixer (relojAudio()); sin el, suena ya
-    double en = luaL_optnumber(L, 6, -1.0);
-    int id = s ? w3dEngine::W3dSoundPlayAt(s, vol, loop, pitch, pan, en) : 0;
+    double en = opciones ? (double)CampoNum(L, 2, "en", -1.0f) : luaL_optnumber(L, 6, -1.0);
+    int id = s ? w3dEngine::W3dSoundPlayEnv(s, vol, loop, pitch, pan, en, conEnv ? &env : 0, envio) : 0;
     if (id <= 0) return 0;   // nil
     lua_pushinteger(L, id);
     return 1;
@@ -735,6 +761,19 @@ static int LPararSonido(lua_State* L) {
     float fade = (float)luaL_optnumber(L, 2, 0.005);
     double en = luaL_optnumber(L, 3, -1.0);     // arg 3 opcional: el corte AGENDADO en el reloj del mixer
     if (id > 0) w3dEngine::W3dSoundStopFadeAt(id, fade, en);
+    return 0;
+}
+// soltarSonido(h): suelta la nota de la voz: su envolvente pasa a la liberacion (sin envolvente: el corte de ~5 ms)
+static int LSoltarSonido(lua_State* L) {
+    int id = (int)luaL_optinteger(L, 1, 0);
+    if (id > 0) w3dEngine::W3dSoundSoltar(id);
+    return 0;
+}
+// reverb(sala, amortiguacion, nivel): la REVERB global (0..1 cada uno; nivel 0 = apagada). Cada sonido le manda lo
+// que diga su 'reverb' (sonido(ruta, {reverb = 0.3}))
+static int LReverb(lua_State* L) {
+    w3dEngine::W3dAudioReverb((float)luaL_optnumber(L, 1, 0.5), (float)luaL_optnumber(L, 2, 0.5),
+                              (float)luaL_optnumber(L, 3, 0.0));
     return 0;
 }
 // relojAudio(): los SEGUNDOS de audio que mezclo el mixer (no avanza en pausa): el reloj de las agendas de sonido() y
@@ -1681,6 +1720,8 @@ void BindsJuegoRegistrar(void* Lv) {
     lua_pushcfunction(L, LSetUVRect);   lua_setglobal(L, "setUVRect");
     lua_pushcfunction(L, LSonido);      lua_setglobal(L, "sonido");
     lua_pushcfunction(L, LPararSonido); lua_setglobal(L, "pararSonido");
+    lua_pushcfunction(L, LSoltarSonido); lua_setglobal(L, "soltarSonido");
+    lua_pushcfunction(L, LReverb);      lua_setglobal(L, "reverb");
     lua_pushcfunction(L, LRelojAudio);  lua_setglobal(L, "relojAudio");
     lua_pushcfunction(L, LRelojMs);     lua_setglobal(L, "relojMs");
     lua_pushcfunction(L, LPerfilLua);   lua_setglobal(L, "perfilLua");

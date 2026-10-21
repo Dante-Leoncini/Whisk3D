@@ -23,6 +23,7 @@
 #include "animation/Animation.h"         // w3dGetTicks: doble/triple toque
 #include "ViewPorts/TransformUI.h"       // ToolbarUsaTactil: las agarraderas solo con pantalla tactil
 #include <stdio.h>                       // guardado atomico: fopen/fwrite/rename
+#include <string.h>                      // strncmp: las keywords del lexer
 #include <math.h>                        // cosf/sinf: las agarraderas
 
 namespace gfx = w3dEngine;
@@ -157,24 +158,26 @@ static bool IdeEsIdent(char c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
            (c >= '0' && c <= '9') || c == '_';
 }
-static bool IdeEsKeyword(const std::string& p) {
+// sin armar un string por palabra (las tablas generadas tienen decenas de miles de identificadores por renglon)
+static bool IdeEsKeyword(const char* p, size_t n) {
     static const char* kw[] = {
         "and", "break", "do", "else", "elseif", "end", "false", "for",
         "function", "goto", "if", "in", "local", "nil", "not", "or",
         "repeat", "return", "then", "true", "until", "while", 0 };
-    for (int i = 0; kw[i]; i++) if (p == kw[i]) return true;
+    if (n < 2 || n > 8) return false;
+    for (int i = 0; kw[i]; i++) if (strncmp(p, kw[i], n) == 0 && kw[i][n] == 0) return true;
     return false;
 }
 static void IdeMarcar(std::vector<unsigned char>* tipos, size_t d, size_t h, unsigned char t) {
     if (!tipos) return;
     for (size_t i = d; i < h && i < tipos->size(); i++) (*tipos)[i] = t;
 }
-void IDE::LexLinea(const std::string& s, bool* enBloque, std::vector<unsigned char>* tipos) {
+void IDE::LexLinea(const std::string& s, bool* enBloque, std::vector<unsigned char>* tipos, size_t hasta) {
     const size_t n = s.size();
-    if (tipos) tipos->assign(n, 0);
+    if (tipos) tipos->assign(hasta < n ? hasta : n, 0);   // (IdeMarcar no escribe mas alla del largo)
     bool bloque = enBloque ? *enBloque : false;
     size_t i = 0;
-    while (i < n) {
+    while (i < n && i < hasta) {
         if (bloque) { // dentro de --[[ ... : comentario hasta el "]]"
             size_t fin = s.find("]]", i);
             if (fin == std::string::npos) { IdeMarcar(tipos, i, n, 1); i = n; }
@@ -221,20 +224,25 @@ void IDE::LexLinea(const std::string& s, bool* enBloque, std::vector<unsigned ch
         if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_') { // palabra
             size_t j = i;
             while (j < n && IdeEsIdent(s[j])) j++;
-            if (IdeEsKeyword(s.substr(i, j - i))) IdeMarcar(tipos, i, j, 3);
+            if (tipos && IdeEsKeyword(s.c_str() + i, j - i)) IdeMarcar(tipos, i, j, 3);
             i = j; continue;
         }
         i++;
     }
-    if (enBloque) *enBloque = bloque;
+    if (enBloque && hasta >= n) *enBloque = bloque;
 }
+
+static int IdeColVisual(const std::string& s, int b);
 
 void IDE::RecalcularBloques() {
     bloqueAlInicio.assign(lineas.size(), 0);
+    anchoMaxCols = 0;
     bool b = false;
     for (size_t i = 0; i < lineas.size(); i++) {
         bloqueAlInicio[i] = b ? 1 : 0;
         LexLinea(lineas[i], &b, NULL); // solo avanza el estado
+        const int lv = IdeColVisual(lineas[i], (int)lineas[i].size());
+        if (lv > anchoMaxCols) anchoMaxCols = lv;
     }
 }
 
@@ -246,7 +254,7 @@ IDE::IDE() {
     curLin = 0; curCol = 0;
     haySel = false; selLin = 0; selCol = 0;
     undoUltimaOp = 0;
-    lastLineas = -1; lastMaxAncho = 0;
+    lastLineas = -1; lastMaxAncho = 0; anchoMaxCols = 0;
     selDrag = false; silencioso = false; hayTextoDisco = false;
     tapsSeguidos = 0; tUltimoTap = 0; ultTapX = -1000; ultTapY = -1000; gestoTactil = 0; lupaX = 0; lupaY = 0;
     lineas.push_back(std::string()); // el buffer nunca esta vacio (1 linea vacia)
@@ -289,15 +297,23 @@ void IDE::AbrirPrimerScript() {
 //  posiciones de BYTE, siempre al principio de una letra.
 // ---------------------------------------------------------------------------------------------------------------
 static bool IdeEsCont(unsigned char c) { return (c & 0xC0) == 0x80; }   // byte de continuacion (10xxxxxx)
-static int IdeColVisual(const std::string& s, int b) {                 // byte -> columna en pantalla
+static int IdeLetrasEntre(const std::string& s, int b0, int b1) {      // letras (columnas) en los bytes [b0, b1)
     int v = 0;
-    for (int i = 0; i < b && i < (int)s.size(); i++) if (!IdeEsCont((unsigned char)s[(size_t)i])) v++;
+    for (int i = b0; i < b1 && i < (int)s.size(); i++) if (!IdeEsCont((unsigned char)s[(size_t)i])) v++;
     return v;
 }
-static int IdeByteDeCol(const std::string& s, int v) {                 // columna en pantalla -> byte
-    int i = 0, n = (int)s.size();
+static int IdeAvanzarLetras(const std::string& s, int b, int v) {     // el byte 'v' letras despues de b
+    int i = b, n = (int)s.size();
     while (i < n && v > 0) { i++; while (i < n && IdeEsCont((unsigned char)s[(size_t)i])) i++; v--; }
     return i;
+}
+static int IdeColVisual(const std::string& s, int b) { return IdeLetrasEntre(s, 0, b); }   // byte -> columna en pantalla
+static int IdeByteDeCol(const std::string& s, int v) { return IdeAvanzarLetras(s, 0, v); } // columna en pantalla -> byte
+// RECORTE HORIZONTAL: los bytes [*b0, *b1) de la linea entre las columnas col0 y col0 + cant (lo que entra en el
+// ancho). Un renglon mas corto que col0 da b0 == b1 (no se ve nada)
+static void IdeTramoVisible(const std::string& s, int col0, int cant, int* b0, int* b1) {
+    *b0 = IdeByteDeCol(s, col0);
+    *b1 = IdeAvanzarLetras(s, *b0, cant);
 }
 static int IdeLetraSig(const std::string& s, int b) {
     int n = (int)s.size(); if (b >= n) return n;
@@ -343,6 +359,27 @@ static std::string IdePlegar(const std::string& s) {
     return o;
 }
 static bool IdeEsLetraPalabra(unsigned char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c >= 0x80; }
+
+// las coincidencias de 'aguja' (ya plegada si !mayus) en la linea que EMPIEZAN en los bytes [desde, hasta): Buscar
+// recorre la linea entera y el dibujo solo el tramo que se ve
+static void IdeBuscarEnLinea(const std::string& s, const std::string& aguja, bool mayus, bool palabra,
+                             size_t desde, size_t hasta, std::vector<int>* col) {
+    const size_t n = s.size(), la = aguja.size();
+    if (la == 0 || desde >= n || desde >= hasta) return;
+    size_t z = hasta + la; if (z > n) z = n;   // las que empiezan antes de 'hasta' terminan antes de z
+    const std::string pajar = mayus ? s.substr(desde, z - desde) : IdePlegar(s.substr(desde, z - desde));
+    size_t p = pajar.find(aguja);
+    while (p != std::string::npos && desde + p < hasta) {
+        const size_t a = desde + p, e = a + la;
+        bool ok = true;
+        if (palabra) {
+            if (a > 0 && IdeEsLetraPalabra((unsigned char)s[a - 1])) ok = false;
+            if (e < n && IdeEsLetraPalabra((unsigned char)s[e])) ok = false;
+        }
+        if (ok) col->push_back((int)a);
+        p = pajar.find(aguja, p + la);
+    }
+}
 
 // texto crudo -> lineas del buffer (sin '\r'; tab -> 4 espacios: la fuente
 // pixel no tiene tabulador y el cursor por columnas necesita ancho fijo)
@@ -565,19 +602,11 @@ void IDE::Coincidencias(const std::string& t, bool mayus, bool palabra, std::vec
     lin->clear(); col->clear();
     if (t.empty()) return;
     const std::string aguja = mayus ? t : IdePlegar(t);
+    std::vector<int> cols;
     for (size_t l = 0; l < lineas.size(); l++) {
-        const std::string pajar = mayus ? lineas[l] : IdePlegar(lineas[l]);
-        size_t p = pajar.find(aguja);
-        while (p != std::string::npos) {
-            bool ok = true;
-            if (palabra) {
-                if (p > 0 && IdeEsLetraPalabra((unsigned char)pajar[p - 1])) ok = false;
-                const size_t e = p + aguja.size();
-                if (e < pajar.size() && IdeEsLetraPalabra((unsigned char)pajar[e])) ok = false;
-            }
-            if (ok) { lin->push_back((int)l); col->push_back((int)p); }
-            p = pajar.find(aguja, p + (aguja.empty() ? 1 : aguja.size()));
-        }
+        cols.clear();
+        IdeBuscarEnLinea(lineas[l], aguja, mayus, palabra, 0, lineas[l].size(), &cols);
+        for (size_t k = 0; k < cols.size(); k++) { lin->push_back((int)l); col->push_back(cols[k]); }
     }
 }
 bool IDE::IrACoincidencia(const std::string& t, bool mayus, bool palabra, int dir) {
@@ -1305,6 +1334,21 @@ static const float* IdeColorDeTipo(unsigned char t) {
     return ListaColores[static_cast<int>(ColorID::blanco)];
 }
 
+// los bytes [b0, b1) de una linea, por tramos del mismo color del lexer ('tipos' cubre hasta b1); col0 = la columna
+// de b0. La x de cada tramo se va sumando: medirla desde el principio de la linea en cada tramo era cuadratico (un
+// renglon de 786000 letras de una tabla generada colgaba la PC entera)
+static void IdeDibujarTramo(const std::string& s, const std::vector<unsigned char>& tipos, int b0, int b1, int col0,
+                            int px, int py, int LW) {
+    int i = b0, col = col0;
+    while (i < b1) {
+        int j = i;
+        while (j < b1 && tipos[(size_t)j] == tipos[(size_t)i]) j++;
+        IdeTexto(px + col * LW, py, s.substr((size_t)i, (size_t)(j - i)), IdeColorDeTipo(tipos[(size_t)i]));
+        col += IdeLetrasEntre(s, i, j);
+        i = j;
+    }
+}
+
 void IDE::Render() {
     SincronizarBarra();
     const int glY = W3dPantallaAlto - y - height;
@@ -1333,11 +1377,9 @@ void IDE::Render() {
     const int n = (int)lineas.size();
     const int gutterW = GutterW();
 
-    // medir el contenido y recalcular el scroll SOLO si cambio (patron Console)
-    int maxLen = 0;
-    for (int i = 0; i < n; i++)
-        { const int lv = IdeColVisual(lineas[i], (int)lineas[i].size()); if (lv > maxLen) maxLen = lv; }
-    int maxAncho = gutterW + marginGS + maxLen * LW + marginGS + GlobalScale * 9;
+    // recalcular el scroll SOLO si cambio el contenido (patron Console). El renglon mas largo ya lo midio
+    // RecalcularBloques: recorrer el texto entero en cada cuadro pesa con scripts de varios MB
+    int maxAncho = gutterW + marginGS + anchoMaxCols * LW + marginGS + GlobalScale * 9;
     if (n != lastLineas || maxAncho != lastMaxAncho) {
         lastLineas = n; lastMaxAncho = maxAncho;
         RecalcularScroll();
@@ -1346,8 +1388,13 @@ void IDE::Render() {
     int hVis = height - top; if (hVis < 0) hVis = 0;
     const int textX0 = gutterW + marginGS + PosX;
     const int py0 = top + marginGS + PosY;
+    // RECORTE: los renglones que entran en el alto y, en cada uno, las columnas que entran en el ancho (las tablas
+    // que genera un conversor pueden tener renglones de cientos de miles de letras: solo se mide, colorea y dibuja
+    // el tramo visible)
     int primera = (0 - (py0)) / lh - 1; if (primera < 0) primera = 0;
     int ultima = primera + hVis / lh + 2; if (ultima > n) ultima = n;
+    int colIni = (-PosX - marginGS) / LW - 1; if (colIni < 0) colIni = 0;
+    const int colCant = (width - gutterW) / LW + 3;
 
     // ---- 1) quads: seleccion + caret + separador del gutter (sin textura) ----
     gfx::Scissor(x + gutterW, glY, (width > gutterW) ? width - gutterW : 0, hVis);
@@ -1364,17 +1411,26 @@ void IDE::Render() {
             IdeQuad(x0, (float)py, x1, (float)(py + lh), kIdeSeleccion);
         }
     }
-    { // BUSCAR: las coincidencias a la vista, resaltadas (la actual ya se ve como la seleccion)
+    { // BUSCAR: las coincidencias a la vista (en el tramo visible de cada renglon), resaltadas (la actual ya se ve
+      // como la seleccion)
         const IdeBusqueda* bq = IDEBusquedaActiva();
-        if (bq && bq->ide == this) {
-            std::vector<int> L, C;
-            Coincidencias(bq->texto, bq->mayus, bq->palabra, &L, &C);
-            for (size_t i = 0; i < L.size(); i++) {
-                const int l = L[i];
-                if (l < primera || l >= ultima) continue;
-                const float x0 = (float)(textX0 + IdeColVisual(lineas[(size_t)l], C[i]) * LW);
-                const float x1 = (float)(textX0 + IdeColVisual(lineas[(size_t)l], C[i] + (int)bq->texto.size()) * LW);
-                IdeQuad(x0, (float)(py0 + l * lh), x1, (float)(py0 + l * lh + lh), kIdeCoincide);
+        if (bq && bq->ide == this && !bq->texto.empty()) {
+            const std::string aguja = bq->mayus ? bq->texto : IdePlegar(bq->texto);
+            const int la = (int)aguja.size();
+            std::vector<int> C;
+            for (int l = primera; l < ultima; l++) {
+                const std::string& s = lineas[(size_t)l];
+                int b0, b1;
+                IdeTramoVisible(s, colIni, colCant, &b0, &b1);
+                if (b0 >= b1) continue;
+                C.clear();
+                IdeBuscarEnLinea(s, aguja, bq->mayus, bq->palabra, (size_t)(b0 - la + 1 > 0 ? b0 - la + 1 : 0), (size_t)b1, &C);
+                for (size_t i = 0; i < C.size(); i++) {
+                    const int c = (C[i] >= b0) ? colIni + IdeLetrasEntre(s, b0, C[i]) : colIni - IdeLetrasEntre(s, C[i], b0);
+                    const float x0 = (float)(textX0 + c * LW);
+                    const float x1 = x0 + (float)(IdeLetrasEntre(s, C[i], C[i] + la) * LW);
+                    IdeQuad(x0, (float)(py0 + l * lh), x1, (float)(py0 + l * lh + lh), kIdeCoincide);
+                }
             }
         }
     }
@@ -1393,9 +1449,10 @@ void IDE::Render() {
             }
         }
         for (int l = primera; l < ultima; l++) {
-            const int ind = IdeSangriaGuia(lineas, l);
+            int ind = IdeSangriaGuia(lineas, l);
+            if (ind > colIni + colCant) ind = colIni + colCant;   // (solo las que entran en el ancho)
             const int py = py0 + l * lh;
-            for (int c = 0; c < ind; c += kIdeTab) {
+            for (int c = (colIni / kIdeTab) * kIdeTab; c < ind; c += kIdeTab) {
                 const float gx = (float)(textX0 + c * LW);
                 const bool activa = (c == colActiva && l >= actDesde && l <= actHasta);
                 IdeQuad(gx, (float)py, gx + ancho, (float)(py + lh), activa ? kIdeGuiaActiva : kIdeGuia);
@@ -1446,16 +1503,12 @@ void IDE::Render() {
     for (int l = primera; l < ultima; l++) {
         const std::string& s = lineas[l];
         if (s.empty()) continue;
+        int b0, b1;
+        IdeTramoVisible(s, colIni, colCant, &b0, &b1);
+        if (b0 >= b1) continue;
         bool blq = (l < (int)bloqueAlInicio.size()) ? (bloqueAlInicio[l] != 0) : false;
-        LexLinea(s, &blq, &tipos);
-        int py = py0 + l * lh;
-        size_t i = 0;
-        while (i < s.size()) {
-            size_t j = i;
-            while (j < s.size() && tipos[j] == tipos[i]) j++;
-            IdeTexto(textX0 + IdeColVisual(s, (int)i) * LW, py, s.substr(i, j - i), IdeColorDeTipo(tipos[i]));
-            i = j;
-        }
+        LexLinea(s, &blq, &tipos, (size_t)b1);   // el color depende de lo anterior del renglon: hasta lo visible
+        IdeDibujarTramo(s, tipos, b0, b1, colIni, textX0, py0 + l * lh, LW);
     }
 
     const float* acento = ListaColores[static_cast<int>(ColorID::accent)];
@@ -1492,19 +1545,18 @@ void IDE::Render() {
         { const float cx = ox + (float)(vis * LW * zoom), gz = (float)(zoom * ((GlobalScale > 0) ? GlobalScale : 1));
           IdeQuad(cx, oy, cx + gz, oy + (float)(lh * zoom), acento); }
         gfx::EnableArray(gfx::TexCoordArray); gfx::Enable(gfx::Texture2D);
-        if (!s.empty()) {
+        // (solo las letras que entran en la lupa, alrededor del cursor)
+        const int colsLupa = bw / (LW * zoom) + 3;
+        int c0 = vis - colsLupa / 2 - 1; if (c0 < 0) c0 = 0;
+        int b0, b1;
+        IdeTramoVisible(s, c0, colsLupa + 2, &b0, &b1);
+        if (b0 < b1) {
             bool blq = (curLin < (int)bloqueAlInicio.size()) ? (bloqueAlInicio[(size_t)curLin] != 0) : false;
-            LexLinea(s, &blq, &tipos);
+            LexLinea(s, &blq, &tipos, (size_t)b1);
             gfx::PushMatrix();
             gfx::Translatef(ox, oy, 0);
             gfx::Scalef((float)zoom, (float)zoom, 1.0f);
-            size_t i = 0;
-            while (i < s.size()) {
-                size_t j = i;
-                while (j < s.size() && tipos[j] == tipos[i]) j++;
-                IdeTexto(IdeColVisual(s, (int)i) * LW, 0, s.substr(i, j - i), IdeColorDeTipo(tipos[i]));
-                i = j;
-            }
+            IdeDibujarTramo(s, tipos, b0, b1, c0, 0, 0, LW);
             gfx::PopMatrix();
         }
         // el borde verde de la lupa

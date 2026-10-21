@@ -134,8 +134,10 @@ class IDE : public ViewportBase, public WithBorder, public Scrollable {
         // lineas ('tipos' puede ser NULL para solo avanzar el estado). LIMITACIONES
         // (documentadas): no soporta niveles anidados [==[ ]==]; los strings largos
         // [[...]] solo se pintan dentro de su linea (multilinea queda como normal).
+        // 'hasta': clasifica solo los bytes de antes (el dibujo: hasta lo que se ve en un renglon de
+        // cientos de miles de letras). Cortada, 'tipos' queda de ese largo y 'enBloque' no se toca.
         static void LexLinea(const std::string& linea, bool* enBloque,
-                             std::vector<unsigned char>* tipos);
+                             std::vector<unsigned char>* tipos, size_t hasta = (size_t)-1);
 
         // ================= viewport =================
         void Render() W3D_OVERRIDE;
@@ -177,7 +179,8 @@ class IDE : public ViewportBase, public WithBorder, public Scrollable {
         void AsegurarCursorVisible();    // ajusta PosX/PosY para que el cursor se vea
         void RecalcularScroll();         // rango del scrollbar con las metricas actuales
         std::vector<unsigned char> bloqueAlInicio; // estado --[[ ]] al INICIO de cada linea
-        void RecalcularBloques();        // recalcula bloqueAlInicio (tras cada edicion)
+        int anchoMaxCols;                // el renglon mas largo, en letras (el Render no recorre el texto entero)
+        void RecalcularBloques();        // recalcula bloqueAlInicio y anchoMaxCols (tras cada edicion)
         int GutterW() const;             // ancho del margen de numeros de linea (px)
 };
 

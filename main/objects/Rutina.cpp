@@ -752,7 +752,7 @@ static void EjecutarPasoCrudo(W3dPaso& p, size_t& i, Rutina* yo) {
     case PasoTextura:        if (p.on) gfx::Enable(gfx::Texture2D); else gfx::Disable(gfx::Texture2D); break;
     case PasoFijarTextura:   gfx::BindTexture(((Texture*)p.ptr)->iID); break;
     case PasoTexturaModo:
-        // (DOT3: el color de vertice es la direccion de la luz, horneada; solo alfa: RGB del color, alfa de la textura)
+        // (DOT3: el color de vertice es la direccion de la luz, horneada; solo alfa: RGB del color, alfa de la textura por el del color)
         if (p.modo == 2) gfx::TexEnvDot3(true); else if (p.modo == 3) gfx::TexEnvAlphaOnly(true); else gfx::TexEnvReplace(p.modo == 1);
         break;
     case PasoTexturaFiltro:  gfx::TexFilter(p.modo == 1); break;

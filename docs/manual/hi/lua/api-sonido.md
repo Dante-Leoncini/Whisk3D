@@ -4,5 +4,8 @@
 |---|---|
 | `beep(freq [, ms, vol])` | एक बीप (बिना फ़ाइल के)। |
 | `sonido("sonidos/x.wav" [, vol, tono, loop, pan]) → h` | एक साउंड बजाता है; एक पहचानकर्ता लौटाता है। |
+| `sonido("sonidos/x.wav", {vol, tono, loop, pan, ataque, decaimiento, sostenido, caida, liberacion, duracion, reverb}) → h` | वही, नामों के साथ, साथ में एनवेलप (अटैक, डिके, 0 से 1 तक सस्टेन, `caida`: सस्टेन इतने सेकंड में 60 dB गिरता है, रिलीज़, और `duracion`: नोट इतने सेकंड बाद अपने आप छूट जाता है) और साउंड का कितना हिस्सा रिवर्ब में जाता है (0 से 1)। |
 | `pararSonido(h [, fundido])`, `pararSonidos()`, `ajustarSonido(h, vol [, tono])` | साउंड रोकना या एडजस्ट करना। |
+| `soltarSonido(h)` | नोट छोड़ता है: एनवेलप अपने रिलीज़ में चला जाता है। |
+| `reverb(sala, amortiguacion, nivel)` | सामान्य रिवर्ब: कमरे का आकार, डैम्पिंग और स्तर (हर एक 0 से 1; स्तर 0 बंद करता है)। |
 | `silenciar(bool)`, `estaMudo()` | सारी आवाज़ बंद करना। |

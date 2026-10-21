@@ -11,6 +11,9 @@ idecargar ide_guias.lua
 idecursor 7 14
 # --- menu Editar (deshacer/rehacer/...) y Buscar / Reemplazar (mayusculas, palabra completa, reemplazar todo = un deshacer)
 idebuscartest
+# --- un renglon ENORME (las tablas que inyecta un conversor, ~800000 letras): el IDE dibuja solo lo que se ve,
+#     en alto y en ancho; antes colgaba la PC ---
+idegrande
 # --- el panel Buscar NO es modal: Ctrl+F lo abre con el foco en "Buscar"; despues de Enter lo tipeado va al script y el
 #     panel sigue abierto; Esc lo cierra ---
 idecargar ide_guias.lua

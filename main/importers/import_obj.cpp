@@ -339,6 +339,16 @@ int TexturasPendientes() {
          ? (int)(g_texPendientes.size() - g_texPendIdx) : 0;
 }
 
+// los binds de lua texturasPendientes() / cargarTexturas() (script/W3dScript.h: W3dTexturasLuaHook)
+extern int (*W3dTexturasLuaHook)(int cargar);
+namespace {
+int TexturasLua(int cargar) {
+    if (cargar) CargarTodasTexturasPendientes();
+    return TexturasPendientes();
+}
+struct RegistrarTexturasLua { RegistrarTexturasLua() { W3dTexturasLuaHook = TexturasLua; } } gRegistrarTexturasLua;
+}
+
 // tira la cola entera SIN cargar nada (cierre de proyecto): las entradas
 // apuntan a materiales del proyecto que se esta cerrando. Las dormidas tambien.
 void OlvidarTexturasPendientes() {
