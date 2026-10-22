@@ -183,6 +183,7 @@ namespace w3dEngine {
 bool DecodeImage(const char* path, unsigned char** outRGBA, int* outW, int* outH) {
     if (!outRGBA) { return false; }
     *outRGBA = NULL;
+    if (EsW3dt(path)) return DecodeW3dt(path, 0, outRGBA, outW, outH);
     TInt w = 0, h = 0;
     unsigned char* rgba = NULL;
     TRAPD(err, DecodeImageSymbianL(path, &rgba, w, h));
@@ -220,6 +221,7 @@ static unsigned char* ReescalarPOT(const unsigned char* rgba, int w, int h, int&
 
 // LOAD (firma del motor): decode + POT + upload comun + free.
 bool LoadTexture(const char* path, unsigned int& outId, int* outW, int* outH) {
+    if (EsW3dt(path)) return LoadTextureW3dt(path, outId, outW, outH);   // (sin ICL: lista para la GPU)
     unsigned char* rgba = NULL;
     int w = 0, h = 0;
     if (!DecodeImage(path, &rgba, &w, &h)) { return false; }

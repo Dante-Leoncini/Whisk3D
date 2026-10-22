@@ -117,6 +117,14 @@ public:
         if (it != editadas.end()) { out = it->second; return true; }
         return zip.Leer(e, out);
     }
+    virtual bool LeerRango(const std::string& e, unsigned desde, unsigned n, std::vector<unsigned char>& out) {
+        std::map<std::string, std::vector<unsigned char> >::const_iterator it = editadas.find(e);
+        if (it == editadas.end()) return zip.LeerRango(e, desde, n, out);
+        out.clear();
+        if (desde > it->second.size() || it->second.size() - desde < n) return false;
+        out.assign(it->second.begin() + desde, it->second.begin() + desde + n);
+        return true;
+    }
     virtual void Listar(std::vector<std::string>& out) const {
         zip.Listar(out);
         for (std::map<std::string, std::vector<unsigned char> >::const_iterator it = editadas.begin();

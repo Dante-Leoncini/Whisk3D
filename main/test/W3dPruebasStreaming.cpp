@@ -58,6 +58,9 @@
 //    streamscript <ruta.lua> <version>      reescribe un .lua: un inicio() que suma 'version' en
 //                                           compartido("version") y cuenta en compartido("arranques")
 //    streamveredicto                        anota el veredicto del Play (compartido("veredicto")): el Stop lo borra
+//    paquetetest
+//        el .w3d como paquete listo para cargar: una textura .w3dt sube con su piramide y vuelve a pixeles, y la
+//        lectura por rango del zip devuelve solo esos bytes
 //    streamjuegolog <carpeta> <nombre> [igual]
 //        corre el juego compilado y exige su "[streaming] OK ..."; 'igual' = el MISMO veredicto que el Play (el que
 //        anoto streamveredicto)
@@ -87,6 +90,9 @@
 #include "animation/Animation.h"       // PlayAnimation
 #include "io/TexturaEditada.h"
 #include "undo/Undo.h"                 // streamundolimpiar
+#include "gfx/w3dTexture.h"            // paquetetest: .w3dt
+#include "gfx/w3dGraphics.h"           // TexTieneMips / MipmapsGlobal
+#include "io/W3dZip.h"                 // paquetetest: LeerRango
 #include "importers/import_obj.h"      // la cola diferida y las texturas dormidas (streambench)
 #include "ViewPorts/Properties.h"      // streamtarjeta: la tarjeta de la instancia
 #include "ViewPorts/LayoutArbol.h"     // LayoutRaizCompleta
@@ -535,6 +541,76 @@ bool CmdStreamTick(std::istringstream& ss) {
     printf("      [streamtick] %d tick(s) de la vista previa (%s)\n", n, g_w3dStreamingVistaPrevia ? "prendida" : "APAGADA: no hace nada");
     return true;
 }
+// ---- paquetetest: el .w3d como PAQUETE listo para cargar --------------------------------------------------------
+//  - una textura .w3dt (RGB565, 4x4 con su piramide 2x2 y 1x1, cada nivel de otro color) sube con sus mipmaps, sin
+//    decodificar, y vuelve a pixeles (DecodeImage: el nivel 0; DecodeThumbnail: el nivel que entra)
+//  - LeerRango de una entrada STORE del zip: solo esos bytes; fuera de rango, false; Leer dos veces (el CRC se
+//    verifica la primera)
+static void PqU16(std::vector<unsigned char>& v, unsigned x) { v.push_back((unsigned char)(x & 0xFF)); v.push_back((unsigned char)(x >> 8)); }
+bool CmdPaqueteTest(std::istringstream&, std::string& err) {
+    // la textura: rojo / verde / azul por nivel
+    std::vector<unsigned char> t;
+    t.push_back('W'); t.push_back('3'); t.push_back('D'); t.push_back('T');
+    PqU16(t, 1); PqU16(t, 1); PqU16(t, 4); PqU16(t, 4); t.push_back(3); t.push_back(0); PqU16(t, 0);
+    const unsigned colores[3] = { 0xF800, 0x07E0, 0x001F };
+    for (int k = 0, lado = 4; k < 3; k++, lado /= 2) {
+        for (int i = 0; i < lado * lado; i++) PqU16(t, colores[k]);
+        while (t.size() % 4) t.push_back(0);
+    }
+    const std::string ruta = "paquetetest.w3dt";
+    FILE* f = fopen(ruta.c_str(), "wb");
+    if (!f) { err = "paquetetest: no pude escribir " + ruta; return false; }
+    fwrite(&t[0], 1, t.size(), f);
+    fclose(f);
+    bool ok = true;
+    unsigned id = 0;
+    int w = 0, h = 0;
+    if (!w3dEngine::EsW3dt(ruta.c_str()) || !w3dEngine::LoadTexture(ruta.c_str(), id, &w, &h) || !id) {
+        err = "paquetetest: el .w3dt no subio"; ok = false;
+    }
+    int tw = 0, th = 0;
+    if (ok && (w != 4 || h != 4 || !w3dEngine::TextureSize(id, tw, th) || tw != 4 || th != 4)) {
+        err = "paquetetest: el tamano del .w3dt no es 4x4"; ok = false;
+    }
+    if (ok && w3dEngine::MipmapsGlobal() && !w3dEngine::TexTieneMips(id)) {
+        err = "paquetetest: el .w3dt no subio su piramide"; ok = false;
+    }
+    if (id) w3dEngine::DeleteTexture(id);
+    unsigned char* px = NULL;
+    if (ok && (!w3dEngine::DecodeImage(ruta.c_str(), &px, &w, &h) || w != 4 || px[0] != 255 || px[1] != 0 || px[2] != 0 || px[3] != 255)) {
+        err = "paquetetest: DecodeImage del .w3dt no da el nivel 0 rojo"; ok = false;
+    }
+    if (px) { w3dEngine::FreeImage(px); px = NULL; }
+    if (ok && (!w3dEngine::DecodeThumbnail(ruta.c_str(), 2, &px, &w, &h) || w != 2 || px[0] != 0 || px[1] != 255 || px[2] != 0)) {
+        err = "paquetetest: la miniatura del .w3dt no es su nivel 1 (verde, 2x2)"; ok = false;
+    }
+    if (px) w3dEngine::FreeImage(px);
+    remove(ruta.c_str());
+    // el zip: lectura por rango
+    if (ok) {
+        std::vector<unsigned char> d(1024);
+        for (size_t i = 0; i < d.size(); i++) d[i] = (unsigned char)(i * 7);
+        const std::string zr = "paquetetest.zip";
+        W3dZipWriter zw;
+        zw.Agregar("mallas/a.w3db", d);
+        if (!zw.Guardar(zr)) { err = "paquetetest: no pude escribir " + zr; return false; }
+        W3dZipLector zl;
+        std::vector<unsigned char> r;
+        if (!zl.Abrir(zr)) { err = "paquetetest: no pude abrir el zip"; ok = false; }
+        else if (!zl.LeerRango("mallas/a.w3db", 100, 10, r) || r.size() != 10 || r[0] != d[100] || r[9] != d[109]) {
+            err = "paquetetest: LeerRango no devolvio los bytes 100..109"; ok = false;
+        } else if (zl.LeerRango("mallas/a.w3db", 1020, 10, r)) {
+            err = "paquetetest: LeerRango fuera de la entrada no fallo"; ok = false;
+        } else if (!zl.Leer("mallas/a.w3db", r) || r != d || !zl.Leer("mallas/a.w3db", r) || r != d) {
+            err = "paquetetest: Leer (dos veces) no devolvio la entrada"; ok = false;
+        }
+        zl.Cerrar();
+        remove(zr.c_str());
+    }
+    if (ok) printf("      [paquetetest] .w3dt (565, 3 niveles) + LeerRango del zip: OK\n");
+    return ok;
+}
+
 bool CmdStreamVista(std::istringstream& ss) {
     int on = 1; ss >> on;
     W3dStreamingVistaPreviaFijar(on != 0);
@@ -884,6 +960,7 @@ bool W3dPruebasStreamingCmd(const std::string& cmd, std::istringstream& ss, std:
     if (cmd == "streamobjetivo") return CmdStreamObjetivo(ss, err);
     if (cmd == "streamtick")     return CmdStreamTick(ss);
     if (cmd == "streamvista")    return CmdStreamVista(ss);
+    if (cmd == "paquetetest")    return CmdPaqueteTest(ss, err);
     if (cmd == "streamcarga")    return CmdStreamCarga(ss, err);
     if (cmd == "streamconfig")   return CmdStreamConfig(ss);
     if (cmd == "streambench")    return CmdStreamBench(ss, err);

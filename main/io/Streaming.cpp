@@ -372,8 +372,10 @@ void W3dStreamingTickEditor() {
 // ============================================================================
 bool W3dStreamingDiferirAlCargar(const InstanciaPrefab* ip) {
     if (!ip || ip->carga != W3D_CARGA_DISTANCIA) return false;
-#ifdef W3D_SIN_EDITOR
-    return true;   // el juego compilado: lo diferido espera al streaming, siempre
+#if defined(W3D_SIN_EDITOR) || defined(W3D_SYMBIAN)
+    // el juego compilado: lo diferido espera al streaming, siempre. El editor del telefono tambien: un mundo
+    // abierto generado entero al abrir no entra en su memoria (se cierra antes de mostrar nada)
+    return true;
 #else
     // el editor: con la vista previa, o con una partida andando (lo que genera el streaming jugando trae sus
     // anidadas diferidas igual que en el juego compilado); el editor que juega como juego (g_modoJuego) tambien
