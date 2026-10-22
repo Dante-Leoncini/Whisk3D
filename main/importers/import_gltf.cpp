@@ -20,6 +20,7 @@
 #include <vector>
 #include <string>
 #include <map>
+#include <set>
 #include <cstring>
 #include <cstdio>
 #include <cmath>
@@ -472,11 +473,43 @@ bool ImportGLTF(const std::string& filepath) {
             for (int j = 0; j < nJoints; j++) { jointNode[j] = joints->arr[j].intOr(-1); jointOfNode[jointNode[j]] = j; }
             std::vector<Matrix4> ibm; { int ibmAcc = sk.getI("inverseBindMatrices", -1); if (ibmAcc >= 0) doc.readMats(ibmAcc, ibm); }
 
+            // HUESOS QUE NO PESAN: un nodo ANCESTRO de algun joint que tiene canales de animacion tambien es hueso
+            // (va DESPUES de los joints: los indices de JOINTS_0 de los vertices no cambian; no pesa en ningun
+            // vertice). Antes sus canales se descartaban y solo su transform de REPOSO entraba horneado en el hijo:
+            // en un rig Biped de 3ds Max exportado de Unity (Bip001 = el padre de la pelvis, el que lleva la postura
+            // del cuerpo, y los padres de las armas no pesan) la pelvis quedaba en reposo y las piernas torcidas
+            // (encontrado con Layla de Mobile Legends: quieta, un pie apoyado y el otro levantado). Un intermedio
+            // SIN animacion sigue horneado en el reposo / el prefijo del hijo, como antes.
+            {
+                std::set<int> animados;
+                const JVal* janims = doc.arr("animations");
+                if (janims) for (size_t ai = 0; ai < janims->size(); ai++) {
+                    const JVal* chs = janims->arr[ai].find("channels");
+                    if (chs) for (size_t c = 0; c < chs->size(); c++) {
+                        const JVal* tg = chs->arr[c].find("target"); if (!tg) continue;
+                        std::string pa = tg->getS("path", "");
+                        if (pa == "translation" || pa == "rotation" || pa == "scale") animados.insert(tg->getI("node", -1));
+                    }
+                }
+                std::set<int> ancestros;
+                for (int j = 0; j < nJoints; j++) {
+                    int p = (jointNode[j] >= 0 && jointNode[j] < nNodes) ? parentNode[jointNode[j]] : -1;
+                    int guard = 0;
+                    while (p >= 0 && guard++ < nNodes) { ancestros.insert(p); p = parentNode[p]; }
+                }
+                for (std::set<int>::iterator it = ancestros.begin(); it != ancestros.end(); ++it)
+                    if (animados.count(*it) && !jointOfNode.count(*it)) {
+                        jointOfNode[*it] = (int)jointNode.size();
+                        jointNode.push_back(*it);
+                    }
+            }
+            const int nHuesos = (int)jointNode.size();
+
             arm = new Armature(collection, Vector3(0, 0, 0));
             arm->SetNameObj(baseNom + "_rig"); // nombre UNICO
             arm->skinGltf = true;
-            arm->bones.resize(nJoints);
-            for (int j = 0; j < nJoints; j++) {
+            arm->bones.resize(nHuesos);
+            for (int j = 0; j < nHuesos; j++) {
                 int nd = jointNode[j];
                 W3dBone& b = arm->bones[j];
                 b.name = (nd >= 0 && nd < nNodes) ? nodes->arr[nd].getS("name", "bone") : std::string("bone");
@@ -495,7 +528,8 @@ bool ImportGLTF(const std::string& filepath) {
                 b.skinA = b.skinInvBind;
             }
             PrepararSkin(arm); // en el path glTF: skinMatrix = worldFK * inverseBindMatrix
-            for (int j = 0; j < nJoints; j++) { arm->bones[j].poseHead = arm->bones[j].head; arm->bones[j].poseTail = arm->bones[j].tail; }
+            for (int j = 0; j < nHuesos; j++) { arm->bones[j].poseHead = arm->bones[j].head; arm->bones[j].poseTail = arm->bones[j].tail; }
+            if (nHuesos > nJoints) w3dLogf("ImportGLTF: %d hueso(s) animado(s) que no pesan en la piel", nHuesos - nJoints);
         }
     }
 

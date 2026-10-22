@@ -1,0 +1,30 @@
+# ===========================================================================
+#  glTF: UN NODO ANIMADO QUE NO ES JOINT DE LA PIEL (main/importers/import_gltf.cpp)
+#
+#  prueba_gltf_hueso_animado.glb (hecho por hl2-w3d/tools/fixtures_pruebas.py, hueso_animado): el nodo 'raiz' NO
+#  es joint pero gira de 0 a 90 grados sobre Z en 30 cuadros; su hijo 'hueso' (el unico joint) esta 1 m arriba.
+#  Es el caso de un rig Biped de 3ds Max exportado de Unity: Bip001 (el padre de la pelvis, el que lleva la postura
+#  del cuerpo) no pesa en ningun vertice. Antes el importador descartaba sus canales: la pelvis quedaba en reposo y
+#  las piernas torcidas (Layla de Mobile Legends, conversiones/mobile_legend).
+#
+#  Lo que se verifica:
+#   1) el importador vuelve hueso a 'raiz' (va despues de los joints: los pesos no cambian)
+#   2) en el cuadro 1 'hueso' esta en (0, 1, 0); en el 31, girado con su padre, en (-1, 0, 0)
+#   3) el round-trip por el contenedor conserva el hueso y su animacion
+#
+#  Correr DESDE ESTA CARPETA:
+#    ../../platform/linux/build/whisk3d --script prueba_gltf_hueso_animado.w3s
+# ===========================================================================
+selobj Cubo
+delete
+importgltf prueba_gltf_hueso_animado.glb
+bonepose raiz 1 0 0 0
+bonepose hueso 1 0 1 0
+bonepose hueso 16 -0.707 0.707 0
+bonepose hueso 31 -1 0 0
+
+# --- round-trip ---
+guardarw3d /tmp/w3d_prueba_gltf_hueso_animado.w3d
+abrirw3d /tmp/w3d_prueba_gltf_hueso_animado.w3d
+bonepose hueso 1 0 1 0
+bonepose hueso 31 -1 0 0

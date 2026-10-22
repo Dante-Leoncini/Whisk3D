@@ -859,6 +859,16 @@ int W3dRaicesDescargar(const std::vector<int>& filas) {
     return n;
 }
 
+bool W3dRaizDescargarDelJuego(int idx) {
+    if (idx < 0 || idx >= (int)gFilas.size() || idx == gActiva) return false;
+    W3dRaizFila& f = gFilas[(size_t)idx];
+    if (!f.raiz || f.bloque || f.entrada.empty() || f.cargaFallo) return false;
+    if (W3dCineActiva() && (idx == gCine.escena || idx == gCine.juego)) return false;
+    LiberarRaiz(f);
+    w3dLogf("[raices] '%s' se descarga: la partida se fue de ahi (vuelve a leerse de '%s')", f.nombre.c_str(), f.entrada.c_str());
+    return true;
+}
+
 // ---- los binds (W3dEscena los registra; ver W3dEscenaSetCine) ----
 static bool CinePedirBind(const std::string& nombre, Object* llamador, const std::string& fn) {
     if (!gCineFn) return false;   // (sin partida: el editor fuera del Play)

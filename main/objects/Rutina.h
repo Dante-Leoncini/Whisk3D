@@ -264,6 +264,10 @@ extern bool g_w3dSoloJuego;
 // proyecto (sus pasos "Clear color" y "Clear"), no del viewport ni del juego: sin un "Clear" no se limpia nada.
 // Un proyecto viejo (sin constructor) lo sigue limpiando el viewport
 bool W3dHayConstructor();
+// lo que dibuja una rutina en una corrida SIN recorte (el total del overlay "faces: dibujadas/total"): los triangulos de
+// sus "Dibujar elementos" con su rango y sin las banderas ni los saltos (eso es el recorte), por 'repetir'; y los
+// vertices de cada malla distinta que dibuja. Los pasos Rutina no se siguen: la llamada se cuenta en su lugar del arbol
+void W3dRutinaContar(Rutina* rt, int& verts, int& tris);
 // (editor) el viewport ya limpio el color con el fondo FIJO de su modo (Z-Buffer, Alfa, Normales: el fondo dice algo):
 // ahi "Clear color" no cambia nada y "Clear" no limpia el color (la profundidad y el estencil si)
 extern bool g_w3dLimpiarColorFijo;

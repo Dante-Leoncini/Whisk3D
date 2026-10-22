@@ -24,6 +24,7 @@
 #include "w3dlog.h"
 #include "objects/Textures.h"
 #include "w3dTexture.h" // engine: UploadRGBA (subida comun a los 4 OS)
+#include "w3dGraphics.h" // VBOMemoria (lo que hay en GL, en el log de cada subida)
 #include "io/w3dFilesystem.h" // ReadFileBytes: resuelve el contenedor v4 (VFS) y disco
 
 // globales compartidos del modelo de PC (Textures.cpp es PC-only, no se compila en Symbian).
@@ -245,7 +246,9 @@ bool LoadTexture(const char* path, unsigned int& outId, int* outW, int* outH) {
     while (glGetError() != GL_NO_ERROR) {}
     outId = UploadRGBA(rgba, w, h, true, true, false, true);   // (16 bits si entra sin perdida: la mitad de memoria)
     GLenum e = glGetError();
-    w3dLogf("LoadTexture: subida %dx%d glErr=%x id=%d", w, h, e, (TInt)outId);
+    // (con lo que ya hay en GL: texturas y VBO comparten la memoria del MBX)
+    w3dLogf("LoadTexture: subida %dx%d glErr=%x id=%d (en GL: texturas %d KB, VBO %d KB)", w, h, e, (TInt)outId,
+            (TInt)(TexturasMemoria().bytes / 1024), (TInt)(VBOMemoria() / 1024));
     FreeImage(rgba);
     if (outW) { *outW = origW; }
     if (outH) { *outH = origH; }

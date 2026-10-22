@@ -5433,6 +5433,8 @@ bool W3dRunCommand(const std::string& linea, std::string& err) {
             else if (nom == "b") b = SDL_CONTROLLER_BUTTON_B;
             else if (nom == "x") b = SDL_CONTROLLER_BUTTON_X;
             else if (nom == "y") b = SDL_CONTROLLER_BUTTON_Y;
+            else if (nom == "l1") b = SDL_CONTROLLER_BUTTON_LEFTSHOULDER;
+            else if (nom == "r1") b = SDL_CONTROLLER_BUTTON_RIGHTSHOULDER;
             else { err = "pad boton: boton desconocido '" + nom + "'"; return false; }
             buttonState[b] = (on != "off");
             printf("      [pad] boton %s=%s\n", nom.c_str(), buttonState[b] ? "on" : "off");
@@ -29398,6 +29400,14 @@ bool W3dRunCommand(const std::string& linea, std::string& err) {
         printf("      [bonepose] '%s' p=%d restT=(%.2f,%.2f,%.2f) restR=(%.1f,%.1f,%.1f) restS=(%.3f,%.3f,%.3f) poseT=(%.2f,%.2f,%.2f) poseR=(%.1f,%.1f,%.1f) head=(%.2f,%.2f,%.2f)\n",
             b.name.c_str(), b.parent, b.restT.x,b.restT.y,b.restT.z, b.restR.x,b.restR.y,b.restR.z, b.restS.x,b.restS.y,b.restS.z,
             b.poseT.x,b.poseT.y,b.poseT.z, b.poseR.x,b.poseR.y,b.poseR.z, b.poseHead.x,b.poseHead.y,b.poseHead.z);
+        // bonepose <hueso> <frame> x y z : ademas ASSERTA donde queda la cabeza del hueso (a 1 cm)
+        float ex, ey, ez;
+        if (ss >> ex >> ey >> ez) {
+            float d = sqrtf((b.poseHead.x-ex)*(b.poseHead.x-ex) + (b.poseHead.y-ey)*(b.poseHead.y-ey) + (b.poseHead.z-ez)*(b.poseHead.z-ez));
+            if (d > 0.01f) { char m[200]; snprintf(m, sizeof m, "bonepose: '%s' en (%.3f,%.3f,%.3f), se esperaba (%.3f,%.3f,%.3f)",
+                                                    b.name.c_str(), b.poseHead.x, b.poseHead.y, b.poseHead.z, ex, ey, ez);
+                             err = m; return false; }
+        }
         return true;
     }
     // ---- meshskin : lista cada malla de la escena con su nombre, verts, si tiene skinArmature y cuantos vertex groups. ----
@@ -30150,6 +30160,17 @@ bool W3dRunCommand(const std::string& linea, std::string& err) {
         printf("      [tris3d] %d (antes %d)\n", t, anterior);
         if (hayDelta && anterior >= 0 && t - anterior != delta) { char b[120]; sprintf(b, "tris3d: %d -> %d (%+d), se esperaba %+d", anterior, t, t - anterior, delta); err = b; anterior = t; return false; }
         anterior = t;
+        return true;
+    }
+    // ---- carastotal <esperado> : el TOTAL del overlay "faces: dibujadas/total" (mallas + lo que dibujan las rutinas,
+    //      sin recorte) ----
+    if (cmd == "carastotal") {
+        int esperado = -1; ss >> esperado;
+        extern void W3dContarMallas(Object* o, int& vAgr, int& vReal, int& fLog, int& fTri);
+        int vAgr = 0, vReal = 0, fLog = 0, fTri = 0;
+        W3dContarMallas(SceneCollection, vAgr, vReal, fLog, fTri);
+        printf("      [carastotal] %d (vertices %d)\n", fTri, vReal);
+        if (esperado >= 0 && fTri != esperado) { char b[120]; sprintf(b, "carastotal: %d, se esperaba %d", fTri, esperado); err = b; return false; }
         return true;
     }
     if (cmd == "statsvivo") {

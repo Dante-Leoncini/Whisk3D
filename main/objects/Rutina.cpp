@@ -9,6 +9,8 @@
 #include "animation/Animation.h"   // AnimPaso: los pasos se animan (g_animPasoHook)
 #include "animation/VertexAnimation.h"   // W3dPoseAlDia: la pose pendiente de "Object pointer"
 #include "objects/Camera.h"              // "Skip if camera riel": el riel de la camara activa
+#include "w3dTexture.h"                  // TexturasMemoria: lo subido a GL, en el log de la precarga
+#include "w3dlog.h"
 #include <map>
 #include <math.h>                  // cosf / sinf (el giro de "Matriz del objeto")
 #include <stdlib.h>
@@ -536,6 +538,51 @@ static void Dibujar(const W3dPaso& p) {
     }
 }
 
+// los triangulos de un "Dibujar elementos" SIN recorte: el rango de Dibujar sin mirar las banderas (son el recorte).
+// Cuenta de las partes de la malla (lo que no se suelta con mallasSoloGPU) y no arma ningun flujo
+static long TrisSinRecorte(const W3dPaso& p) {
+    const MallaRecurso* r = (const MallaRecurso*)p.ptr;
+    if (!r || r->facesSize <= 0) return 0;
+    const int tris = ((p.entero >= 0 && p.entero < (int)r->partes.size()) ? r->partes[(size_t)p.entero].cantidad
+                                                                          : r->facesSize) / 3;
+    if (p.sub == RangoManual) {
+        const int a = (int)p.n[0].Valor();
+        int b = (int)p.n[1].Valor(); if (b < 0) b = tris - 1;
+        return (b >= a) ? b - a + 1 : 0;
+    }
+    if (p.sub == RangoArray) {
+        const float* a = p.n[2].p;
+        if (!a) return 0;
+        const int k = (int)a[0], ancho = p.n[3].p ? 3 : 2;
+        long n = 0;
+        for (int j = 0; j < k; j++) {
+            const float* e = a + 1 + ancho * j;
+            int y = (int)e[1]; if (y < 0) y = tris - 1;
+            if (y >= (int)e[0]) n += y - (int)e[0] + 1;
+        }
+        return n;
+    }
+    return tris;
+}
+
+void W3dRutinaContar(Rutina* rt, int& verts, int& tris) {
+    verts = tris = 0;
+    if (!rt || rt->sucia) return;   // (sucia: los punteros pueden ser de mallas que ya no estan; los resuelve al dibujarse)
+    const std::vector<W3dPaso>& L = rt->ListaActual();
+    std::vector<const MallaRecurso*> vistas;
+    long t = 0;
+    for (size_t i = 0; i < L.size(); i++) {
+        if (L[i].tipo != PasoDibujar || !L[i].ptr) continue;
+        t += TrisSinRecorte(L[i]);
+        const MallaRecurso* r = (const MallaRecurso*)L[i].ptr;
+        bool ya = false;
+        for (size_t j = 0; j < vistas.size() && !ya; j++) ya = (vistas[j] == r);
+        if (!ya) { vistas.push_back(r); verts += r->vertexSize; }
+    }
+    const int vueltas = (rt->repetir > 1.0f) ? (int)rt->repetir : 1;
+    tris = (int)(t * vueltas);
+}
+
 // el objeto malla de un paso (NULL si el nombre no es de una malla)
 static Mesh* MallaObjeto(const W3dPaso& p) {
     Object* o = (Object*)p.ptr;
@@ -922,7 +969,14 @@ static void PrecargarMallas(std::vector<W3dPaso>& L, int prof) {
         if (L[i].tipo == PasoMatcap) { m->ramFija = true; if (m->soloGPU) W3dMallaRecursoAsegurarRAM(m); }
         if (m->soloGPU && L[i].tipo == PasoDibujar && !W3dMallaFlujoListo(m, L[i].entero, L[i].modo))
             W3dMallaRecursoAsegurarRAM(m);
+        const long vboAntes = gfx::VBOMemoria();
         W3dMallaRecursoAsegurarVBO(m);
+        // lo que se subio y cuanto hay en GL (el N95 comparte esa memoria entre texturas y VBO, y un glBufferData que no
+        // entra falla en silencio: si el telefono se cae, la ultima linea dice hasta donde llego)
+        const long vbo = gfx::VBOMemoria();
+        if (vbo != vboAntes)
+            w3dLogf("[mallas] '%s': VBO %ld KB (en GL: texturas %ld KB, VBO %ld KB)", m->nombre.c_str(),
+                    (vbo - vboAntes) / 1024, gfx::TexturasMemoria().bytes / 1024, vbo / 1024);
         W3dFlujo f;
         if (L[i].tipo == PasoDibujar) W3dMallaFlujo(m, L[i].entero, L[i].modo, f);
     }

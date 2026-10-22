@@ -153,6 +153,10 @@ int  W3dRaicesCargarTodas(std::vector<int>* cargadas = 0);
 // se vuelven a leer de ahi si se las abre). Se saltea la activa, la del bloque, las que no tienen entrada,
 // las que no se pudieron leer y las de una cinematica en curso. Devuelve cuantas libero.
 int  W3dRaicesDescargar(const std::vector<int>& filas);
+// DESCARGA una raiz que la PARTIDA cargo (cambiarEscena) y que la partida deja: en un telefono no entran dos niveles
+// a la vez. Con las mismas reglas que W3dRaicesDescargar (no la activa, ni la del bloque, ni una sin entrada); la
+// proxima vez se vuelve a leer de su entrada. true = la libero
+bool W3dRaizDescargarDelJuego(int idx);
 // el CONTENIDO de una raiz desde su entrada: objetos (y su prefab), animaciones de escena y
 // capas del Mix, sobre SceneCollection (que en ese momento ES esa raiz). Lo implementa el
 // lector del proyecto (importers/import_w3d.cpp); false = no se pudo leer.

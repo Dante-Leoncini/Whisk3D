@@ -11,10 +11,11 @@
 #include "W3dProfile.h"                  // g_profShow (ms por categoria del frame)
 #include "render/OpcionesRender.h"       // g_genMallaCount, g_fpsActual
 #include "objects/Mesh.h"               // Mesh (contar vertices/caras de la escena)
+#include "objects/Rutina.h"             // W3dRutinaContar (lo que dibujan las rutinas)
 #include <cstdio>                        // sprintf
 
-// suma recursiva de las estadisticas de malla de toda la escena
-static void W3dContarMallas(Object* o, int& vAgr, int& vReal, int& fLog, int& fTri){
+// suma recursiva de las estadisticas de malla de toda la escena (la usa tambien el comando de prueba "carastotal")
+void W3dContarMallas(Object* o, int& vAgr, int& vReal, int& fLog, int& fTri){
     if (!o) return;
     if (o->getType() == ObjectType::mesh){
         Mesh* m = (Mesh*)o;
@@ -26,6 +27,11 @@ static void W3dContarMallas(Object* o, int& vAgr, int& vReal, int& fLog, int& fT
                : (!m->edicionPendiente.empty() && m->w3dmAjenos.nCaras > 0) ? m->w3dmAjenos.nCaras
                : (m->facesSize / 3);
         fTri  += m->facesSize / 3;
+    } else if (o->getType() == ObjectType::rutina){
+        // lo que dibujan las rutinas (un escenario unido, instancias): sin esto "dibujadas" pasaba al total
+        int v = 0, t = 0;
+        W3dRutinaContar((Rutina*)o, v, t);
+        vAgr += v; vReal += v; fLog += t; fTri += t;
     }
     for (size_t i = 0; i < o->Childrens.size(); i++)
         W3dContarMallas(o->Childrens[i], vAgr, vReal, fLog, fTri);

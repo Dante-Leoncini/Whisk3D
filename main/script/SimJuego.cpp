@@ -142,6 +142,9 @@ static SimSnap gBaseEditor;  // la escena DEL USUARIO antes de tocar nada (la re
 struct SimBaseRaiz { Object* raiz; SimSnap snap; };
 static Object* gRaizPlay = NULL;
 static std::vector<SimBaseRaiz> gBasesRaices;
+// las raices que ya estaban cargadas al dar Play (las abrio el usuario: pueden tener cambios sin guardar). Las que
+// cargo la PARTIDA con cambiarEscena() se descargan cuando la partida se va de ellas (SimCambiarRaiz)
+static std::set<Object*> gRaicesDelUsuario;
 // CINEMATICA (reproducirEscena, W3dRaices.h): la ESCENA que se reproduce como la dejo el usuario (se le
 // devuelve al volver) y sus objetos con script (corren mientras dura; los del juego quedan en pausa)
 static SimSnap gCineBase;
@@ -473,6 +476,8 @@ static void ArrancarRaizActual() {
 // jugo en esta partida vuelve a su base, igual que el juego compilado, que la recarga de su entrada.
 // Un JUEGO arranca su simulacion; una ESCENA ademas reproduce su animacion desde el inicio (una
 // cinematica: sus scripts pueden mirar animEscenaActual() y pedir la siguiente al terminar).
+static void JuntarSub(Object* o, std::vector<Object*>& out);   // (abajo: lo que se libera sale de las fotos)
+static void PodarFotos(const std::set<Object*>& fuera);
 static void SimCambiarRaiz(int idx) {
     if (!gActiva) return;
     // el MODO de la partida (el timeline en "Juego") sigue en la raiz nueva aunque sea una escena:
@@ -489,6 +494,8 @@ static void SimCambiarRaiz(int idx) {
     W3dAnimObjetosReset();   // (los clips de objeto de la que se va dejan de sonar)
     BindsJuegoResetPunteros();
     W3dEscenaLimpiar();   // (las escenas UI de la que se va vuelven a verse, como las dejo el usuario)
+    Object* vieja = SceneCollection;
+    const int idxVieja = W3dRaizActiva();
     if (!W3dRaizCambiarActiva(idx)) {
         w3dLogfE("[juego] cambiarEscena: no pude abrir la escena %d", idx);
     } else {
@@ -506,6 +513,36 @@ static void SimCambiarRaiz(int idx) {
         }
     }
     { extern void PropsOlvidarEscena(); PropsOlvidarEscena(); }
+    // la raiz que se deja, si la cargo la PARTIDA (no el usuario) y no es la del Play: se DESCARGA (en el N95 la
+    // cinematica y el area 1 juntas no entran en la RAM). Antes, fuera de todas las listas y fotos del Play
+    if (vieja && vieja != SceneCollection && vieja != gRaizPlay && !gRaicesDelUsuario.count(vieja)) {
+        std::vector<Object*> sub;
+        JuntarSub(vieja, sub);
+        std::set<Object*> fuera(sub.begin(), sub.end());
+        // (lo que un script destruyo ahi y espera el Stop descolgado: se va con su raiz)
+        std::vector<Object*> descolgados;
+        for (size_t k = gDestruidosEnPlay.size(); k-- > 0; ) {
+            bool adentro = false;
+            for (Object* p = gDestruidosEnPlay[k].padre; p && !adentro; p = p->Parent) adentro = fuera.count(p) != 0;
+            if (adentro) { descolgados.push_back(gDestruidosEnPlay[k].o); gDestruidosEnPlay.erase(gDestruidosEnPlay.begin() + (long)k); }
+        }
+        for (size_t i = 0; i < descolgados.size(); i++) {
+            std::vector<Object*> ds;
+            JuntarSub(descolgados[i], ds);
+            for (size_t j = 0; j < ds.size(); j++) { fuera.insert(ds[j]); W3dObjetoVivoMarcar(ds[j], true); }
+        }
+        PodarFotos(fuera);
+        for (size_t i = gCreadosEnPlay.size(); i-- > 0; )
+            if (fuera.count(gCreadosEnPlay[i].o)) gCreadosEnPlay.erase(gCreadosEnPlay.begin() + (long)i);
+        for (size_t i = gBasesRaices.size(); i-- > 0; )
+            if (gBasesRaices[i].raiz == vieja) gBasesRaices.erase(gBasesRaices.begin() + (long)i);
+        for (size_t i = ObjSelects.size(); i-- > 0; ) if (fuera.count(ObjSelects[i])) ObjSelects.erase(ObjSelects.begin() + (long)i);
+        if (fuera.count(ObjActivo)) ObjActivo = NULL;
+        gPodando = true;   // (ya esta fuera de las listas y las fotos: el gancho del destructor no repite)
+        for (size_t i = 0; i < descolgados.size(); i++) W3dLiberarSubarbol(descolgados[i]);
+        W3dRaizDescargarDelJuego(idxVieja);
+        gPodando = false;
+    }
     Recorrer(SceneCollection, NULL, &gScripted);
     ArrancarRaizActual();
     W3dStreamingPartidaInicio();   // (las diferidas cerca de la escena nueva, como al arrancar el Play)
@@ -818,6 +855,8 @@ static void SimPlay() {
     Snapshot(&gBaseEditor);
     gRaizPlay = SceneCollection;
     gBasesRaices.clear();
+    gRaicesDelUsuario.clear();
+    for (size_t i = 0; i < W3dRaices().size(); i++) if (W3dRaices()[i].raiz) gRaicesDelUsuario.insert(W3dRaices()[i].raiz);
     W3dRaicesSetCambioJuego(SimCambiarRaiz);   // cambiarEscena() a otra escena 3D
     W3dRaicesSetCine(SimCine);                  // reproducirEscena(): una cinematica con el juego en pausa
     // instanciar() / destruir() de lua: lo nuevo arranca, lo destruido se va (y el Stop lo arregla)
