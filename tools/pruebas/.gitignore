@@ -1,7 +1,9 @@
-# salidas de las corridas (entradas: los .w3d/.w3dui sin sufijo)
+# salidas de las corridas (entradas: los .w3d/.w3dui sin sufijo). El harness corre cada script parado en esta
+# carpeta, asi que quedan aca aunque se lo llame desde otro lado (la raiz del repo)
 *_v4.w3d
 *_rt*.w3d
 *.ppm
+*_rt*.w3dvis
 whisk3d.log
 *_rt_*.png
 *_rt_*.wav

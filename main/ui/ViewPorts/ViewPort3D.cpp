@@ -433,6 +433,7 @@ Viewport3D::Viewport3D(Vector3 pos){
     hudX0 = 0.0f; hudY0 = 0.0f; hudW = 0.0f; hudH = 0.0f; hudEsc = 1.0f; // aun sin HUD dibujado
     hudOverride = false;
     showOverlays = true;
+    soloEscena = false;
     // stats por-viewport apagados por defecto (igual que los globales viejos; --stats o el menu los prende)
     OverlayFps = false; OverlayStatVertices = false; OverlayStatFaces = false;
     OverlayStatGL = false; OverlayStatModgen = false; OverlayStatTimes = false;
@@ -1604,6 +1605,7 @@ static void WP3DOclusionPass(Viewport3D* vp) {
     gfx::DisableArray(gfx::NormalArray); gfx::DisableArray(gfx::TexCoordArray);
     gfx::EnableArray(gfx::VertexArray); gfx::EnableArray(gfx::ColorArray);
     gfx::Enable(gfx::DepthTest); gfx::DepthMask(true);
+    gfx::ReadPixelsBegin(vp->x, glY, vp->width, vp->height);   // (la 3DS lo dibuja aparte, donde no se ve)
     gfx::ClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     gfx::Clear(gfx::ColorBuffer | gfx::DepthBuffer);
     // triangulos de cada cara (la misma triangulacion que el render), en MUNDO, con el ID de la cara
@@ -1863,7 +1865,7 @@ void Viewport3D::Render() {
     const int glY = W3dPantallaAlto - y - height; // arbol arriba-izq -> GL
     w3dEngine::Enable(w3dEngine::ScissorTest);
     w3dEngine::Scissor(x, glY, width, height);
-    WP3DOclusionPass(this);   // modos de pintura: mapa "que cara se ve en cada pixel" (lo pisa el Clear de abajo)
+    if (!soloEscena) WP3DOclusionPass(this);   // modos de pintura: mapa "que cara se ve en cada pixel" (lo pisa el Clear de abajo)
 
     // ZBuffer: fog de profundidad con rango FIJO en unidades de mundo (NO depende de la escena ni del
     // zoom). Es SOLO la distancia camara->objeto: en la camara = blanco, a fogFar o mas lejos = negro.
@@ -2109,6 +2111,7 @@ void Viewport3D::Render() {
     // estado GL 2D tras las mallas. La opcion ShowUi que lo salteaba se dio de baja:
     // sin chrome el viewport quedaba inusable y el estado sucio (CULL_FACE + arrays
     // prendidos) contaminaba el proximo dibujo 2D (los errores graficos reportados).
+    if (soloEscena) { Estado2D(); g_prof.viewport3d += W3dNowMs() - _tVp0; return; }
     RenderUI();
     RenderSnapIndicador(); // recuadro verde en el target de snap (encima de todo)
     WP3DRenderPincel(this); // circulo del pincel (modo Weight Paint), siguiendo al mouse
@@ -2881,35 +2884,39 @@ void Viewport3D::SyncBotonContexto(){
         (EditSelectMode == SelFace) ? (int)IconType::selFace : (int)IconType::selVertex;
 }
 
+void Viewport3D::Estado2D() {
+    w3dEngine::MatrixMode(w3dEngine::Projection);
+    w3dEngine::LoadIdentity();
+    w3dEngine::Ortho(0, width, height, 0, -1, 1);
+    w3dEngine::MatrixMode(w3dEngine::ModelView);
+    w3dEngine::LoadIdentity();
+    // estado 2D COMPLETO (no asumir lo que dejo el render de la escena:
+    // antes la barra iba al final de RenderOverlay que ya lo seteaba; con
+    // overlays off corre justo despues de los meshes 3D que dejan CULL_FACE
+    // y NORMAL/COLOR arrays activos -> los botones se veian medio culeados
+    // (un solo triangulo) y el texto desaparecia).
+    w3dEngine::Disable(w3dEngine::DepthTest);
+    w3dEngine::Disable(w3dEngine::Lighting);
+    w3dEngine::Disable(w3dEngine::Fog);
+    w3dEngine::Disable(w3dEngine::PointSprite);
+    w3dEngine::Disable(w3dEngine::CullFace);
+    w3dEngine::Enable(w3dEngine::ColorMaterial);
+    w3dEngine::Enable(w3dEngine::Texture2D);
+    w3dEngine::Enable(w3dEngine::Blend);
+    w3dEngine::BlendAlpha();
+    w3dEngine::EnableArray(w3dEngine::VertexArray);
+    w3dEngine::EnableArray(w3dEngine::TexCoordArray);
+    w3dEngine::DisableArray(w3dEngine::NormalArray);
+    w3dEngine::DisableArray(w3dEngine::ColorArray);
+}
+
 void Viewport3D::RenderUI() {
     // barra de botones 2D del area: NO es un overlay, es chrome del area (como
     // los bordes). Se dibuja SIEMPRE, aunque "Show Overlays" este off (la opcion
     // ShowUi que lo salteaba se dio de baja: dejaba el viewport sin chrome y el
     // estado GL 2D sin resetear). (Usa el viewport ya seteado en Render().)
     {
-        w3dEngine::MatrixMode(w3dEngine::Projection);
-        w3dEngine::LoadIdentity();
-    w3dEngine::Ortho(0, width, height, 0, -1, 1);
-        w3dEngine::MatrixMode(w3dEngine::ModelView);
-        w3dEngine::LoadIdentity();
-        // estado 2D COMPLETO (no asumir lo que dejo el render de la escena:
-        // antes la barra iba al final de RenderOverlay que ya lo seteaba; con
-        // overlays off corre justo despues de los meshes 3D que dejan CULL_FACE
-        // y NORMAL/COLOR arrays activos -> los botones se veian medio culeados
-        // (un solo triangulo) y el texto desaparecia).
-        w3dEngine::Disable(w3dEngine::DepthTest);
-        w3dEngine::Disable(w3dEngine::Lighting);
-        w3dEngine::Disable(w3dEngine::Fog);
-        w3dEngine::Disable(w3dEngine::PointSprite);
-        w3dEngine::Disable(w3dEngine::CullFace);
-        w3dEngine::Enable(w3dEngine::ColorMaterial);
-        w3dEngine::Enable(w3dEngine::Texture2D);
-        w3dEngine::Enable(w3dEngine::Blend);
-        w3dEngine::BlendAlpha();
-        w3dEngine::EnableArray(w3dEngine::VertexArray);
-        w3dEngine::EnableArray(w3dEngine::TexCoordArray);
-        w3dEngine::DisableArray(w3dEngine::NormalArray);
-        w3dEngine::DisableArray(w3dEngine::ColorArray);
+        Estado2D();
         // la INTERFAZ 2D del juego/programa, dibujada sobre la PANTALLA DEL JUEGO (no sobre
         // el viewport entero, que era lo que la dejaba "aplastada": estirar el lienzo al
         // rect del viewport escala X e Y con factores distintos y ademas descuadra el HUD

@@ -38213,6 +38213,13 @@ bool W3dRunScript(const std::string& path) {
     std::ifstream f(path.c_str());
     if (!f) { printf("FALLO: no se pudo abrir el script '%s'\n", path.c_str()); return false; }
     printf("=== W3dScript: %s ===\n", path.c_str()); fflush(stdout);
+    // EL SCRIPT CORRE PARADO EN SU CARPETA: sus entradas (geometria, texturas) viven al lado del .w3s y lo que fabrica
+    // con un nombre pelado (los *_v4.w3d / *_rt*.w3d, ver tools/pruebas/.gitignore) queda ahi, ignorado. Corrido
+    // desde otro lado (la raiz del repo) no encontraba sus entradas y dejaba las salidas tiradas en la raiz
+    try {
+        const std::filesystem::path dir = std::filesystem::path(path).parent_path();
+        if (!dir.empty()) std::filesystem::current_path(dir);
+    } catch (...) {}
     std::string linea; int nLinea = 0, nOk = 0;
     while (std::getline(f, linea)) {
         nLinea++;

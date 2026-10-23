@@ -342,9 +342,21 @@ static unsigned int RelojSDL() { return SDL_GetTicks(); }
 //  prueba de lo mas lindo a lo mas basico y se queda con lo primero que abra; lo que se resigna va al log.
 //  W3D_GL_PRUEBA_RESPALDO=1 hace fallar el primer intento a proposito (para probar el respaldo sin ese driver).
 // ---------------------------------------------------------------------------------------------------------------
+#ifdef W3D_3DS
+#include "c3d/w3dC3D.h"   // la 3DS: dibuja citro3d (sin OpenGL)
+#endif
 struct W3dIntentoGL { int msaa, estencil, z; const char* que; };
 static bool g_glSinMsaa = false;   // se pidio antialiasing y el driver no lo dio (se avisa al abrir)
 static SDL_Window* CrearVentanaGL(const char* titulo, int w, int h, Uint32 flags, bool antialias, SDL_GLContext* ctxOut) {
+#ifdef W3D_3DS
+    // la 3DS no tiene OpenGL: la ventana es la pantalla de abajo (la tactil, donde SDL entrega los toques) y dibuja
+    // citro3d (c3d/w3dGraphicsC3D.cpp), que se inicia aca: SDL ya inicio las pantallas (gfxInit)
+    (void)antialias;
+    *ctxOut = NULL;
+    SDL_Window* win3ds = SDL_CreateWindow(titulo, SDL_WINDOWPOS_UNDEFINED_DISPLAY(1), SDL_WINDOWPOS_UNDEFINED_DISPLAY(1), w, h, flags);
+    if (win3ds && !w3dEngine::C3DInit()) { w3dLogfE("citro3d no inicio"); SDL_DestroyWindow(win3ds); return NULL; }
+    return win3ds;
+#endif
     static const W3dIntentoGL kIntentos[] = {
         { 4, 8, 24, "antialiasing 4x, estencil 8, profundidad 24" },
         { 2, 8, 24, "antialiasing 2x, estencil 8, profundidad 24" },
@@ -814,6 +826,12 @@ static void MainLoopFrame() {
         W3dDcControlComoMouse(AnimEsJuego && PlayAnimation && SimActiva());
     }
 #endif
+#ifdef W3D_3DS
+    {   // los botones y los sticks de la consola en el editor (fuera del modo juego, como en la Dreamcast)
+        extern bool SimActiva(); extern void W3d3dsControles(bool);
+        W3d3dsControles(AnimEsJuego && PlayAnimation && SimActiva());
+    }
+#endif
     while (SDL_PollEvent(&e)) ProcesarEvento(e); // manejo compartido (mismo que la espera de reposo)
     // la PULSACION LARGA tactil (agarrar una fila del outliner): se mide con el reloj, no con eventos
     { extern void ControlesTick(); ControlesTick(); }
@@ -985,6 +1003,10 @@ static void MainLoopFrame() {
     if (doRender) {
         lastRenderTime = now;
         double _profRender0 = W3dNowMs();
+#ifdef W3D_3DS
+        w3dEngine::C3DCuadroEmpezar();                     // (la 3DS: el cuadro de citro3d, el editor en la de abajo)
+        { extern void W3d3dsPantallaArriba(); W3d3dsPantallaArriba(); }   // (la vista grande; deja elegida la de abajo)
+#endif
         if (rootViewport){
             rootViewport->Render();
         }
@@ -1006,7 +1028,12 @@ static void MainLoopFrame() {
 #ifdef W3D_DREAMCAST
         { extern void W3dDcDibujarCursor(int, int); W3dDcDibujarCursor(winW, winH); }   // (la consola no tiene cursor propio)
 #endif
+#ifdef W3D_3DS
+        w3dEngine::C3DCuadroTerminar();
+        { extern void W3d3dsCuadroDibujado(); W3d3dsCuadroDibujado(); }   // (la captura de prueba en la SD)
+#else
         SDL_GL_SwapWindow(window);
+#endif
 #ifdef W3D_DREAMCAST
         { extern void W3dDcCuadroDibujado(); W3dDcCuadroDibujado(); }   // (la captura de prueba por la consola serie)
 #endif
@@ -1196,6 +1223,10 @@ int main(int argc, char* argv[]) {
     // la Dreamcast: la salida de video es 640x480 (VGA o TV), la UI a escala 1 y sin antialiasing (la PVR no lo hace)
     winW = 640; winH = 480; cfg.fullscreen = true; cfg.scale = 1; cfg.enableAntialiasing = false;
 #endif
+#ifdef W3D_3DS
+    // la 3DS: el editor en la pantalla de abajo (la tactil, 320x240), la UI a escala 1 y sin antialiasing
+    winW = 320; winH = 240; cfg.fullscreen = true; cfg.scale = 1; cfg.enableAntialiasing = false;
+#endif
     // AUTO KEY: el config MANDA sobre el global de animacion (que arranca apagado). Reporte del
     // dueno: "no se guarda que en el timeline puse auto key" -> se prendia de nuevo en cada sesion.
     { extern bool AutoKeyOn; AutoKeyOn = cfg.autoKey; }
@@ -1214,6 +1245,8 @@ int main(int argc, char* argv[]) {
         // probar tamanos chicos, ej. 240x320 estilo N95 con scale=1)
     #ifdef W3D_DREAMCAST
         Uint32 windowFlags = SDL_WINDOW_OPENGL | SDL_WINDOW_FULLSCREEN;   // (la consola es una sola pantalla)
+    #elif defined(W3D_3DS)
+        Uint32 windowFlags = SDL_WINDOW_FULLSCREEN;   // (sin OpenGL: ver CrearVentanaGL)
     #else
         Uint32 windowFlags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE;
         if (cfg.fullscreen) windowFlags |= SDL_WINDOW_MAXIMIZED;

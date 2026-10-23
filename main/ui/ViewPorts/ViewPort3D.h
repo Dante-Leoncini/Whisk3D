@@ -132,6 +132,9 @@ class Viewport3D : public ViewportBase, public WithBorder {
         // Editor2D en vista de juego (coherencia con varios viewports).
         bool hudOverride;
         bool showOverlays;
+        // SOLO LA ESCENA: Render dibuja el 3D sin el chrome del area (barra, menus, pincel, caja de seleccion) ni el
+        // mapa de oclusion de la pintura. Para mostrar la vista en otra pantalla (la de arriba de la 3DS)
+        bool soloEscena;
         // los 6 flags del overlay "Statistics" -> PER-VIEWPORT (antes globales en OpcionesRender). MISMO nombre que
         // los globales viejos a proposito: RenderEstadisticas y el menu Overlays>Statistics (metodos de Viewport3D)
         // los referencian sin calificar -> pasan a bindear this->flag sin tocar esos sitios. Stats por viewport.
@@ -264,6 +267,7 @@ class Viewport3D : public ViewportBase, public WithBorder {
         void RenderRelantionshipsLines();
         void Render3Dcursor();
         void RenderUI();
+        void Estado2D();   // el estado 2D completo tras las mallas (lo primero que hace RenderUI)
         // durante un transform reemplaza la barra de botones por una barra de
         // estado (Translate/Scale/Rotate con los valores en vivo)
         void RenderBarraTransform();
