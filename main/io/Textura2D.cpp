@@ -5,6 +5,7 @@
 #include "w3dTexture.h"
 #include "w3dFilesystem.h"
 #include "objects/Textures.h"   // puente al cache 3D (atlas unico: un solo id GL)
+#include "render/EscenaRender.h" // las capturas de pantalla ("pantalla:<nombre>")
 #include <stdio.h>
 #include <stdlib.h>
 #include <map>
@@ -97,6 +98,14 @@ void Textura2DListar(std::vector<std::string>& rutas) {
 
 unsigned Textura2DObtener(const std::string& ruta, int* w, int* h) {
     if (ruta.empty()) return 0;
+    // una CAPTURA DE PANTALLA (EscenaRender.h): la textura se busca cada vez, sin cache (existe recien cuando el juego
+    // copia la pantalla y crece si la pantalla cambia); hasta entonces, ninguna
+    if (W3dEsRutaCaptura(ruta)) {
+        const Texture* t = W3dCapturaTextura(ruta, false);
+        if (w) *w = t ? t->ancho : 0;
+        if (h) *h = t ? t->alto : 0;
+        return t ? t->iID : 0;
+    }
     std::map<std::string, Tex2DEntrada>::iterator it = gTexturas.find(ruta);
     if (it == gTexturas.end()) {
         Tex2DEntrada e; e.id = 0; e.w = 0; e.h = 0; e.prestada = false;

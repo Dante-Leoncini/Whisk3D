@@ -273,6 +273,17 @@ static void TstCajaUI(lua_State* L, Object* o, float* c) {
     for (int i = 0; i < 4; i++) c[i] = (float)lua_tonumber(L, -4 + i);
     lua_pop(L, 4);
 }
+// dentro(o, x, y) -> bool
+static bool TstDentroBind(lua_State* L, Object* o, float x, float y) {
+    lua_getglobal(L, "dentro");
+    lua_pushlightuserdata(L, o);
+    lua_pushnumber(L, x);
+    lua_pushnumber(L, y);
+    if (lua_pcall(L, 3, 1, 0) != 0) { lua_pop(L, 1); return false; }
+    bool r = lua_toboolean(L, -1) != 0;
+    lua_pop(L, 1);
+    return r;
+}
 // llama <fn>(o, x, y) sin resultados (setPosPx / velocidad / limitar con bordes)
 // misma llamada pero con un CUARTO argumento de texto: el eje de limitar()
 static void TstXYEjeBind(lua_State* L, const char* fn, Object* o, float x, float y, const char* eje) {
@@ -25065,6 +25076,21 @@ bool W3dRunCommand(const std::string& linea, std::string& err) {
                pelota->pos.x, espX, l3 ? "OK" : "MAL", l4 ? "OK" : "MAL");
         if (!l3 || !l4) ok = false;
 
+        // 5) SIN EL RECT DEL ULTIMO RENDER (el HUD dibujado sobre el 3D del juego no lo pasa): un boton anclado a la
+        //    esquina de abajo a la derecha, corrido (-91, -92) px y de 100 x 100, esta en el lienzo en (320-91, 240-92).
+        //    Antes cajaUI y dentro devolvian su pos cruda (-91, -92) y el toque no le pegaba (los botones del HUD de la
+        //    demo de Mobile Legends)
+        BindsJuegoRender(1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, NULL);
+        Rect2D* boton = new Rect2D(u, Vector3(-91.0f / 640.0f, -92.0f / 480.0f, 0.0f));
+        boton->ancla = 8; boton->ancho = 100.0f; boton->alto = 100.0f;
+        float cb[4];
+        TstCajaUI(L, boton, cb);
+        bool b1 = fabsf(cb[0] - 229.0f) < 0.5f && fabsf(cb[1] - 148.0f) < 0.5f;
+        bool b2 = TstDentroBind(L, boton, 229.0f, 148.0f) && !TstDentroBind(L, boton, -91.0f, -92.0f);
+        printf("      [chocantest] anclado sin render: cajaUI = (%.1f, %.1f) esperado (229, 148) %s | dentro %s\n",
+               cb[0], cb[1], b1 ? "OK" : "MAL", b2 ? "OK" : "MAL");
+        if (!b1 || !b2) ok = false;
+
         // ---- limpieza (como paltest: hijos primero, y BindsJuego sin punteros muertos) ----
         lua_close(L);
         W3dFisicaLimpiar();
@@ -25073,7 +25099,7 @@ bool W3dRunCommand(const std::string& linea, std::string& err) {
         cont->Childrens.clear(); delete h1; delete h2;
         u->Childrens.clear();
         delete cont; delete sonda; delete pelota; delete pared;
-        delete marca; delete pala; delete anc;
+        delete marca; delete pala; delete anc; delete boton;
         for (size_t i = 0; i < SceneCollection->Childrens.size(); i++)
             if (SceneCollection->Childrens[i] == (Object*)u) { SceneCollection->Childrens.erase(SceneCollection->Childrens.begin() + i); break; }
         delete u;

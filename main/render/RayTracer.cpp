@@ -715,7 +715,10 @@ void RTViewportPaso(Viewport3D* vp) {
         const int tw = Pot(vp->width), th = Pot(vp->height);
         if (!g_rtTexId || tw != g_rtTexW || th != g_rtTexH) {
             if (g_rtTexId) w3dEngine::DeleteTexture(g_rtTexId);
+            // negro OPACO: la imagen trazada no tiene transparencia (en la Dreamcast una textura opaca va en RGB565 y no
+            // en ARGB4444, que dejaba bandas marcadas en la luz)
             std::vector<unsigned char> vacio((size_t)tw * th * 4, 0);
+            for (size_t i = 3; i < vacio.size(); i += 4) vacio[i] = 255;
             g_rtTexId = w3dEngine::UploadRGBA(&vacio[0], tw, th, false, false);
             g_rtTexW = tw; g_rtTexH = th;
         }

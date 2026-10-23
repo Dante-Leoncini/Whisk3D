@@ -31,6 +31,7 @@
 #include "W3dAlmacen.h"                // W3dAlmacenMontado(): setTextura respeta las entradas del contenedor v4
 #include "objects/Materials.h"         // setTexturaB / setMezclaTextura: la mezcla de texturas de un material
 #include "objects/Textures.h"
+#include "render/EscenaRender.h"     // capturarPantalla / capturaUV
 #include "base/W3dConfig.h"            // ConfigMudo(): mute global del Core
 #include "W3dAviso.h"                  // W3dAvisof: el aviso de control conectado/desconectado
 
@@ -138,11 +139,25 @@ static bool RectResueltoLienzo(Object* o, float* cx, float* cy, float* aw, float
 // CAJA de un objeto en coords de LIENZO (centro + tamano): el rect RESUELTO por el layout si ya se
 // dibujo, y si no la pos/tam crudos. Es lo que devuelve cajaUI() y lo que usan limitar(o, area),
 // dentro(area, x, y) y la fisica cuando un objeto hace de area: un solo lugar, una sola respuesta.
+// El punto de su ancla (borde o esquina del lienzo) en coords de LIENZO, para un elemento colgado de la raiz UI en layout
+// libre y sin padding: ahi su pos es un corrimiento desde ese punto (render/UIOverlay.cpp). En cualquier otro caso 0, 0
+// (la pos cruda es lo unico que se sabe).
+static void AnclaCrudaLienzo(Object* o, float w, float h, float* ax, float* ay) {
+    *ax = *ay = 0.0f;
+    if (!o || !UI2D_EsElemento2D(o) || !o->Parent || o->Parent->getType() != ObjectType::ui) return;
+    UI* u = (UI*)o->Parent;
+    if (u->layoutHijos != 0 || u->padIzq != 0.0f || u->padDer != 0.0f || u->padArr != 0.0f || u->padAba != 0.0f) return;
+    UI2D_PuntoAncla(((Elemento2D*)o)->ancla, -w * 0.5f, -h * 0.5f, w, h, ax, ay);
+}
 static bool CajaLienzo(Object* o, float* cx, float* cy, float* aw, float* ah) {
     if (!o) return false;
     if (RectResueltoLienzo(o, cx, cy, aw, ah)) return true;
     float w, h; TamLienzo(&w, &h);
-    *cx = o->pos.x * w; *cy = o->pos.y * h; *aw = 0.0f; *ah = 0.0f;
+    // (sin el rect del ultimo render -el HUD dibujado sobre el 3D del juego no lo pasa-: el de un elemento anclado a un
+    //  borde o esquina sale de su ancla; antes era la pos sola y el toque de un boton del HUD en la esquina no le pegaba)
+    float ax, ay;
+    AnclaCrudaLienzo(o, w, h, &ax, &ay);
+    *cx = ax + o->pos.x * w; *cy = ay + o->pos.y * h; *aw = 0.0f; *ah = 0.0f;
     if (UI2D_EsElemento2D(o)) TamDeclarado((Elemento2D*)o, w, h, aw, ah);
     return true;
 }
@@ -252,11 +267,37 @@ static bool CajaHitLienzo(Object* o, float* cx, float* cy, float* hw, float* hh)
 //  BINDS (coordenadas en px de lienzo, centro 0,0).
 // ---------------------------------------------------------------------------
 // margenPantalla() -> mx, my: cuanto se extiende la pantalla MAS ALLA del lienzo del HUD encajado (letterbox), por lado,
-// en unidades del lienzo. 0, 0 si el HUD llena la pantalla. Un elemento anclado abajo que se quiere pegar al borde REAL
-// (en vertical, con el lienzo 4:3 centrado) se corre 'my' hacia abajo
+// en unidades del lienzo, hasta los bordes REALES (las bandas del encuadre de la camara tambien son pantalla). 0, 0 si
+// el HUD llena la pantalla. Un elemento anclado arriba que se quiere pegar al borde de arriba (en vertical, con el
+// lienzo 4:3 centrado) se corre 'my' hacia arriba; uno de abajo, hacia abajo
 float g_hudMargenX = 0.0f, g_hudMargenY = 0.0f;
 static int LMargenPantalla(lua_State* L) {
     lua_pushnumber(L, g_hudMargenX); lua_pushnumber(L, g_hudMargenY); return 2;
+}
+// marcoPantalla() -> x, y, ancho, alto: el CUADRO DE LA IMAGEN 3D (el encuadre de la camara, sin las bandas) en
+// unidades del lienzo, x e y desde el centro del lienzo (y hacia abajo), como posPx de un elemento anclado al centro.
+// En vertical con la camara 4:3 y el modo cover, la imagen es mas alta que el lienzo; con bandas, es el lienzo
+float g_hudMarco[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+static int LMarcoPantalla(lua_State* L) {
+    for (int i = 0; i < 4; i++) lua_pushnumber(L, g_hudMarco[i]);
+    return 4;
+}
+// capturarPantalla(nombre [, conHud]) -> ruta: copia la imagen 3D de ESTE cuadro (al terminar la escena, antes del HUD;
+// con 'conHud', despues de dibujar el HUD: lo que ve el jugador) a una textura; la ruta ("pantalla:<nombre>") sirve para setTextura de una imagen 2D, un material o "Bind texture" de una
+// rutina. capturaUV(nombre) -> u0, v0, u1, v1: la parte de la textura con la imagen derecha (para setUVRect), o nil
+// si todavia no se copio (la copia pedida se hace al dibujar: puede pasar mas de un actualizar). Ver EscenaRender.h
+static int LCapturarPantalla(lua_State* L) {
+    const char* n = luaL_checkstring(L, 1);
+    W3dCapturaPedir(n, lua_toboolean(L, 2) != 0);
+    g_redraw = true;
+    lua_pushstring(L, (std::string("pantalla:") + n).c_str());
+    return 1;
+}
+static int LCapturaUV(lua_State* L) {
+    float uv[4];
+    if (!W3dCapturaUV(luaL_checkstring(L, 1), uv)) return 0;
+    for (int i = 0; i < 4; i++) lua_pushnumber(L, uv[i]);
+    return 4;
 }
 static int LPantalla(lua_State* L) {
     float w, h; TamLienzo(&w, &h);
@@ -513,7 +554,10 @@ static int LDibujado(lua_State* L) {
 static int LSetTextura(lua_State* L) {
     Object* o = W3dScriptParamObjeto(L, 1);
     const char* s = lua_tostring(L, 2);
-    if (o && o->getType() == ObjectType::imagen2d && s) {
+    if (o && o->getType() == ObjectType::imagen2d && s && W3dEsRutaCaptura(s)) {
+        ((Imagen2D*)o)->textura = s;   // (una captura de pantalla: no es una ruta del proyecto)
+        g_redraw = true;
+    } else if (o && o->getType() == ObjectType::imagen2d && s) {
         // (un script de una LIBRERIA externa: primero la de SU libreria, W3dScriptRutaDeLibreria)
         const std::string deLib = W3dScriptRutaDeLibreria(L, s);
         std::string res = deLib.empty() ? std::string(s) : deLib;
@@ -1702,6 +1746,9 @@ void BindsJuegoRegistrar(void* Lv) {
                             FisicaPosCruda);   // idempotente (se llama por cada lua_State)
     lua_pushcfunction(L, LPantalla);    lua_setglobal(L, "pantalla");
     lua_pushcfunction(L, LMargenPantalla); lua_setglobal(L, "margenPantalla");
+    lua_pushcfunction(L, LMarcoPantalla); lua_setglobal(L, "marcoPantalla");
+    lua_pushcfunction(L, LCapturarPantalla); lua_setglobal(L, "capturarPantalla");
+    lua_pushcfunction(L, LCapturaUV);   lua_setglobal(L, "capturaUV");
     lua_pushcfunction(L, LResolucion);  lua_setglobal(L, "resolucion");
     lua_pushcfunction(L, LSetMemoria);  lua_setglobal(L, "setMemoria");
     lua_pushcfunction(L, LMemoria);     lua_setglobal(L, "memoria");

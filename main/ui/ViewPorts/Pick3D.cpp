@@ -252,6 +252,28 @@ static int EditPickIndex(int modo, int mx, int my, int vx, int vy, int vw, int v
     w3dEngine::EnableArray(w3dEngine::VertexArray);
     w3dEngine::EnableArray(w3dEngine::ColorArray);
     w3dEngine::Enable(w3dEngine::DepthTest);
+
+    // leer un AREA chica (no 1 pixel) y tomar el ID mas cercano al centro: tolera
+    // que el cursor virtual del telefono caiga un par de pixeles corrido + el
+    // clamping del tamano de punto/linea del driver. Clampeado al viewport.
+#ifdef __EMSCRIPTEN__
+    // WebGL clampea glLineWidth a 1px (las aristas del pick se dibujan de 1px en vez de 9) y limita
+    // el tamano de punto -> leemos un AREA MAS GRANDE para pescar aristas/caras finas bajo el click.
+    int RAD = 7;
+#else
+    int RAD = 3;
+#endif
+    // VERTICE + TOUCH: area de lectura GRANDE -> el vertice mas cercano al dedo gana (el voto por
+    // pixeles favorece al que tiene el punto mas centrado). Aristas/caras y mouse quedan igual.
+    if (!faceMode && !edgeMode && PickEsTactil()) RAD = 16;
+    const int WD = 2 * RAD + 1;
+    int cxw = mx, cyw = screenH - 1 - my; // centro en coords de ventana (GL)
+    int x0 = cxw - RAD, y0 = cyw - RAD;
+    if (x0 < vx) x0 = vx; if (x0 + WD > vx + vw) x0 = vx + vw - WD;
+    if (y0 < glY) y0 = glY; if (y0 + WD > glY + vh) y0 = glY + vh - WD;
+    if (x0 < 0) x0 = 0; if (y0 < 0) y0 = 0;
+    w3dEngine::ReadPixelsBegin(x0, y0, WD, WD);   // (antes de dibujar: la Dreamcast dibuja la pasada por software)
+
     w3dEngine::ClearColor(0, 0, 0, 1);
     w3dEngine::Clear(w3dEngine::ColorBuffer | w3dEngine::DepthBuffer);
 
@@ -330,25 +352,6 @@ static int EditPickIndex(int modo, int mx, int my, int vx, int vy, int vw, int v
         w3dEngine::PointSize(1.0f);
     }
 
-    // leer un AREA chica (no 1 pixel) y tomar el ID mas cercano al centro: tolera
-    // que el cursor virtual del telefono caiga un par de pixeles corrido + el
-    // clamping del tamano de punto/linea del driver. Clampeado al viewport.
-#ifdef __EMSCRIPTEN__
-    // WebGL clampea glLineWidth a 1px (las aristas del pick se dibujan de 1px en vez de 9) y limita
-    // el tamano de punto -> leemos un AREA MAS GRANDE para pescar aristas/caras finas bajo el click.
-    int RAD = 7;
-#else
-    int RAD = 3;
-#endif
-    // VERTICE + TOUCH: area de lectura GRANDE -> el vertice mas cercano al dedo gana (el voto por
-    // pixeles favorece al que tiene el punto mas centrado). Aristas/caras y mouse quedan igual.
-    if (!faceMode && !edgeMode && PickEsTactil()) RAD = 16;
-    const int WD = 2 * RAD + 1;
-    int cxw = mx, cyw = screenH - 1 - my; // centro en coords de ventana (GL)
-    int x0 = cxw - RAD, y0 = cyw - RAD;
-    if (x0 < vx) x0 = vx; if (x0 + WD > vx + vw) x0 = vx + vw - WD;
-    if (y0 < glY) y0 = glY; if (y0 + WD > glY + vh) y0 = glY + vh - WD;
-    if (x0 < 0) x0 = 0; if (y0 < 0) y0 = 0;
     GLubyte area[33 * 33 * 4]; // dimensionado para el WD mas grande (vertice+touch: 33); otros modos usan menos
     w3dEngine::ReadPixelsRGBA(x0, y0, WD, WD, area);
     w3dEngine::Enable(w3dEngine::Dither);
@@ -1494,6 +1497,7 @@ bool ScenePick3D(int mx, int my, int vx, int vy, int vw, int vh, int screenH) {
     w3dEngine::DisableArray(w3dEngine::NormalArray);
     w3dEngine::DisableArray(w3dEngine::TexCoordArray);
     w3dEngine::Enable(w3dEngine::DepthTest);
+    w3dEngine::ReadPixelsBegin(mx, screenH - 1 - my, 1, 1);   // (antes de dibujar: ver EditPickIndex)
     w3dEngine::ClearColor(0, 0, 0, 1);
     w3dEngine::Clear(w3dEngine::ColorBuffer | w3dEngine::DepthBuffer);
 

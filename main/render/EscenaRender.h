@@ -2,6 +2,7 @@
 #define ESCENA_RENDER_H
 
 #include "objects/CameraBase.h"
+#include <string>
 
 // ============================================================================
 //  EscenaRender — EL PASE 3D DE LA ESCENA, UNA SOLA VEZ, PARA LOS DOS.
@@ -106,5 +107,35 @@ void W3dEscena3DPasada();
 bool W3dEscena3DSinBandas(float W, float H, float marcoNX, float marcoNY, float zoom, float panX, float panY);
 void W3dEscena3DBandas(float W, float H, float marcoNX, float marcoNY,
                        float zoom, float panX, float panY, bool opaco);
+
+// ---------------------------------------------------------------------------
+//  CAPTURAS DE PANTALLA: la imagen 3D de un cuadro copiada a una textura (render a textura). Sirve para fundir la
+//  ultima imagen sobre la nueva en un corte, para un espejo o una pantalla dentro del juego (una rutina dibuja algo,
+//  lo copia y despues dibuja lo demas con esa textura), para congelar la imagen detras de un menu.
+//
+//  Cada captura tiene un NOMBRE y su textura se llama "pantalla:<nombre>": con esa ruta la usan un material, una
+//  imagen 2D (setTextura) o el paso "Bind texture" de una rutina. Se copia el CUADRO de la imagen (el encuadre de la
+//  camara, sin las bandas) en pixeles reales: la textura es la potencia de dos que lo contiene (crece sola si la
+//  pantalla cambia) y la imagen queda en su esquina, DADA VUELTA en V (la fila 0 es la de abajo): W3dCapturaUV da el
+//  rectangulo de UV que la muestra derecha. Una captura cuesta una copia en la GPU; en el PowerVR del N95, ademas, el
+//  dibujo de lo mandado hasta ese momento: es para un cuadro de vez en cuando.
+// ---------------------------------------------------------------------------
+// la textura de una captura ("nombre" o "pantalla:nombre"); 'crear' = la reserva si no existe (con el tamano del
+// viewport actual). NULL si no existe y no se pidio crearla
+class Texture;
+Texture* W3dCapturaTextura(const std::string& nombre, bool crear);
+bool     W3dEsRutaCaptura(const std::string& ruta);   // empieza con "pantalla:"
+// lua (capturarPantalla): la copia se hace al terminar el pase 3D de ESTE cuadro (antes del HUD) o, 'conHud', despues
+// de dibujar el HUD (la pantalla entera, como la ve el jugador)
+void     W3dCapturaPedir(const std::string& nombre, bool conHud = false);
+// el paso "Copy screen" de una rutina: copia YA el cuadro de la imagen (lo dibujado hasta ahora)
+bool     W3dCapturaCopiarYa(const std::string& nombre);
+// u0, v0, u1, v1 de la parte de la textura con la imagen, derecha (v0 > v1). false si nunca se copio o si hay una copia
+// pedida que todavia no se hizo (el cuadro no se dibujo: el que la pidio espera)
+bool     W3dCapturaUV(const std::string& nombre, float uv[4]);
+// las pedidas (lo llama W3dEscena3DPasada al terminar) y las pedidas con el HUD (lo llama quien dibuja el HUD del
+// juego, despues de dibujarlo: el viewport del editor y el runtime)
+void     W3dCapturasHacer();
+void     W3dCapturasHacerConHud();
 
 #endif // ESCENA_RENDER_H

@@ -14,6 +14,8 @@
     #endif
 #elif defined(_WIN32)
     #include <windows.h>
+#elif defined(W3D_DREAMCAST)
+    #include <dc/flashrom.h>
 #endif
 
 W3dIdioma g_idioma = W3dLangEN;
@@ -82,6 +84,12 @@ void W3dIdiomaDetectar(){
             SDL_free(locs);
         }
     #endif
+
+#elif defined(W3D_DREAMCAST)
+    // La Dreamcast guarda el idioma elegido en el menu de la consola en su memoria flash (el que usan los juegos).
+    // (con la BIOS emulada de Flycast la flash no tiene esa configuracion: queda en ingles, se cambia en Ajustes)
+    flashrom_syscfg_t cfg;
+    g_idioma = (flashrom_get_syscfg(&cfg) >= 0 && cfg.language == FLASHROM_LANG_SPANISH) ? W3dLangES : W3dLangEN;
 
 #elif defined(_WIN32)
     // El idioma de la UI, no el de formato de numeros: son cosas distintas y el que importa aca es el de la UI.

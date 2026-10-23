@@ -10,6 +10,7 @@
 #include "animation/VertexAnimation.h"   // W3dPoseAlDia: la pose pendiente de "Object pointer"
 #include "objects/Camera.h"              // "Skip if camera riel": el riel de la camara activa
 #include "w3dTexture.h"                  // TexturasMemoria: lo subido a GL, en el log de la precarga
+#include "render/EscenaRender.h"         // las capturas de pantalla ("Copy screen" y las texturas "pantalla:")
 #include "w3dlog.h"
 #include <map>
 #include <math.h>                  // cosf / sinf (el giro de "Matriz del objeto")
@@ -102,6 +103,7 @@ static const PasoInfo kPasos[PasoN] = {
     { "saltarFuera",     "Skip if outside",   GrupoControl,     4, RefObjeto,  EnteroCuenta, OpcNada,          false, 0, { "Min X", "Max X", "Min Z", "Max Z" } },
     { "saltarRiel",      "Skip if camera riel", GrupoControl,   0, RefObjeto,  EnteroCuenta, OpcRiel,          false, 0, { 0 } },
     { "saltarNoListado", "Skip if not listed", GrupoControl,    0, RefObjeto,  EnteroCuenta, OpcNada,          false, 0, { 0 } },
+    { "copiarPantalla",  "Copy screen",       GrupoTextura,     0, RefTextura, EnteroNada,   OpcNada,          false, 0, { 0 } },
 };
 static const char* const kGrupos[GrupoN] = { "Transform", "Draw", "Texture", "Fog", "Lights", "Alpha test", "Color",
                                              "Depth & clear", "Blending", "Face culling", "Control" };
@@ -315,6 +317,11 @@ static void ResolverPaso(W3dPaso& p, Object* desde, Object* noSoy, std::vector<M
     if (!p.ref2.empty()) p.ptr2 = W3dBuscarNombreDesde(desde, p.ref2);
     const int rt = W3dPasoRef(p.tipo);
     if (rt == RefNada || rt == RefFuncion || p.ref.empty()) return;
+    if (rt == RefTextura && (p.tipo == PasoCopiarPantalla || W3dEsRutaCaptura(p.ref))) {
+        // una CAPTURA DE PANTALLA (EscenaRender.h): se crea si no existe y no se retiene (es del registro de capturas)
+        p.ptr = W3dCapturaTextura(p.ref, true);
+        return;
+    }
     if (rt == RefTextura) {
         // LA RUTINA RETIENE SUS TEXTURAS (como sus mallas): una referencia propia sobre la que ya este cargada (la de
         // un material, encontrada por sufijo: la MISMA, sin otra copia) o, si nadie la cargo, la que trae el cache.
@@ -827,6 +834,7 @@ static void EjecutarPasoCrudo(W3dPaso& p, size_t& i, Rutina* yo) {
     // ---- textura ----
     case PasoTextura:        if (p.on) gfx::Enable(gfx::Texture2D); else gfx::Disable(gfx::Texture2D); break;
     case PasoFijarTextura:   gfx::BindTexture(((Texture*)p.ptr)->iID); break;
+    case PasoCopiarPantalla: W3dCapturaCopiarYa(p.ref); break;
     case PasoTexturaModo:
         // (DOT3: el color de vertice es la direccion de la luz, horneada; solo alfa: RGB del color, alfa de la textura por el del color)
         if (p.modo == 2) gfx::TexEnvDot3(true); else if (p.modo == 3) gfx::TexEnvAlphaOnly(true); else gfx::TexEnvReplace(p.modo == 1);

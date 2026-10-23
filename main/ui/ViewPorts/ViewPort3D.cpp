@@ -1582,6 +1582,13 @@ static std::vector<unsigned char> g_wpOclBuf;
 static void WP3DOclusionPass(Viewport3D* vp) {
     Mesh* m = (WP3DModoPintura() && ObjActivo && ObjActivo->getType() == ObjectType::mesh) ? (Mesh*)ObjActivo : NULL;
     if (!m || g_xray || m->vertexSize <= 0 || vp->width <= 0 || vp->height <= 0) { WPOclusionLimpiar(); return; }
+#ifdef W3D_DREAMCAST
+    // la PVR arma el cuadro recien al cerrarlo: este dibujo no se puede leer y el Clear no lo borra, asi que quedaba
+    // ENCIMA de la escena (el cubo pintado se veia negro, solo las lineas). Sin mapa vale el test de back-facing, como
+    // con X-Ray
+    WPOclusionLimpiar();
+    return;
+#endif
     namespace gfx = w3dEngine;
     const int glY = W3dPantallaAlto - vp->y - vp->height;
     // la PROYECCION ya la cargo el frame (W3dEscena3DProyeccion); la VISTA la aplica la escena mas
@@ -2943,8 +2950,13 @@ void Viewport3D::RenderUI() {
               if (Viewport3DActive == this) UI2D_OverrideVentana(this, sw, sh);
               UI2D_OverrideVentanaScope ventana(this, sw, sh);
               hudX0 = sx0; hudY0 = sy0; hudW = sw; hudH = sh; hudEsc = 1.0f; hudOverride = true;
-              { extern float g_hudMargenX, g_hudMargenY; if (Viewport3DActive == this) g_hudMargenX = g_hudMargenY = 0.0f; }
+              { extern float g_hudMargenX, g_hudMargenY, g_hudMarco[4];
+                if (Viewport3DActive == this) {
+                    g_hudMargenX = g_hudMargenY = 0.0f;
+                    g_hudMarco[0] = g_hudMarco[1] = 0.0f; g_hudMarco[2] = sw; g_hudMarco[3] = sh;
+                } }
               UI2D_DibujarOverlay(sx0, sy0, sw, sh, 1.0f, g_hudCapturaPos, true);
+              W3dCapturasHacerConHud();   // (capturarPantalla(nombre, true): con el HUD ya dibujado)
           } else {
               // 2b) lienzo con tamano propio, o EDICION (el lienzo sigue siendo el del
               //     render, asi el Editor 2D no cambia): ENCAJARLO (letterbox) con escala
@@ -2958,10 +2970,25 @@ void Viewport3D::RenderUI() {
               float dx0 = sx0 + (sw - dw) * 0.5f, dy0 = sy0 + (sh - dh) * 0.5f;
               hudX0 = dx0; hudY0 = dy0; hudW = dw; hudH = dh; hudEsc = esc; hudOverride = false;
               // (margenPantalla() de lua) cuanto se extiende el viewport mas alla del HUD encajado, en unidades del
-              // LIENZO: en vertical con el lienzo 4:3, la franja de abajo donde un texto "de abajo" se tiene que pegar
-              { extern float g_hudMargenX, g_hudMargenY;
-                if (Viewport3DActive == this) { g_hudMargenX = (sw - dw) * 0.5f / esc; g_hudMargenY = (sh - dh) * 0.5f / esc; } }
+              // LIENZO, hasta los bordes del VIEWPORT (no del cuadro de la camara: sus bandas tambien son pantalla): en
+              // vertical con el lienzo 4:3, las franjas de arriba y de abajo donde se pega lo que va en los bordes.
+              // (marcoPantalla()) el cuadro de la imagen 3D en unidades del lienzo, desde su centro
+              { extern float g_hudMargenX, g_hudMargenY, g_hudMarco[4];
+                if (Viewport3DActive == this) {
+                    // (en el modo juego puro no hay barras del editor: la pantalla es el viewport entero)
+                    const float ux0 = 0.0f, uw = (float)width;
+                    const float uy0 = g_juegoPuro ? 0.0f : (float)arri;
+                    const float uh = g_juegoPuro ? (float)height : (float)(height - arri - abaj);
+                    g_hudMargenX = (dx0 - ux0) / esc; g_hudMargenY = (dy0 - uy0) / esc;
+                    if ((ux0 + uw) - (dx0 + dw) < dx0 - ux0) g_hudMargenX = ((ux0 + uw) - (dx0 + dw)) / esc;
+                    if ((uy0 + uh) - (dy0 + dh) < dy0 - uy0) g_hudMargenY = ((uy0 + uh) - (dy0 + dh)) / esc;
+                    if (g_hudMargenX < 0.0f) g_hudMargenX = 0.0f;
+                    if (g_hudMargenY < 0.0f) g_hudMargenY = 0.0f;
+                    g_hudMarco[0] = (sx0 - (dx0 + dw * 0.5f)) / esc; g_hudMarco[1] = (sy0 - (dy0 + dh * 0.5f)) / esc;
+                    g_hudMarco[2] = sw / esc; g_hudMarco[3] = sh / esc;
+                } }
               UI2D_DibujarOverlay(dx0, dy0, dw, dh, esc, g_hudCapturaPos, true);
+              W3dCapturasHacerConHud();   // (capturarPantalla(nombre, true): con el HUD ya dibujado)
           } }
         // MODO JUEGO PURO (VERDE+0): el HUD del juego ya se dibujo; todo lo que
         // sigue es CHROME del editor (barras, botones, toolbar, estadisticas).

@@ -21,6 +21,7 @@
 #include "W3dEscena.h"              // W3dEscenaActiva(): el lienzo/UI del juego = la escena activa
 #include "W3dPaletas.h"             // paleta EFECTIVA por objeto (herencia por Parent)
 #include "script/BindsJuego.h"      // BindsJuegoRatonEstado(): mouse-over para el borde de hover
+#include <math.h>                   // fabsf: el rectangulo de UV dado vuelta
 #include "w3dGraphics.h"
 #include <stdio.h>    // snprintf (formato de los textos number/float)
 #include <stdlib.h>   // atof
@@ -457,12 +458,13 @@ static void DibujarImagenRect(Imagen2D* im, float x0, float y0, float x1, float 
     // Se toma la ventana rectangular de las esquinas 0 (u0,v0) y 2 (u1,v1): cubre el flipbook por
     // celdas y el scroll/zoom eje-alineado; el skew/rotacion (esquinas 1 y 3) es un caso futuro.
     // IMAGEN FIJA: manda su uvRect (default 0,0,1,1 = entera; atlas unico = su recorte).
+    // (dado vuelta = espejado: u1 < u0 o v1 < v0. La captura de pantalla viene con las filas de abajo para arriba)
     float uOff = im->uvRect[0], vOff = im->uvRect[1];
     float uSc = im->uvRect[2] - im->uvRect[0], vSc = im->uvRect[3] - im->uvRect[1];
-    if (uSc <= 0.0f) { uOff = 0.0f; uSc = 1.0f; }
-    if (vSc <= 0.0f) { vOff = 0.0f; vSc = 1.0f; }
-    int cw = (int)(iw * uSc + 0.5f); if (cw < 1) cw = 1;   // px del recorte (aspecto de modo 1/2)
-    int ch = (int)(ih * vSc + 0.5f); if (ch < 1) ch = 1;
+    if (uSc == 0.0f) { uOff = 0.0f; uSc = 1.0f; }
+    if (vSc == 0.0f) { vOff = 0.0f; vSc = 1.0f; }
+    int cw = (int)(iw * fabsf(uSc) + 0.5f); if (cw < 1) cw = 1;   // px del recorte (aspecto de modo 1/2)
+    int ch = (int)(ih * fabsf(vSc) + 0.5f); if (ch < 1) ch = 1;
     if (im->EsFlipbook()) {
         const float* uvp = im->flipPlay.uvActual;   // (0,0)(1,0)(1,1)(0,1)
         uOff = uvp[0]; vOff = uvp[1];

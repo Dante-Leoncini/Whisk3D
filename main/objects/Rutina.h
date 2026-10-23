@@ -101,6 +101,8 @@ enum W3dPasoTipo {
                         // solo mientras la camara va por ese riel
     PasoSaltarNoListado,// si el objeto NO esta en la lista del nodo actual de su Culling de riel (Object::listadoRiel == 0:
                         // la SLST del original dice que desde aca no se ve), saltea N pasos
+    PasoCopiarPantalla, // copia lo dibujado hasta aca (el cuadro de la imagen) a la textura 'ref', la captura "pantalla:<ref>"
+                        // (render a textura: dibujar, copiar, limpiar y dibujar lo demas con esa textura; EscenaRender.h)
     PasoN
 };
 

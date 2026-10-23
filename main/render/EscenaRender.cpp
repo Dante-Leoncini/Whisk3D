@@ -13,7 +13,10 @@
 #include "render/OpcionesRender.h"// RenderType + la luz de los modos de preview
 #include "objects/Niebla.h"        // la niebla arranca y termina apagada en cada pase
 #include "W3dEscena.h"             // dibujar3D(false) de lua: el pase no se hace
+#include "objects/Textures.h"      // las capturas de pantalla: texturas registradas por ruta
+#include "gfx/w3dTexture.h"
 #include <math.h>
+#include <map>
 
 namespace gfx = w3dEngine;
 
@@ -167,6 +170,147 @@ void W3dEscena3DPasada() {
     W3dParticulasDibujarPendientes();
     W3dNieblaReiniciar();               // nada de niebla para lo que se dibuja despues (overlays, HUD, UI)
     gfx::EstadoBase();                  // ni el alpha test, el sesgo o la matriz de textura que dejo la escena
+    W3dCapturasHacer();                 // las capturas que pidio lua: la imagen 3D sola (el HUD todavia no)
+}
+
+// ---------------------------------------------------------------------------
+//  CAPTURAS DE PANTALLA (ver EscenaRender.h)
+// ---------------------------------------------------------------------------
+namespace {
+struct Captura {
+    Texture* tex;
+    unsigned id;          // su textura GL (para saber si el puntero sigue siendo la misma)
+    unsigned gen;         // g_w3dTexturasGen cuando se verifico que sigue viva
+    int texW, texH;       // lo reservado (potencias de dos)
+    int w, h;             // lo copiado la ultima vez (0 = nunca)
+    bool pedida, conHud;
+    Captura() : tex(NULL), id(0), gen(0), texW(0), texH(0), w(0), h(0), pedida(false), conHud(false) {}
+};
+std::map<std::string, Captura> gCapturas;
+int gMarcoPase[4] = { 0, 0, 0, 0 };   // el cuadro de la imagen del ultimo pase 3D (el HUD se dibuja con otro viewport)
+const char kPrefijoCaptura[] = "pantalla:";
+const size_t kLargoPrefijo = sizeof(kPrefijoCaptura) - 1;
+
+std::string SinPrefijo(const std::string& n) {
+    if (n.compare(0, kLargoPrefijo, kPrefijoCaptura) == 0) return n.substr(kLargoPrefijo);
+    // (una ruta que ya paso por el cache de texturas: lo que sigue al prefijo)
+    size_t k = n.find(kPrefijoCaptura);
+    return k == std::string::npos ? n : n.substr(k + kLargoPrefijo);
+}
+
+int Pot(int v) { int p = 16; while (p < v && p < 2048) p <<= 1; return p; }
+
+// la textura sigue viva: al cerrar el proyecto el cache libera todas las suyas (y con ellas las capturas)
+bool Viva(Captura& c) {
+    if (!c.tex) return false;
+    if (c.gen == g_w3dTexturasGen) return true;
+    for (size_t i = 0; i < Textures.size(); i++)
+        if (Textures[i] == c.tex && c.tex->iID == c.id) { c.gen = g_w3dTexturasGen; return true; }
+    c.tex = NULL; c.id = 0; c.w = c.h = 0;
+    return false;
+}
+
+// el cuadro de la imagen en pixeles de la ventana (GL: y desde abajo): el viewport y el encuadre de la camara
+// (g_renderMarco, lo publica W3dEscena3DProyeccion), la misma cuenta que los Recortes
+void Marco(int r[4]) {
+    int vp[4]; gfx::GetViewport(vp);
+    const float mw = vp[2] * g_renderMarco[2], mh = vp[3] * g_renderMarco[3];
+    const float mx0 = vp[0] + vp[2] * 0.5f * (1.0f + g_renderMarco[0]) - mw * 0.5f;
+    const float my0 = vp[1] + vp[3] * 0.5f * (1.0f + g_renderMarco[1]) - mh * 0.5f;
+    int x0 = (int)floorf(mx0 + 0.5f), y0 = (int)floorf(my0 + 0.5f);
+    int x1 = (int)floorf(mx0 + mw + 0.5f), y1 = (int)floorf(my0 + mh + 0.5f);
+    if (x0 < vp[0]) x0 = vp[0];
+    if (y0 < vp[1]) y0 = vp[1];
+    if (x1 > vp[0] + vp[2]) x1 = vp[0] + vp[2];
+    if (y1 > vp[1] + vp[3]) y1 = vp[1] + vp[3];
+    r[0] = x0; r[1] = y0; r[2] = x1 - x0; r[3] = y1 - y0;
+}
+
+Captura* Buscar(const std::string& nombre, bool crear) {
+    const std::string n = SinPrefijo(nombre);
+    if (n.empty()) return NULL;
+    std::map<std::string, Captura>::iterator it = gCapturas.find(n);
+    if (it == gCapturas.end()) {
+        if (!crear) return NULL;
+        it = gCapturas.insert(std::make_pair(n, Captura())).first;
+    }
+    Captura& c = it->second;
+    if (!Viva(c) && crear) {
+        int r[4]; Marco(r);
+        c.texW = Pot(r[2] > 0 ? r[2] : 64); c.texH = Pot(r[3] > 0 ? r[3] : 64);
+        Texture* t = new Texture();
+        t->iID = gfx::ReservarPantalla(0, c.texW, c.texH);
+        t->ancho = c.texW; t->alto = c.texH;
+        if (!t->iID || !TexturaRegistrar(std::string(kPrefijoCaptura) + n, t)) { delete t; return NULL; }
+        c.tex = t; c.id = t->iID; c.gen = g_w3dTexturasGen; c.w = c.h = 0;
+    }
+    return &c;
+}
+
+void Copiar(Captura& c, const int* rect = NULL) {
+    int r[4];
+    if (rect) { for (int i = 0; i < 4; i++) r[i] = rect[i]; } else Marco(r);
+    if (r[2] < 1 || r[3] < 1) return;
+    if (r[2] > c.texW || r[3] > c.texH) {
+        // la pantalla crecio (o giro): la misma textura, mas grande (los que la usan tienen el mismo puntero)
+        if (r[2] > c.texW) c.texW = Pot(r[2]);
+        if (r[3] > c.texH) c.texH = Pot(r[3]);
+        gfx::ReservarPantalla(c.id, c.texW, c.texH);
+        c.tex->ancho = c.texW; c.tex->alto = c.texH;
+    }
+    gfx::CopiarPantalla(c.id, r[0], r[1], r[2], r[3]);
+    c.w = r[2]; c.h = r[3];
+}
+}
+
+bool W3dEsRutaCaptura(const std::string& ruta) {
+    return ruta.find(kPrefijoCaptura) != std::string::npos;
+}
+
+Texture* W3dCapturaTextura(const std::string& nombre, bool crear) {
+    Captura* c = Buscar(nombre, crear);
+    return (c && Viva(*c)) ? c->tex : NULL;
+}
+
+void W3dCapturaPedir(const std::string& nombre, bool conHud) {
+    Captura* c = Buscar(nombre, true);
+    if (c) { c->pedida = true; c->conHud = conHud; }
+}
+
+bool W3dCapturaCopiarYa(const std::string& nombre) {
+    Captura* c = Buscar(nombre, true);
+    if (!c || !c->tex) return false;
+    Copiar(*c);
+    return true;
+}
+
+bool W3dCapturaUV(const std::string& nombre, float uv[4]) {
+    Captura* c = Buscar(nombre, false);
+    if (!c || c->pedida || !Viva(*c) || c->w < 1 || c->h < 1) return false;   // (pedida: todavia no se dibujo)
+    uv[0] = 0.0f; uv[1] = (float)c->h / (float)c->texH;
+    uv[2] = (float)c->w / (float)c->texW; uv[3] = 0.0f;
+    return true;
+}
+
+void W3dCapturasHacer() {
+    Marco(gMarcoPase);
+    for (std::map<std::string, Captura>::iterator it = gCapturas.begin(); it != gCapturas.end(); ++it) {
+        Captura& c = it->second;
+        if (!c.pedida || c.conHud) continue;
+        c.pedida = false;
+        if (!Viva(c)) Buscar(it->first, true);
+        if (c.tex) Copiar(c);
+    }
+}
+
+void W3dCapturasHacerConHud() {
+    for (std::map<std::string, Captura>::iterator it = gCapturas.begin(); it != gCapturas.end(); ++it) {
+        Captura& c = it->second;
+        if (!c.pedida || !c.conHud) continue;
+        c.pedida = false;
+        if (!Viva(c)) Buscar(it->first, true);
+        if (c.tex) Copiar(c, gMarcoPase);
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -65,7 +65,7 @@ Cada paso fija **un** estado, como OpenGL.
 |---|---|
 | Transform | Push / Pop matrix, Translate, Rotate, Scale, Object matrix (la matriz de mundo de un objeto: **Multiply**, o **Load** = cámara x objeto en UNA llamada, sin apilar) |
 | Draw | **Array on/off**, **Vertex / Normal / UV / Color pointer**, **Draw elements**, Point size, Line width, Draw children, Call routine |
-| Texture | Texture on/off, Bind texture (de una lista por carpetas), Texture mode (modular, reemplazar, **normal map DOT3**, **solo alfa**: RGB del color, alfa de la textura por el del color), Texture filter, Texture wrap, **UV offset** (la matriz de textura), **Matcap**, **Texture mix** (la unidad 1 con su textura B en la misma pasada: modo *Interpolate* (`Mix` 0..1, animable o de una memoria), *Multiply* o *Multiply 2x* (un lightmap); el entero es la **capa UV** de la malla del último puntero de UV con la que se muestrea B, 0 = las mismas UV; ver `formato/material-capas.md`). La unidad 1 recuerda su combiner, su textura y su puntero al apagarse: prenderla de nuevo con lo mismo son 6 llamadas |
+| Texture | Texture on/off, Bind texture (de una lista por carpetas), Texture mode (modular, reemplazar, **normal map DOT3**, **solo alfa**: RGB del color, alfa de la textura por el del color), Texture filter, Texture wrap, **UV offset** (la matriz de textura), **Matcap**, **Texture mix** (la unidad 1 con su textura B en la misma pasada: modo *Interpolate* (`Mix` 0..1, animable o de una memoria), *Multiply* o *Multiply 2x* (un lightmap); el entero es la **capa UV** de la malla del último puntero de UV con la que se muestrea B, 0 = las mismas UV; ver `formato/material-capas.md`). La unidad 1 recuerda su combiner, su textura y su puntero al apagarse: prenderla de nuevo con lo mismo son 6 llamadas, **Copy screen** (copia lo dibujado hasta ahí a una textura: ver abajo) |
 | Fog | on/off, mode, start, end, density, color |
 | Lights | Lighting on/off, Light on/off (GL_LIGHT0..7), Light color (ambiente/difuso/especular), Light position (puntual/direccional), Ambient light |
 | Alpha test | on/off, reference |
@@ -268,6 +268,24 @@ celdas translúcidas).
 Después de la escena el motor repone el estado de material que la interfaz no pone (`gfx::EstadoBase`: alpha test,
 sesgo, matriz y modo de textura, sombreado, luz): un alpha test que quedaba prendido borraba las filas tenues del
 outliner, la barra del viewport y la interfaz de la cámara.
+
+## Capturas de pantalla (render a textura)
+
+**Copy screen** copia lo que se dibujó hasta ese paso (el cuadro de la imagen: el encuadre de la cámara, sin las
+bandas) a la textura `pantalla:<nombre>` (el nombre va en la referencia del paso; la textura se crea sola). Con eso una
+rutina puede dibujar algo, copiarlo, limpiar y dibujar el resto usándolo con **Bind texture** (`pantalla:<nombre>`):
+un espejo, una pantalla dentro del juego, una imagen congelada detrás de un menú. Desde lua, `capturarPantalla(nombre)`
+pide la copia de la imagen entera de ese cuadro (al terminar la escena, o con el HUD) y `capturaUV(nombre)` da la parte
+de la textura que la muestra derecha.
+
+- Es `glCopyTexSubImage2D`: está en GL 1.1, GLES 1.1 (el N95) y GLES2/WebGL sin extensiones. La textura es la potencia
+  de dos que contiene la imagen (crece sola si la pantalla cambia o gira), RGB (565 en el N95: su pantalla es de 16
+  bits), sin mipmaps.
+- La copia empieza por la fila de abajo: la imagen queda dada vuelta en V (`capturaUV` ya lo tiene en cuenta; en una
+  malla, la UV va de 1 a 0).
+- En el PowerVR del N95 copiar en medio del cuadro obliga a dibujar todo lo mandado hasta ahí: sirve para un cuadro de
+  vez en cuando (un corte, un fundido), no para cada cuadro.
+- Las capturas son del proyecto: se liberan con sus texturas al cerrarlo (`main/render/EscenaRender.h/.cpp`).
 
 ## Archivos
 

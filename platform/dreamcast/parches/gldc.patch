@@ -1,0 +1,401 @@
+--- a/GL/util.c
++++ b/GL/util.c
+@@ -1,16 +1,16 @@
+ #include "private.h"
+ 
+ uint32_t _glPackNormal(const GLfloat* nxyz) {
+-    uint8_t bx = (uint8_t)((nxyz[0] + 1) * 127.5);
+-    uint8_t by = (uint8_t)((nxyz[1] + 1) * 127.5);
+-    uint8_t bz = (uint8_t)((nxyz[2] + 1) * 127.5);
++    uint8_t bx = (uint8_t)((nxyz[0] + 1) * 127.5f);
++    uint8_t by = (uint8_t)((nxyz[1] + 1) * 127.5f);
++    uint8_t bz = (uint8_t)((nxyz[2] + 1) * 127.5f);
+     return (bx << 16) | (by << 8) | bz;
+ }
+ 
+ void _glUnpackNormal(uint32_t packed, float* nxyz) {
+-    nxyz[0] = ((packed >> 16) & 0xFF) / 127.5 - 1;
+-    nxyz[1] = ((packed >> 8) & 0xFF) / 127.5 - 1;
+-    nxyz[2] = (packed & 0xFF) / 127.5 - 1;
++    nxyz[0] = ((packed >> 16) & 0xFF) / 127.5f - 1.0f;
++    nxyz[1] = ((packed >> 8) & 0xFF) / 127.5f - 1.0f;
++    nxyz[2] = (packed & 0xFF) / 127.5f - 1.0f;
+ }
+ 
+ half_float_t _glPackHalfFloat(float f) {
+--- a/GL/attributes.c
++++ b/GL/attributes.c
+@@ -508,6 +508,17 @@
+     output[2] = input[2] * ONE_OVER_TWO_FIVE_FIVE;
+ }
+ 
++/* Whisk3D: GL_BYTE es CON signo (-127..127 -> -1..1); antes se leia como GL_UNSIGNED_BYTE / 255 y una normal hacia
++   atras quedaba apuntando hacia adelante (la luz salia mal) */
++static void _readNormal3b3f(const GLubyte* input, GLubyte* out) {
++    const GLbyte* in = (const GLbyte*) input;
++    float* output = (float*) out;
++
++    output[0] = (signed char) in[0] * (1.0f / 127.0f);
++    output[1] = (signed char) in[1] * (1.0f / 127.0f);
++    output[2] = (signed char) in[2] * (1.0f / 127.0f);
++}
++
+ static void _readNormal3us3f(const GLubyte* in, GLubyte* out) {
+     const GLushort* input = (const GLushort*) in;
+     float* output = (float*) out;
+@@ -562,6 +573,7 @@
+             return _readNormal3f3f;
+         break;
+         case GL_BYTE:
++            return _readNormal3b3f;
+         case GL_UNSIGNED_BYTE:
+             return _readNormal3ub3f;
+         break;
+--- a/GL/draw.c
++++ b/GL/draw.c
+@@ -4,6 +4,7 @@
+ #include <stdlib.h>
+ #include <math.h>
+ #include <limits.h>
++#include <malloc.h>   /* memalign (Whisk3D: la copia de la entrada del recorte de scissor) */
+ 
+ #include "state.h"
+ #include "private.h"
+@@ -175,39 +176,89 @@
+     float half_size = _glGetHalfPointSize();
+ 
+     // Expands v to { v + (S/2,-S/2), v + (S/2,S/2), v + (-S/2,-S/2), (-S/2,S/2) }
++    // Whisk3D: cada esquina con su UV de 0 a 1 (point sprite: la textura entera sobre el punto, como GL_COORD_REPLACE;
++    // antes las 4 esquinas copiaban la UV del vertice y un icono salia de un solo color)
+     for (; count > 0; count--, src--) {
+         *dst = *src;
+         dst->flags = GPU_CMD_VERTEX_EOL;
+         dst->xyz[0] -= half_size; dst->xyz[1] += half_size;
++        dst->uv[0] = 0.0f; dst->uv[1] = 1.0f;
+         dst--;
+ 
+         *dst = *src;
+         dst->xyz[0] += half_size; dst->xyz[1] += half_size;
++        dst->uv[0] = 1.0f; dst->uv[1] = 1.0f;
+         dst--;
+ 
+         *dst = *src;
+         dst->xyz[0] -= half_size; dst->xyz[1] -= half_size;
++        dst->uv[0] = 0.0f; dst->uv[1] = 0.0f;
+         dst--;
+ 
+         *dst = *src;
+         dst->xyz[0] += half_size; dst->xyz[1] -= half_size;
++        dst->uv[0] = 1.0f; dst->uv[1] = 0.0f;
+         dst--;
+     }
+ }
+ 
+ // Heavily based on the pvrline example by jnmartin84
+ // Which is based on https://devcry.heiho.net/html/2017/20170820-opengl-line-drawing.html
++/* Whisk3D: la punta de una linea que queda detras del plano cercano se corre al punto donde la linea lo cruza */
++static void clip_line_end(Vertex* fuera, const Vertex* dentro) {
++    const float d0 = fuera->w + fuera->xyz[2];
++    const float d1 = dentro->w + dentro->xyz[2];
++    const float t = d0 / (d0 - d1);
++    const float invt = 1.0f - t;
++    int i;
++    for(i = 0; i < 3; ++i) fuera->xyz[i] = invt * fuera->xyz[i] + t * dentro->xyz[i];
++    for(i = 0; i < 2; ++i) fuera->uv[i] = invt * fuera->uv[i] + t * dentro->uv[i];
++    for(i = 0; i < 4; ++i) fuera->argb[i] = invt * fuera->argb[i] + t * dentro->argb[i];
++    fuera->w = invt * fuera->w + t * dentro->w;
++    if(fuera->xyz[2] < -fuera->w) fuera->xyz[2] = -fuera->w;   /* (que el redondeo no la deje afuera) */
++}
++
+ static Vertex* draw_line(Vertex* dst, Vertex* v1, Vertex* v2) {
+     Vertex ov1 = *v1;
+     Vertex ov2 = *v2;
+     // TODO don't copy unless dst might overlap v1/v2
+ 
++    /* Whisk3D: la linea se recorta contra el plano cercano ANTES de hacerla cuadrilatero. Si se recortaba despues, el
++       corte caia sobre la diagonal del cuadrilatero, cuyo ancho dividido por un w casi cero salia gigante (un eje que
++       pasa por detras de la camara se veia como una franja enorme) */
++    const int fuera1 = ov1.xyz[2] < -ov1.w;
++    const int fuera2 = ov2.xyz[2] < -ov2.w;
++    if(fuera1 && fuera2) {
++        /* toda detras: cuatro vertices iguales y afuera, el recorte los descarta */
++        *dst = ov2; dst->flags = GPU_CMD_VERTEX_EOL; dst--;
++        *dst = ov1; dst--;
++        *dst = ov2; dst--;
++        *dst = ov1; dst--;
++        return dst;
++    }
++    if(fuera1) clip_line_end(&ov1, &ov2);
++    else if(fuera2) clip_line_end(&ov2, &ov1);
++
++    /* Whisk3D: la linea apenas hacia la camara (GLdc no tiene glPolygonOffset). Sin esto, una arista dibujada sobre su
++       cara peleaba con ella en la profundidad y salia punteada. La PVR compara 1/w: escalar x, y, z y w por igual deja
++       la linea en el mismo lugar de la pantalla y la acerca un 0,4% de su distancia. Con w = 1 (proyeccion
++       ortografica) GLdc usa z: ahi se corre z */
++    if(ov1.w != 1.0f) { ov1.xyz[0] *= 0.996f; ov1.xyz[1] *= 0.996f; ov1.xyz[2] *= 0.996f; ov1.w *= 0.996f; }
++    else ov1.xyz[2] -= 0.0005f;
++    if(ov2.w != 1.0f) { ov2.xyz[0] *= 0.996f; ov2.xyz[1] *= 0.996f; ov2.xyz[2] *= 0.996f; ov2.w *= 0.996f; }
++    else ov2.xyz[2] -= 0.0005f;
++
+ 	// Essentially "expands" a line into a quad by
+     // 1) Calculating normal of the line from v1 to v2
+ 	// 2) Scaling normal by the line width
+ 	// 3) Offseting the endpoints wrt the scaled normal
+-    float dx = ov2.xyz[0] - ov1.xyz[0];
+-    float dy = ov2.xyz[1] - ov1.xyz[1];
++    /* Whisk3D: esto corre ANTES de la division por w (las coordenadas son de pantalla multiplicadas por w): la
++       direccion se mide en pantalla y el ancho se multiplica por el w de cada punta. Antes el ancho quedaba dividido
++       por w y las lineas lejanas salian de menos de un pixel (punteadas). */
++    const float w1 = (ov1.w > 0.000001f || ov1.w < -0.000001f) ? ov1.w : 1.0f;
++    const float w2 = (ov2.w > 0.000001f || ov2.w < -0.000001f) ? ov2.w : 1.0f;
++    float dx = ov2.xyz[0] / w2 - ov1.xyz[0] / w1;
++    float dy = ov2.xyz[1] / w2 - ov1.xyz[1] / w1;
+ 
+     float inverse_mag = fast_rsqrt((dx*dx) + (dy*dy)) * _glGetHalfLineWidth();
+     float nx = -dy * inverse_mag;
+@@ -215,23 +266,23 @@
+ 
+     *dst = ov2;
+     dst->flags = GPU_CMD_VERTEX_EOL;
+-    dst->xyz[0] -= nx;
+-    dst->xyz[1] -= ny;
++    dst->xyz[0] -= nx * w2;
++    dst->xyz[1] -= ny * w2;
+     dst--;
+ 
+     *dst = ov1;
+-    dst->xyz[0] -= nx;
+-    dst->xyz[1] -= ny;
++    dst->xyz[0] -= nx * w1;
++    dst->xyz[1] -= ny * w1;
+     dst--;
+ 
+     *dst = ov2;
+-    dst->xyz[0] += nx;
+-    dst->xyz[1] += ny;
++    dst->xyz[0] += nx * w2;
++    dst->xyz[1] += ny * w2;
+     dst--;
+ 
+     *dst = ov1;
+-    dst->xyz[0] += nx;
+-    dst->xyz[1] += ny;
++    dst->xyz[0] += nx * w1;
++    dst->xyz[1] += ny * w1;
+     dst--;
+ 
+     return dst;
+@@ -821,6 +872,16 @@
+     float y1;
+ } ScreenRect;
+ 
++/* Whisk3D: de que bordes del scissor queda afuera un vertice (0 = adentro; lo mismo que scissor_plane_distance < 0) */
++GL_FORCE_INLINE int scissor_outcode(const Vertex* v, const ScreenRect* r) {
++    int c = 0;
++    if(v->xyz[0] < r->x0 * v->w) c |= 1;
++    if(v->xyz[0] > r->x1 * v->w) c |= 2;
++    if(v->xyz[1] < r->y0 * v->w) c |= 4;
++    if(v->xyz[1] > r->y1 * v->w) c |= 8;
++    return c;
++}
++
+ GL_FORCE_INLINE float scissor_plane_distance(const Vertex* v, int plane, const ScreenRect* r) {
+     switch(plane) {
+         case 0: return v->xyz[0] - (r->x0 * v->w);
+@@ -924,7 +985,11 @@
+         return;
+     }
+ 
+-    if(mode != GL_TRIANGLES && mode != GL_QUADS) {
++    /* Whisk3D: tambien las lineas y los puntos (ya armados como quads de 4 vertices en orden de tira). Sin esto solo los
++       recortaba la PVR, que lo hace por bloques de 32x32: la grilla del viewport 3D se pasaba hasta 31 pixeles a los
++       paneles de al lado (se veia en el editor UV) */
++    if(mode != GL_TRIANGLES && mode != GL_QUADS && mode != GL_LINES && mode != GL_LINE_STRIP &&
++       mode != GL_LINE_LOOP && mode != GL_POINTS) {
+         return;
+     }
+ 
+@@ -947,19 +1012,64 @@
+         return;
+     }
+ 
++    /* Whisk3D: dos cambios.
++       1) Lo mas comun (la interfaz entera dentro de su panel) es que nada toque los bordes: se mira el outcode de cada
++          vertice y, si todo cae adentro, no se hace nada. Antes cada triangulo pasaba por el recorte de 4 planos
++          copiando sus vertices (64 bytes cada uno) en cada plano: era la mitad del cuadro en el SH-4.
++       2) La salida se escribia encima de la entrada, en el mismo buffer: un quad sale como 6 vertices (y un triangulo
++          recortado en una esquina, hasta 15), asi que pisaba las primitivas siguientes antes de leerlas (los quads
++          desaparecian y los triangulos del borde de un panel salian rotos). Si hace falta recortar, la entrada se copia
++          aparte. Cada primitiva entera adentro pasa tal cual y la que queda entera afuera de un borde se descarta. */
+     Vertex* base = _glSubmissionTargetStart(target);
+-    Vertex* dst = base;
++    GLuint i;
++    for(i = 0; i < input_count; ++i) {
++        if(scissor_outcode(&base[i], &r)) break;
++    }
++    if(i == input_count) {
++        /* (el buffer se reservo con lugar para lo que podia salir del recorte: se deja en lo que hay) */
++        aligned_vector_resize(&target->output->vector, target->start_offset + target->count);
++        return;
++    }
+ 
+-    if(mode == GL_TRIANGLES) {
+-        for(GLuint i = 0; i < input_count; i += 3) {
+-            Vertex tri[3] = {base[i], base[i + 1], base[i + 2]};
+-            dst = emit_clipped_triangle(dst, &tri[0], &tri[1], &tri[2], &r);
+-        }
+-    } else {
+-        for(GLuint i = 0; i < input_count; i += 4) {
+-            Vertex q[4] = {base[i], base[i + 1], base[i + 2], base[i + 3]};
+-            dst = emit_clipped_triangle(dst, &q[0], &q[1], &q[2], &r);
+-            dst = emit_clipped_triangle(dst, &q[2], &q[1], &q[3], &r);
++    static Vertex* entrada = NULL;
++    static GLuint entrada_cap = 0;
++    if(input_count > entrada_cap) {
++        Vertex* nueva = (Vertex*) memalign(32, input_count * sizeof(Vertex));
++        if(!nueva) return;
++        free(entrada);
++        entrada = nueva;
++        entrada_cap = input_count;
++    }
++    memcpy(entrada, base, input_count * sizeof(Vertex));
++
++    Vertex* dst = base;
++    const GLuint paso = (mode == GL_TRIANGLES) ? 3 : 4;
++    for(i = 0; i + paso <= input_count; i += paso) {
++        const Vertex* v = &entrada[i];
++        const int c0 = scissor_outcode(&v[0], &r), c1 = scissor_outcode(&v[1], &r), c2 = scissor_outcode(&v[2], &r);
++        if(paso == 3) {
++            if(c0 & c1 & c2) continue;
++            if(!(c0 | c1 | c2)) {
++                dst[0] = v[0]; dst[1] = v[1]; dst[2] = v[2];
++                dst[0].flags = dst[1].flags = GPU_CMD_VERTEX;
++                dst[2].flags = GPU_CMD_VERTEX_EOL;
++                dst += 3;
++                continue;
++            }
++            dst = emit_clipped_triangle(dst, &v[0], &v[1], &v[2], &r);
++        } else {
++            /* (los quads, las lineas y los puntos ya vienen en orden de tira: 0, 1, 2 y 2, 1, 3) */
++            const int c3 = scissor_outcode(&v[3], &r);
++            if(c0 & c1 & c2 & c3) continue;
++            if(!(c0 | c1 | c2 | c3)) {
++                dst[0] = v[0]; dst[1] = v[1]; dst[2] = v[2]; dst[3] = v[3];
++                dst[0].flags = dst[1].flags = dst[2].flags = GPU_CMD_VERTEX;
++                dst[3].flags = GPU_CMD_VERTEX_EOL;
++                dst += 4;
++                continue;
++            }
++            dst = emit_clipped_triangle(dst, &v[0], &v[1], &v[2], &r);
++            dst = emit_clipped_triangle(dst, &v[2], &v[1], &v[3], &r);
+         }
+     }
+ 
+@@ -1015,6 +1125,12 @@
+             return count * 5;
+         case GL_QUADS:
+             return count * 8;
++        /* Whisk3D: las lineas y los puntos ya armados son quads (4 vertices por linea o por punto): el mismo lugar */
++        case GL_LINES:
++        case GL_LINE_STRIP:
++        case GL_LINE_LOOP:
++        case GL_POINTS:
++            return final_count * 8;
+         default:
+             return final_count;
+     }
+--- a/GL/lighting.c
++++ b/GL/lighting.c
+@@ -201,7 +201,10 @@
+             l->isDirectional = params[3] == 0.0f;
+ 
+             if(l->isDirectional) {
+-                //FIXME: Do we need to rotate directional lights?
++                /* Whisk3D: como GL, la direccion se rota con la modelview actual (sin trasladar) */
++                float dir[3] = { params[0], params[1], params[2] };
++                _glMatrixLoadModelView();
++                TransformNormalNoMod(dir, l->position);
+             } else {
+                 _glMatrixLoadModelView();
+                 TransformVec3(l->position);
+@@ -599,9 +602,11 @@
+     if(light->isDirectional) {
+         /* Directional lights: position is a direction vector (w=0).
+          * L = -light->position (direction from vertex to light at infinity) */
+-        *outLx = -light->position[0];
+-        *outLy = -light->position[1];
+-        *outLz = -light->position[2];
++        /* Whisk3D: en GL la posicion (w = 0) ya ES la direccion HACIA la luz; negarla la ponia del lado opuesto y una
++           cara de frente quedaba solo con la luz ambiente */
++        *outLx = light->position[0];
++        *outLy = light->position[1];
++        *outLz = light->position[2];
+         
+         /* Ensure normalized (should already be if set up correctly) */
+         float lenSq = (*outLx)*(*outLx) + (*outLy)*(*outLy) + (*outLz)*(*outLz);
+--- a/GL/framebuffer.c
++++ b/GL/framebuffer.c
+@@ -95,9 +95,10 @@
+             __asm__ __volatile__("" ::: "memory");
+             (void)(*(volatile uint32_t *)0xa05f8000);
+         } else {
++            /* Whisk3D: sin esperar a que la PVR termine de dibujar. La escena siguiente ya espera lo que hace falta
++               antes de empezar (pvr_wait_ready en SceneBegin) y los vertices tienen doble buffer: asi la PVR dibuja
++               este cuadro mientras la CPU arma el proximo. Esperar aca dejaba a una de las dos quieta siempre */
+             SceneFinish();
+-            pvr_wait_ready();
+-            pvr_wait_render_done();
+         }
+         FBO_SCENE_OPEN = GL_FALSE;
+         FBO_SCENE_IS_RTT = GL_FALSE;
+--- a/GL/texture.c
++++ b/GL/texture.c
+@@ -2603,6 +2603,48 @@
+ 
+     // Calculate the starting point for the subregion in the texture data
+     GLubyte* targetData = active->data;
++
++    /* Whisk3D: una actualizacion PARCIAL que hay que convertir (RGBA de 8 bits a los 16 bits de la PVR) se convierte
++       directo en la textura, cada pixel en su lugar (lineal o twiddled). Antes se armaba un buffer del tamanio de toda
++       la textura lleno de ceros, se convertia ahi solo la region y se copiaba el buffer ENTERO encima: cada
++       actualizacion borraba el resto de la textura (el trazado de rayos, que sube la imagen de a tiles, quedaba en negro
++       salvo el ultimo tile). Las conversiones escriben de a 16 bits, que la memoria de video acepta */
++    if (needs_conversion > 0 && (needs_conversion & CONVERSION_TYPE_PACK) != CONVERSION_TYPE_PACK &&
++        (xoffset != 0 || yoffset != 0 || width != textureWidth || height != textureHeight) &&
++        (destStride == 2 || destStride == 4)) {
++        if (needs_conversion == CONVERSION_TYPE_CONVERT) {
++            for (GLsizei y = 0; y < height; ++y) {
++                const GLubyte* src = (const GLubyte*) data + (y * sourcePitch);
++                GLubyte* dst = targetData + ((y + yoffset) * texturePitch + xoffset) * destStride;
++                for (GLsizei x = 0; x < width; ++x) {
++                    conversion(src, dst);
++                    dst += destStride;
++                    src += sourceStride;
++                }
++            }
++            _glGPUStateMarkDirty();
++            return;
++        } else if (needs_conversion == 2 || needs_conversion == 3) {
++            uint32_t maskX, maskY;
++            calc_twiddle_factors(textureWidth, textureHeight, &maskX, &maskY);
++            for (uint32_t y = yoffset; y < (uint32_t) (yoffset + height); ++y) {
++                for (uint32_t x = xoffset; x < (uint32_t) (xoffset + width); ++x) {
++                    GLubyte* dst = targetData + (destStride * twid_compute_index(x, y, maskX, maskY));
++                    const GLubyte* src = (const GLubyte*) data + ((y - yoffset) * sourcePitch) + ((x - xoffset) * sourceStride);
++                    if (needs_conversion == 3) {
++                        conversion(src, dst);
++                    } else if (destStride == 2) {
++                        GLushort t; memcpy(&t, src, 2); *((GLushort*) dst) = t;
++                    } else {
++                        GLuint t; memcpy(&t, src, 4); *((GLuint*) dst) = t;
++                    }
++                }
++            }
++            _glGPUStateMarkDirty();
++            return;
++        }
++    }
++
+     if (needs_conversion > 0) {
+         GLubyte* conversionBuffer = (GLubyte*) memalign(32, destBytes);
+ 

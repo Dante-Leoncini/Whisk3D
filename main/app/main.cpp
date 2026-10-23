@@ -414,10 +414,11 @@ Config loadConfig(const std::string& filename) {
             return cfg;
         }
 
-        std::string content((std::istreambuf_iterator<char>(file)),
-                            std::istreambuf_iterator<char>());
-
-        std::istringstream iss(content);
+        // (por el operator<< del stream y no con istreambuf_iterator: si el read falla, el iterador tira una excepcion
+        // que nadie atrapa y la app se cae; asi solo queda el texto que se pudo leer)
+        std::ostringstream leido;
+        leido << file.rdbuf();
+        std::istringstream iss(leido.str());
     #endif
 
     std::string line;
@@ -507,9 +508,9 @@ bool loadColors(const std::string& filename) {
             return false;
         }
 
-        std::string content((std::istreambuf_iterator<char>(file)),
-                            std::istreambuf_iterator<char>());
-        fileStream.str(content);
+        std::ostringstream leido;   // (no istreambuf_iterator: ver loadConfig)
+        leido << file.rdbuf();
+        fileStream.str(leido.str());
     #endif
 
     std::string line;
@@ -619,6 +620,9 @@ static bool CambiosGuardar() {
 }
 static void ProcesarEvento(SDL_Event& e) {
     g_redraw = true;
+#ifdef W3D_DREAMCAST
+    if (e.type == SDL_MOUSEMOTION && e.motion.which != SDL_TOUCH_MOUSEID) { extern void W3dDcMouseMovido(); W3dDcMouseMovido(); }
+#endif
 #ifdef __EMSCRIPTEN__
     // puntero bloqueado para el juego: el movimiento va a ratonRel() y, para el resto del editor, el cursor queda en el
     // centro del juego (el movimiento relativo ya no lo mueve)
@@ -803,6 +807,12 @@ static void MainLoopFrame() {
       bool _animPre = HayAnimacionActiva() || !VertexAnimationActives.empty() || PlayAnimation ||
                       _partAnim;
       if (!_animPre && !_needRender && !g_redraw && SDL_WaitEventTimeout(&e, 200)) ProcesarEvento(e); }
+#endif
+#ifdef W3D_DREAMCAST
+    {   // el control de la consola como mouse (fuera del modo juego; con el juego corriendo el control es del juego)
+        extern bool SimActiva(); extern void W3dDcControlComoMouse(bool);
+        W3dDcControlComoMouse(AnimEsJuego && PlayAnimation && SimActiva());
+    }
 #endif
     while (SDL_PollEvent(&e)) ProcesarEvento(e); // manejo compartido (mismo que la espera de reposo)
     // la PULSACION LARGA tactil (agarrar una fila del outliner): se mide con el reloj, no con eventos
@@ -993,7 +1003,13 @@ static void MainLoopFrame() {
         LayoutTickFPS(now); // overlay de fps (reloj de PC: SDL_GetTicks)
         g_prof.render = W3dNowMs() - _profRender0; // profiler: TODO el render (viewports 3D + paneles UI + menus)
         double _profSwap0 = W3dNowMs();
+#ifdef W3D_DREAMCAST
+        { extern void W3dDcDibujarCursor(int, int); W3dDcDibujarCursor(winW, winH); }   // (la consola no tiene cursor propio)
+#endif
         SDL_GL_SwapWindow(window);
+#ifdef W3D_DREAMCAST
+        { extern void W3dDcCuadroDibujado(); W3dDcCuadroDibujado(); }   // (la captura de prueba por la consola serie)
+#endif
         g_prof.swap = W3dNowMs() - _profSwap0; // profiler: swap (con vsync ON = espera al vblank)
         W3dProfEnd(); // profiler: suaviza g_profShow hacia g_prof (numeros estables). NO se resetea g_redraw aca: se
         // capturo+reseteo al inicio del frame; lo que los subsistemas (notif/texturas) prendieron queda para el proximo.
@@ -1057,6 +1073,11 @@ int main(int argc, char* argv[]) {
             break;
         }
 #endif
+#ifdef W3D_DREAMCAST
+    // la Dreamcast: el driver de video de SDL engancha GLdc (OpenGL 1.x de la PVR) solo en este modo; sin el hint
+    // abre un framebuffer de software y no hay contexto GL
+    SDL_SetHint(SDL_HINT_DC_VIDEO_MODE, "SDL_DC_OPENGL_VIDEO");
+#endif
     if (SDL_Init(initFlags) != 0) {
         std::cerr << "Error SDL_Init: " << SDL_GetError() << std::endl;
         return -1;
@@ -1086,8 +1107,12 @@ int main(int argc, char* argv[]) {
     // existe (Win: AppData, Linux: ~/.local/share, Android: internal storage). En Android
     // el GetResDir es el APK (solo lectura) -> sin esto los bookmarks no se guardaban.
     {
+    #ifdef W3D_DREAMCAST
+        w3dFileSystem::SetUserDataDir("/ram");   // la Dreamcast: lo unico escribible es el disco en RAM
+    #else
         char* pref = SDL_GetPrefPath("Whisk3D", "Whisk3D");
         if (pref) { w3dFileSystem::SetUserDataDir(pref); SDL_free(pref); }
+    #endif
     }
 
     // Android: los recursos van dentro del APK (assets). El Core los lee con el
@@ -1167,6 +1192,10 @@ int main(int argc, char* argv[]) {
     }
     winW = cfg.width;  winH = cfg.height;  // aplicar el tamano del config a la ventana
                                         // (antes quedaba el default 640x480: el config no se usaba)
+#ifdef W3D_DREAMCAST
+    // la Dreamcast: la salida de video es 640x480 (VGA o TV), la UI a escala 1 y sin antialiasing (la PVR no lo hace)
+    winW = 640; winH = 480; cfg.fullscreen = true; cfg.scale = 1; cfg.enableAntialiasing = false;
+#endif
     // AUTO KEY: el config MANDA sobre el global de animacion (que arranca apagado). Reporte del
     // dueno: "no se guarda que en el timeline puse auto key" -> se prendia de nuevo en cada sesion.
     { extern bool AutoKeyOn; AutoKeyOn = cfg.autoKey; }
@@ -1183,8 +1212,12 @@ int main(int argc, char* argv[]) {
     #else
         // fullscreen -> maximizada; sino respeta width/height del config (util para
         // probar tamanos chicos, ej. 240x320 estilo N95 con scale=1)
+    #ifdef W3D_DREAMCAST
+        Uint32 windowFlags = SDL_WINDOW_OPENGL | SDL_WINDOW_FULLSCREEN;   // (la consola es una sola pantalla)
+    #else
         Uint32 windowFlags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE;
         if (cfg.fullscreen) windowFlags |= SDL_WINDOW_MAXIMIZED;
+    #endif
         window = CrearVentanaGL("Whisk3D Pre-Alpha", winW, winH, windowFlags, cfg.enableAntialiasing, &glContext);
         #if !defined(__EMSCRIPTEN__) && !defined(_WIN32)
         // ULTIMO RESPALDO: en una sesion Wayland, SDL abre por X11 (XWayland) y ahi puede no haber GLX usable.
@@ -1208,6 +1241,9 @@ int main(int argc, char* argv[]) {
         char titulo[64];
         snprintf(titulo, sizeof(titulo), "Whisk3D Pre-Alpha %s", W3dVersion());
         SDL_SetWindowTitle(window, titulo);
+#ifdef W3D_DREAMCAST
+        SDL_StartTextInput();   // (el SDL de la PC arranca con la entrada de texto activa; el de la Dreamcast, apagada)
+#endif
     }
 
     if (!window) {
