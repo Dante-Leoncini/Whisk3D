@@ -986,8 +986,23 @@ static void TickCine(float dt) {
     g_redraw = true;
 }
 
+// DESGLOSE de la logica por fase (ms acumulados desde la ultima lectura): fisica de cuerpos rigidos, hitbox, lua,
+// animaciones (escena + objetos + esqueletos) y streaming. Lo leen el [PERF] del N95 y benchjuego en PC: dice a que
+// se le va el tiempo de la logica sin adivinar
+static double gSimMs[SIM_PERF_N] = { 0, 0, 0, 0, 0 };
+static int    gSimTicks = 0;
+int SimPerfDesglose(double out[SIM_PERF_N], bool reiniciar) {
+    for (int i = 0; i < SIM_PERF_N; i++) { out[i] = gSimMs[i]; if (reiniciar) gSimMs[i] = 0; }
+    const int n = gSimTicks;
+    if (reiniciar) gSimTicks = 0;
+    return n;
+}
+
 static void TickReal(float dt) {
     if (W3dCineActiva()) { TickCine(dt); return; }
+    extern double W3dNowMs();
+    double _t = W3dNowMs(), _t2;
+    gSimTicks++;
     // FISICA del Core (velocidad + rebotes): PRIMERO se integran las posiciones y despues
     // corren los scripts, asi el script ve la posicion nueva y resuelve el choque (rebotar)
     // en el MISMO frame. Es el mismo orden y el mismo dt que el runtime compilado
@@ -996,11 +1011,13 @@ static void TickReal(float dt) {
     // CUERPOS RIGIDOS (cajas con masa): mismo orden que la fisica minima, y los
     // scripts leen contactos() de ESTE paso en el mismo frame.
     W3dRigidosPaso(dt);
+    _t2 = W3dNowMs(); gSimMs[SIM_PERF_FISICA] += _t2 - _t; _t = _t2;
     // HITBOX: solapes de ESTE paso (despues de mover los cuerpos) -> alEntrar / alQuedarse /
     // alSalir, y los contactos nuevos de los rigidos -> alTocar. Antes de los actualizar():
     // el script ve el evento y su actualizar() del mismo tick ya puede reaccionar. Mismo lugar
     // que en el runtime compilado (W3dGameActualizar).
     W3dHitboxPaso(dt);
+    _t2 = W3dNowMs(); gSimMs[SIM_PERF_HITBOX] += _t2 - _t; _t = _t2;
     // CAMARAS CON RIEL: el indice fraccionario (rielIndice, el 5to valor de rielDe)
     // lo horneaba SOLO el dibujo (Viewport3D::UpdateViewOrbit -> UpdatePosition), asi
     // que en ticks sin render -- harness `simplay`, o el primer tick antes del primer
@@ -1011,7 +1028,6 @@ static void TickReal(float dt) {
     // es deterministica e idempotente: el dibujo posterior recalcula lo mismo).
     { extern void W3dCamarasRielTick(); W3dCamarasRielTick(); }
     EntradaPad();
-    extern double W3dNowMs();
     double _lua0 = W3dNowMs();
     int _act = 0;
     if (gLuaMsAcum.size() != gScripted.size()) gLuaMsAcum.assign(gScripted.size(), 0.0);
@@ -1028,6 +1044,8 @@ static void TickReal(float dt) {
     g_luaScriptsActivos = _act;              // el "solo calcular las cosas cercanas": los no-visibles no cuentan
     g_luaScriptsTotal   = (int)gScripted.size();
     g_luaTickMs         = W3dNowMs() - _lua0;
+    gSimMs[SIM_PERF_LUA] += g_luaTickMs;
+    _t = W3dNowMs();
     // ANIMACION DE ESCENA pedida por los scripts (animEscena de lua): avanzar el
     // reloj y APLICAR las curvas. Va DESPUES del bucle de scripts para que un
     // animEscena() recien pedido pose los objetos en ESTE mismo frame (el editor
@@ -1042,9 +1060,11 @@ static void TickReal(float dt) {
     // SNAPSHOT del estado apretado para el flanco de apretado() del PROXIMO frame (DESPUES de los scripts,
     // igual que el runtime en W3dGameActualizar): asi apretado() funciona identico en el Play y compilado.
     BindsJuegoSnapshotPunteros();
+    _t2 = W3dNowMs(); gSimMs[SIM_PERF_ANIM] += _t2 - _t; _t = _t2;
     // STREAMING (io/Streaming.h): cargar lo que se acerco y descargar lo que se alejo, fuera de los actualizar() y ANTES
     // del fin de frame (lo que genera arranca su actualizar() desde el proximo tick). Mismo lugar que en el runtime
     W3dStreamingTick();
+    gSimMs[SIM_PERF_STREAM] += W3dNowMs() - _t;
     W3dScriptFinFrame();   // idem para teclaApretada()/botonApretado(): UNA vez, despues de TODOS los objetos
                            // (y los destruir() del frame: ver SimObjetoDestruir)
     // lo que instanciar() creo en este tick entra a la lista (su inicio() ya corrio): su actualizar(), desde el proximo

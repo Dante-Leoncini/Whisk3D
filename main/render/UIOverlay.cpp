@@ -1110,9 +1110,15 @@ static void DibujarElemRec(Object* o, float rx0, float ry0, float rw, float rh,
     if (rotado) { gfx::MatrixMode(gfx::ModelView); gfx::PopMatrix(); }
 }
 
+// el TIEMPO del HUD del juego (ms acumulados: lo leen el [PERF] del N95 y benchjuego)
+double g_uiMs = 0.0;
+double W3dNowMs();
+namespace { struct CronoUI { double t0; CronoUI() { t0 = W3dNowMs(); }
+                             ~CronoUI() { g_uiMs += W3dNowMs() - t0; } }; }
 void UI2D_DibujarOverlay(float x0, float y0, float w, float h, float escala,
                          std::vector<UI2DPos>* outPos, bool saltarVerEn3D) {
     if (!SceneCollection) return;
+    CronoUI crono;
     gfx::StatScope cat(gfx::StatCatUI);   // (el contador de llamadas: esto es la interfaz del juego)
     // HOVER: pasar el mouse (coords de LIENZO, centro 0,0) a las coords de DIBUJO de ESTE
     // overlay. El mapeo es el mismo del dibujo: el lienzo entero ocupa el rect (x0,y0,w,h).

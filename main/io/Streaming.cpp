@@ -37,6 +37,14 @@ namespace {
 // en el medio se reconoce por su serial (la direccion se recicla)
 struct Ficha { InstanciaPrefab* ip; unsigned serial; };
 std::vector<Ficha> gLista;
+// UN MUNDO GRANDE se decide POR TAJADAS: cada tick mira a lo sumo kPorTick instancias (en ronda: todo el mapa en
+// unos pocos ticks; las distancias de carga son de decenas de metros y la camara no las cruza en 0.3 s), y las que
+// estan PIDIENDO (la bomba y la generacion) se atienden todos los ticks. Medir las ~800 celdas de Portland en cada
+// tick -GetGlobalPosition sube por los padres- era la mayor parte de la logica del juego en el N95 (25-60 ms por tick).
+// Una lista chica (los niveles de siempre, las pruebas) se mira entera, como antes
+const size_t kPorTick = 48;
+size_t gCursor = 0;
+std::vector<size_t> gPidiendo;   // indices en gLista de las que estan PIDIENDO (se rearma con la lista)
 unsigned gListaNacidos = 0;
 Object*  gListaRaiz = NULL;
 bool     gListaSucia = true;
@@ -80,6 +88,10 @@ static void Reconstruir() {
     gListaNacidos = nacidos;
     gListaRaiz = SceneCollection;
     gListaSucia = false;
+    gCursor = 0;
+    gPidiendo.clear();
+    for (size_t i = 0; i < gLista.size(); i++)
+        if (gLista[i].ip->streamEstado == W3D_STREAM_PIDIENDO) gPidiendo.push_back(i);
 }
 
 // ============================================================================
@@ -303,8 +315,22 @@ void W3dStreamingTick() {
         std::vector<std::pair<float, size_t> > candidatas;   // (distancia^2, indice): las que esperan generarse
         bool enVuelo = false;
         int descargadas = 0;
+        // QUE se mira este tick: la lista entera si es chica; si no, la tajada que toca + las que estan pidiendo
+        std::vector<size_t> mirar;
+        const size_t n = gLista.size();
+        if (n <= kPorTick) {
+            for (size_t i = 0; i < n; i++) mirar.push_back(i);
+        } else {
+            if (gCursor >= n) gCursor = 0;
+            for (size_t k = 0; k < kPorTick; k++) mirar.push_back((gCursor + k) % n);
+            gCursor = (gCursor + kPorTick) % n;
+            for (size_t k = 0; k < gPidiendo.size(); k++) mirar.push_back(gPidiendo[k]);
+            std::sort(mirar.begin(), mirar.end());
+            mirar.erase(std::unique(mirar.begin(), mirar.end()), mirar.end());
+        }
         // 1) DECIDIR: pedir lo que se acerca, soltar lo que se aleja
-        for (size_t i = 0; i < gLista.size(); i++) {
+        for (size_t m = 0; m < mirar.size(); m++) {
+            const size_t i = mirar[m];
             InstanciaPrefab* ip = gLista[i].ip;
             if (!W3dObjetoVivoSerial(ip, gLista[i].serial)) continue;   // (se libero: una descarga de afuera, un borrado)
             Vector3 obj;
@@ -356,6 +382,13 @@ void W3dStreamingTick() {
         }
         // 4) los materiales que quedaron sin quien los dibuje duermen sus texturas
         DormirSinUso(mats);
+        // las que siguen PIDIENDO, para el proximo tick (una generacion rearma la lista entera: Reconstruir)
+        if (!gListaSucia && gListaNacidos == W3dObjetosNacidos()) {
+            gPidiendo.clear();
+            for (size_t m = 0; m < mirar.size(); m++)
+                if (W3dObjetoVivoSerial(gLista[mirar[m]].ip, gLista[mirar[m]].serial) &&
+                    gLista[mirar[m]].ip->streamEstado == W3D_STREAM_PIDIENDO) gPidiendo.push_back(mirar[m]);
+        }
     }
     if (W3dStreamingReloj) {
         gStats.tickMs = W3dStreamingReloj() - t0;

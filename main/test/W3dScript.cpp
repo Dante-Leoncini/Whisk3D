@@ -1,4 +1,5 @@
 #include "ViewPorts/PopUp/AtajosPopup.h"
+#include "script/SimJuego.h"   // SimPerfDesglose (benchjuego)
 #include "WhiskUI/widgets/PopupMenu.h"
 #include "ViewPorts/PopUp/ConfirmarPopup.h"
 #include "ViewPorts/PopUp/BuscarPopup.h"
@@ -4815,6 +4816,7 @@ bool W3dRunCommand(const std::string& linea, std::string& err) {
         extern unsigned int (*g_skinRelojMs)(); extern int g_skinPerfMs, g_skinPerfSkins, g_skinPerfCompletos;
         struct RelojPC { static unsigned int Ms(){ double W3dNowMs(); return (unsigned int)W3dNowMs(); } };
         g_skinRelojMs = RelojPC::Ms; g_skinPerfMs = 0; g_skinPerfSkins = 0; g_skinPerfCompletos = 0;
+        { extern double g_rutinasMs, g_uiMs; g_rutinasMs = g_uiMs = 0.0; double d[SIM_PERF_N]; SimPerfDesglose(d, true); }
         for (int i = 0; i < n; i++) {
             gfx::StatsReset(); g_cullHijosTotal = 0; g_cullHijosVisibles = 0;
             double t0 = W3dNowMs();
@@ -4850,6 +4852,12 @@ bool W3dRunCommand(const std::string& linea, std::string& err) {
                n, msTot / n, (msTot > 0.0) ? 1000.0 * n / msTot : 0.0);
         printf("      [benchjuego] desglose: sim=%.2f anims=%.2f render(cpu)=%.2f glFinish(gpu)=%.2f ms\n",
                msSim / n, msAnim / n, msRender / n, msFin / n);
+        { extern double g_rutinasMs, g_uiMs;
+          printf("      [benchjuego] render por frame: rutinas=%.3f hud=%.3f ms\n", g_rutinasMs / n, g_uiMs / n);
+          g_rutinasMs = g_uiMs = 0.0; }
+        { double d[SIM_PERF_N]; const int nt = SimPerfDesglose(d, true); const double k = nt > 0 ? 1.0 / nt : 0.0;
+          printf("      [benchjuego] logica por tick: fisica=%.3f hitbox=%.3f lua=%.3f anim=%.3f streaming=%.3f ms (%d ticks)\n",
+                 d[SIM_PERF_FISICA] * k, d[SIM_PERF_HITBOX] * k, d[SIM_PERF_LUA] * k, d[SIM_PERF_ANIM] * k, d[SIM_PERF_STREAM] * k, nt); }
         printf("      [benchjuego] por frame: drawcalls=%ld (vbo=%ld) indices=%ld mallas=%ld texbinds=%ld | culling: %ld/%ld hijos visibles\n",
                dc / n, dcv / n, idx / n, mallas / n, binds / n, cullVis / n, cullTot / n);
         printf("      [benchjuego] presupuesto/frame: stateChanges=%ld bytesSubidos=%ld trisOpacos=%ld trisBlend=%ld | dc particulas=%ld ui=%ld\n",

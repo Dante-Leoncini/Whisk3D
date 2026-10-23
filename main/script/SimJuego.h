@@ -31,6 +31,10 @@ void SimTickPlay(float dt);       // lo llama el main loop con el timeline en PL
 extern int    g_luaScriptsActivos;
 extern int    g_luaScriptsTotal;
 extern double g_luaTickMs;
+// el DESGLOSE de la logica del juego por fase (ver SimJuego.cpp): ms acumulados en 'out', devuelve cuantos ticks
+// abarcan; 'reiniciar' los pone en cero
+enum { SIM_PERF_FISICA = 0, SIM_PERF_HITBOX, SIM_PERF_LUA, SIM_PERF_ANIM, SIM_PERF_STREAM, SIM_PERF_N };
+int SimPerfDesglose(double out[SIM_PERF_N], bool reiniciar);
 void SimLuaPerfTop(char* buf, int bufLen, int frames);   // top-3 scripts por ms ("Juego:41 agua:12"), resetea
 void SimStop();                   // restaurar el estado inicial + descargar
 bool SimStep(int dir);            // en pausa: +1 re-simula / -1 vuelve un frame

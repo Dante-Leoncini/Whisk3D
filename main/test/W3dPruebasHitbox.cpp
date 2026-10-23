@@ -55,7 +55,8 @@
 //    fisicamallatest
 //        cuerpos rigidos de tipo MALLA (W3dRigido + la grilla de W3dColMalla), sin Play: una caja
 //        que cae sobre un plano malla queda apoyada; otra sobre una RAMPA de 30 grados baja sin
-//        atravesarla; una lanzada contra una PARED malla no la cruza; fisicaRayo toca la malla.
+//        atravesarla; una lanzada contra una PARED malla no la cruza; fisicaRayo toca la malla; un
+//        PERSONAJE que camina contra un escalon de 20 cm lo sube y uno de 60 cm lo frena.
 // ============================================================================
 #include "test/W3dPruebasHitbox.h"
 #include "test/W3dScript.h"            // W3dRunCommand("juego3dmin ...")
@@ -867,16 +868,39 @@ static bool CmdFisicaMallaTest(std::istringstream&, std::string& err) {
     Empty* cPiso  = FmCaja("FmCajaPiso",  Vector3(0, 3, 0));
     Empty* cRampa = FmCaja("FmCajaRampa", Vector3(30, 3, 0));
     Empty* cPared = FmCaja("FmCajaPared", Vector3(55, 0.6f, 0));
+    // escalones: un cubo malla (2 m de lado) aplastado a 20 cm y otro a 60 cm, sobre un piso en x=90 / z=+-20
+    Object* sueloE = FmPlano("FmSueloE", Vector3(90, 0, 0), 30.0f, Vector3(1, 0, 0), 0.0f);
+    Object* bajo = NewMesh(MeshType(MeshType::cube), NULL, false);
+    Object* alto = NewMesh(MeshType(MeshType::cube), NULL, false);
+    if (!sueloE || !bajo || !alto) { err = "fisicamallatest: NewMesh fallo"; return false; }
+    bajo->SetNameObj("FmEscalon"); bajo->pos = Vector3(92, 0.1f, -10); bajo->scale = Vector3(2, 0.1f, 2);
+    alto->SetNameObj("FmMuro");    alto->pos = Vector3(92, 0.3f, 10);  alto->scale = Vector3(2, 0.3f, 2);
+    bajo->fisica = new W3dRigidoDef(); bajo->fisica->tipo = 3;
+    alto->fisica = new W3dRigidoDef(); alto->fisica->tipo = 3;
+    Empty* pj1 = HbEmpty("FmPj1", Vector3(87, 0.01f, -10));
+    Empty* pj2 = HbEmpty("FmPj2", Vector3(87, 0.01f, 10));
+    Empty* pjs[2] = { pj1, pj2 };
+    for (int k = 0; k < 2; k++) {
+        W3dRigidoDef* d = new W3dRigidoDef();
+        d->tipo = 2; d->masa = 70; d->caja[0] = 0.7f; d->caja[1] = 1.75f; d->caja[2] = 0.7f; d->centro[1] = 0.875f;
+        pjs[k]->fisica = d;
+    }
     W3dRigidosAsegurar(SceneCollection);
     W3dRigidoSetVel(cPiso, Vector3(0, -0.1f, 0));
     W3dRigidoSetVel(cRampa, Vector3(0, -0.1f, 0));
     W3dRigidoSetVel(cPared, Vector3(12, 0, 0));
-    float minDistRampa = 1e30f;
+    float minDistRampa = 1e30f, yEscalon = -1.0f;
     // la rampa: su normal y su eje a lo largo (la del plano Y-up y su Z, giradas). La distancia al plano se mide
     // mientras la caja esta ENCIMA (la rampa mide 20 m: en 4 s se desliza hasta el borde y cae)
     const Vector3 nr = rampa->Rot() * Vector3(0, 1, 0), lr = rampa->Rot() * Vector3(0, 0, 1);
     for (int i = 0; i < 120; i++) {
+        // los personajes caminan hacia +x (el script les fija la velocidad horizontal en cada cuadro, como el juego)
+        for (int k = 0; k < 2; k++) {
+            Vector3 v; W3dRigidoVel(pjs[k], &v);
+            W3dRigidoSetVel(pjs[k], Vector3(2.0f, v.y, 0.0f));
+        }
         W3dRigidosPaso(1.0f / 30.0f);
+        if (pj1->pos.x > 91.0f && pj1->pos.x < 93.0f && pj1->pos.y > yEscalon) yEscalon = pj1->pos.y;
         if (fabsf(lr.Dot(cRampa->pos - rampa->pos)) > 9.0f) continue;
         const float d = nr.Dot(cRampa->pos - rampa->pos);
         if (d < minDistRampa) minDistRampa = d;
@@ -893,6 +917,13 @@ static bool CmdFisicaMallaTest(std::istringstream&, std::string& err) {
     if (ok && fabsf(cRampa->pos.z) < 0.5f) { err = "fisicamallatest: la caja no se deslizo por la rampa"; ok = false; }
     // 3) la pared en x=60: el centro no pasa de 59.5
     if (ok && cPared->pos.x > 59.55f) { err = "fisicamallatest: la caja cruzo la pared malla"; ok = false; }
+    // 3b) el escalon de 20 cm (de x=90 a 94): encima de el, los pies a ~0.2; el de 60 cm: frenado antes de x=90
+    printf("      [fisicamallatest] escalon 20cm: y encima=%.2f (x final %.2f) | muro 60cm: x=%.2f y=%.2f\n",
+           yEscalon, pj1->pos.x, pj2->pos.x, pj2->pos.y);
+    if (ok && (yEscalon < 0.17f || yEscalon > 0.3f)) {
+        err = "fisicamallatest: el personaje no subio el escalon de 20 cm"; ok = false;
+    }
+    if (ok && pj2->pos.x > 90.7f) { err = "fisicamallatest: el personaje atraveso el muro de 60 cm"; ok = false; }
     // 4) el rayo: de (0,5,0) hacia abajo toca la caja apoyada (a ~3.5) y, ignorandola, el piso malla a 5
     if (ok) {
         Vector3 n; Object* t = NULL;

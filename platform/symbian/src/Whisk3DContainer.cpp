@@ -1182,7 +1182,11 @@ int CWhisk3DContainer::DrawCallBack( TAny* aInstance )
                     const TUint ahoraPf = User::NTickCount();
                     const TUint cuadrosPf = gPfCuadros ? gPfCuadros : 1;
                     const TUint fpsPf = (gPfDesde && ahoraPf > gPfDesde) ? (gPfCuadros * 1000u) / (ahoraPf - gPfDesde) : 0;
-                    w3dLogf("[PERF] %u fps | render=%u swap=%u ms por cuadro", fpsPf, gPfRender / cuadrosPf, gPfSwap / cuadrosPf);
+                    // (de ese render: cuanto es la escena armada por RUTINAS y cuanto el HUD; el resto, el editor y el GL suelto)
+                    extern double g_rutinasMs, g_uiMs;
+                    w3dLogf("[PERF] %u fps | render=%u (rutinas=%d hud=%d) swap=%u ms por cuadro", fpsPf, gPfRender / cuadrosPf,
+                            (int)(g_rutinasMs / cuadrosPf + 0.5), (int)(g_uiMs / cuadrosPf + 0.5), gPfSwap / cuadrosPf);
+                    g_rutinasMs = g_uiMs = 0.0;
                     gPfRender = gPfSwap = gPfCuadros = 0; gPfDesde = ahoraPf;
                     w3dLogf("[PERF] /30f logica: sim=%u anim=%u pvs=%u part=%u ms | skin=%d ms (recalc %d, completos %d) | lua %d/%d scripts [%s] | RENDER: %d caras %d draws | GL %d (esc %d ui %d ed %d) | CULLING: %d de %d hijos",
                             gPfSim/30, gPfAnim/30, gPfPvs/30, gPfPart/30,
@@ -1191,6 +1195,12 @@ int CWhisk3DContainer::DrawCallBack( TAny* aInstance )
                             gc.total, gc.llamadas[w3dEngine::StatCatEscena] + gc.llamadas[w3dEngine::StatCatParticulas],
                             gc.llamadas[w3dEngine::StatCatUI], gc.llamadas[w3dEngine::StatCatEditor],
                             g_cullHijosVisibles/30, g_cullHijosTotal/30);
+                    // el DESGLOSE de sim= por fase (SimJuego): fisica / hitbox / lua / animaciones / streaming
+                    { extern int SimPerfDesglose(double*, bool); double d[5]; const int nt = SimPerfDesglose(d, true);
+                      const double k = nt > 0 ? 1.0 / nt : 0.0;
+                      w3dLogf("[PERF] sim por tick: fisica=%d hitbox=%d lua=%d anim=%d streaming=%d ms",
+                              (int)(d[0] * k + 0.5), (int)(d[1] * k + 0.5), (int)(d[2] * k + 0.5), (int)(d[3] * k + 0.5),
+                              (int)(d[4] * k + 0.5)); }
                     gPfSim=gPfAnim=gPfPvs=gPfPart=gPfN=0;
                     g_cullHijosTotal=0; g_cullHijosVisibles=0;
                     g_skinPerfMs=0; g_skinPerfSkins=0; g_skinPerfCompletos=0;

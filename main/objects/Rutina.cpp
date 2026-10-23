@@ -426,18 +426,34 @@ static void ReponerMV() { if (gMVCargada) { gfx::LoadMatrix(gBaseMV.m); gMVCarga
 static const MallaRecurso* gPtrMalla[4] = { 0, 0, 0, 0 };
 static int gPtrCapaUV = 0;   // (la capa de UV a la que apunta el de UV: 0 = la de render)
 static void OlvidarPunteros() { for (int k = 0; k < 4; k++) gPtrMalla[k] = 0; }
+// PUNTEROS DIFERIDOS: el paso "puntero" solo ANOTA a que malla quiere apuntar; el driver recibe el bind + el puntero
+// recien antes de un draw (Mandar). Una rutina que apunta y despues no dibuja nada (una celda del mapa con todas sus
+// partes fuera de cuadro) no le cuesta nada al driver: en el mundo abierto eran la mitad de las llamadas de GL del
+// cuadro (en el N95 cada una es CPU del driver). Se anotan los datos (no el paso: los de paso() de lua son temporales)
+struct PunteroPend { int tipo; MallaRecurso* malla; int entero; bool hay; };
+static PunteroPend gPend[4];
+static bool gHayPend = false;
+static void PendLimpiar() { for (int k = 0; k < 4; k++) gPend[k].hay = false; gHayPend = false; }
 
+// el TIEMPO de las rutinas (ms acumulados de las corridas de afuera: las anidadas van adentro). Lo leen el [PERF] del
+// N95 y benchjuego: cuanto del render es armar la escena con rutinas
+double g_rutinasMs = 0.0;
+static double gCorridaDesde = 0.0;
 static void AbrirCorrida() {
     if (gProf++ > 0) return;
+    { extern double W3dNowMs(); gCorridaDesde = W3dNowMs(); }
     gIboActual = 0xFFFFFFFFu; gVboEnUso = false; gPlanosEstado = 0;
     gBaseMVLeida = gMVCargada = false;
     OlvidarPunteros();
+    PendLimpiar();
 }
 static void CerrarCorrida() {
     if (--gProf > 0) return;
+    { extern double W3dNowMs(); g_rutinasMs += W3dNowMs() - gCorridaDesde; }
     if (gVboEnUso) gfx::UnbindVBOs();
     gVboEnUso = false; gIboActual = 0xFFFFFFFFu;
     OlvidarPunteros();
+    PendLimpiar();
     ReponerMV();
     // (opcion de proyecto "mallasSoloGPU") las mallas que esta corrida subio y solo dibujan rutinas sueltan su RAM:
     // recien aca, cuando la corrida ya armo sus flujos y sus cajas. Sin anotadas no cuesta nada
@@ -448,11 +464,10 @@ static void CerrarCorrida() {
 // apaga el paso "Array on/off". Una malla sin ese array no cambia nada (el editor no deja dibujar con ese array
 // prendido apuntando ahi). El de UV puede apuntar a una CAPA de la malla (entero k > 0: uvExtra[k]): la misma malla
 // dibujada con otras UV sin otra copia de posiciones (los 39 rivales: una carroceria, una capa por auto)
-static void Puntero(int tipo, const W3dPaso& p) {
-    MallaRecurso* r = (MallaRecurso*)p.ptr;
+static void PunteroDe(int tipo, MallaRecurso* r, int entero) {
     const int k = tipo - PasoPunteroVertices;
-    const int capa = (tipo == PasoPunteroUV && p.entero > 0 && HayCapaUV(r, p.entero)) ? p.entero : 0;
-    if (tipo == PasoPunteroUV && p.entero > 0 && !capa) return;   // (una capa que la malla no tiene)
+    const int capa = (tipo == PasoPunteroUV && entero > 0 && HayCapaUV(r, entero)) ? entero : 0;
+    if (tipo == PasoPunteroUV && entero > 0 && !capa) return;   // (una capa que la malla no tiene)
     // (la malla tiene el array en RAM o, si solto su RAM -soloGPU-, en su VBO)
     if (!r || !(capa || MallaTieneArray(r, k))) return;
     if (gPtrMalla[k] == r && (tipo != PasoPunteroUV || gPtrCapaUV == capa)) return;   // (ya apunta ahi: ni bind ni puntero)
@@ -488,6 +503,18 @@ static void Puntero(int tipo, const W3dPaso& p) {
         }
     }
 }
+static void Puntero(int tipo, const W3dPaso& p) { PunteroDe(tipo, (MallaRecurso*)p.ptr, p.entero); }
+static void PunteroAnotar(const W3dPaso& p) {
+    PunteroPend& e = gPend[p.tipo - PasoPunteroVertices];
+    e.tipo = p.tipo; e.malla = (MallaRecurso*)p.ptr; e.entero = p.entero; e.hay = true;
+    gHayPend = true;
+}
+static void AplicarPunteros() {
+    if (!gHayPend) return;
+    for (int k = 0; k < 4; k++)
+        if (gPend[k].hay) { gPend[k].hay = false; PunteroDe(gPend[k].tipo, gPend[k].malla, gPend[k].entero); }
+    gHayPend = false;
+}
 static const gfx::VArray kArrayGfx[ArrayN] = { gfx::VertexArray, gfx::NormalArray, gfx::TexCoordArray, gfx::ColorArray };
 
 // manda un flujo (del IBO o de RAM), recortado a los indices [desde, desde + cuantos) si cuantos >= 0
@@ -497,6 +524,7 @@ static void Mandar(const W3dFlujo& f, int desde, int cuantos) {
     if (!f.ibo && !idx) return;   // (ni IBO ni indices en RAM: una malla soloGPU que no pudo volver a subir su IBO)
     if (cuantos >= 0) { n = cuantos; primero += desde; idx += desde; }
     if (n <= 0) return;
+    AplicarPunteros();   // (los punteros anotados: recien ahora, que se dibuja)
     if (f.ibo) {
         if (gIboActual != f.ibo) { gfx::BindIndexVBO(f.ibo); gIboActual = f.ibo; }
         gfx::DrawElementsVBO((gfx::Primitiva)f.primGL, n, primero);
@@ -596,6 +624,7 @@ static void PunteroPose(const W3dPaso& p) {
     Mesh* m = MallaObjeto(p);
     if (!m) return;
     const int k = (p.modo >= 0 && p.modo < ArrayN) ? p.modo : ArrayVertices;
+    gPend[k].hay = false;   // (la pose GANA a un puntero anotado antes para el mismo array)
     if (k == ArrayVertices || k == ArrayNormales || k == ArrayUV) W3dPoseAlDia(m);
     if (k == ArrayVertices) m->paseDibujado = g_w3dPase;   // (se dibuja este cuadro: un espejo la puede reflejar)
     const bool skin = (m->skinArmature != NULL);
@@ -771,7 +800,7 @@ static void EjecutarPasoCrudo(W3dPaso& p, size_t& i, Rutina* yo) {
     // ---- dibujar ----
     case PasoArray: if (p.on) gfx::EnableArray(kArrayGfx[p.modo]); else gfx::DisableArray(kArrayGfx[p.modo]); break;
     case PasoPunteroVertices: case PasoPunteroNormales: case PasoPunteroUV: case PasoPunteroColores:
-        Puntero(p.tipo, p); break;
+        PunteroAnotar(p); break;
     case PasoDibujar: Dibujar(p); break;
     case PasoPunteroPose: PunteroPose(p); break;
     case PasoDibujarVisibles: DibujarVisibles(p); break;
