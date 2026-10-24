@@ -11,17 +11,39 @@ float axisState[SDL_CONTROLLER_AXIS_MAX] = {0.0f};
 bool buttonState[SDL_CONTROLLER_BUTTON_MAX] = {false};
 GLfloat deadzone = 0.20f;
 
+float axisStateM[W3D_MANDOS_SDL][SDL_CONTROLLER_AXIS_MAX] = {{0.0f}};
+bool buttonStateM[W3D_MANDOS_SDL][SDL_CONTROLLER_BUTTON_MAX] = {{false}};
+static SDL_JoystickID gMandoId[W3D_MANDOS_SDL] = { -1, -1, -1, -1 };
+
+// el lugar de un mando (por su id de SDL): el que ya tenia o el primero libre (-1 si ya hay 4)
+static int LugarDe(SDL_JoystickID id) {
+    for (int i = 0; i < W3D_MANDOS_SDL; i++) if (gMandoId[i] == id) return i;
+    for (int i = 0; i < W3D_MANDOS_SDL; i++) if (gMandoId[i] < 0) { gMandoId[i] = id; return i; }
+    return -1;
+}
+
 void RefreshInputControllerSDL(SDL_Event &e) {
     if (e.type == SDL_CONTROLLERAXISMOTION) {
         int axis = e.caxis.axis;
         float value = e.caxis.value / 32767.0f;
         axisState[axis] = (fabs(value) < deadzone) ? 0.0f : value;
+        const int m = LugarDe(e.caxis.which);
+        if (m >= 0) axisStateM[m][axis] = axisState[axis];
     }
-    else if (e.type == SDL_CONTROLLERBUTTONDOWN) {
-        buttonState[e.cbutton.button] = true;
+    else if (e.type == SDL_CONTROLLERBUTTONDOWN || e.type == SDL_CONTROLLERBUTTONUP) {
+        const bool v = e.type == SDL_CONTROLLERBUTTONDOWN;
+        buttonState[e.cbutton.button] = v;
+        const int m = LugarDe(e.cbutton.which);
+        if (m >= 0) buttonStateM[m][e.cbutton.button] = v;
     }
-    else if (e.type == SDL_CONTROLLERBUTTONUP) {
-        buttonState[e.cbutton.button] = false;
+    else if (e.type == SDL_CONTROLLERDEVICEREMOVED) {
+        // (su lugar queda libre y suelto: el proximo que se mueva lo toma)
+        for (int i = 0; i < W3D_MANDOS_SDL; i++) {
+            if (gMandoId[i] != e.cdevice.which) continue;
+            gMandoId[i] = -1;
+            for (int k = 0; k < SDL_CONTROLLER_AXIS_MAX; k++) axisStateM[i][k] = 0.0f;
+            for (int k = 0; k < SDL_CONTROLLER_BUTTON_MAX; k++) buttonStateM[i][k] = false;
+        }
     }
 }
 #endif

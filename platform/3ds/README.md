@@ -45,9 +45,11 @@ Los arreglos de vértices se copian en cada cuadro a un anillo de memoria lineal
 - **Los draws chicos van juntos.** La interfaz son muchos draws de 6 vértices (un rectángulo, un ícono, un texto), y a la PICA cada draw le cuesta lo mismo tenga 6 vértices o 600. Los draws chicos sin luz se pasan al espacio de recorte en la CPU y los seguidos con el mismo estado salen en un solo draw. Con la escena de inicio, de 191 draws por cuadro quedan 18.
 - **No se vacía toda la caché en cada cuadro.** Lo que lee la GPU ya está vaciado: el anillo al terminar el cuadro y cada textura al subirla.
 
-Lo que la PICA no tiene se arma en la CPU: las líneas y los puntos son triángulos.
+Lo que la PICA no tiene se arma en la CPU: las líneas y los puntos son triángulos. Se recortan a un margen de dos pantallas para cada lado: la PICA solo recorta contra el plano cercano, y una línea que lo cruza (la grilla debajo de la cámara) llegaba con la punta a cientos de miles de píxeles de distancia.
 
-**La selección por color** (tocar un objeto, un vértice, una arista) se dibuja aparte, en una superficie del tamaño de la pantalla de abajo que no se ve. La CPU lee esos píxeles directo de la VRAM.
+**La selección por color** (tocar un objeto, un vértice, una arista) se dibuja aparte, en una superficie del tamaño de la pantalla de abajo que no se ve. El motor de transferencias de la GPU la copia a memoria lineal y la CPU lee ahí esos píxeles (la CPU no lee la VRAM directo: en el emulador andaba, en la consola no es seguro).
+
+**Los atributos de los vértices** van empaquetados y cada uno ocupa exactamente lo que se declara: las normales de 3 bytes van como 4 (la cuarta en cero). Con 3 bytes y lugar para 4, en la consola el cubo salía sombreado como con las normales soldadas.
 
 ## Preparar (una vez)
 
@@ -82,6 +84,17 @@ Hace falta una 3DS con el Homebrew Launcher. Se copia `whisk3d.3dsx` a la carpet
 
 Los datos del editor van en la carpeta `3ds/Whisk3D` de la SD (la crea al arrancar).
 
+## Si se cuelga en la consola
+
+Whisk3D escribe su log en la SD, en `3ds/Whisk3D/whisk3d.log` (se pisa en cada sesión). La primera línea dice si es una New 3DS o una 3DS vieja.
+
+Además vigila la GPU: si un cuadro no termina en 2 segundos (en la consola de verdad, la GPU colgada), anota en ese log la lista de draws del cuadro que la colgó (qué eran, cuántos vértices, con qué estado y hasta dónde llegaban en la pantalla). El emulador nunca se cuelga así, por eso hace falta.
+
+Si se cuelga, sirve:
+
+- **El log** de la SD (después de reiniciar la consola).
+- **Si Luma3DS muestra una pantalla de excepción** ("An exception occurred"): una foto, o el archivo que guarda en `luma/dumps/arm11/`. Con eso y `build/whisk3d.elf` (que tiene los símbolos) se sabe en qué función se cayó.
+
 ## Probar en Azahar
 
 Con ventana:
@@ -112,7 +125,8 @@ Corre el emulador en un X virtual, espera a que arranque y captura las dos panta
 
 ```bash
 TOQUES="45,12 70,45" bash platform/3ds/captura_azahar.sh       # el menú del modo y "Edit Mode"
-TOQUES="85,105>140,150" bash platform/3ds/captura_azahar.sh     # arrastrar el dedo de un punto a otro
+TOQUES="85,105>140,150" bash platform/3ds/captura_azahar.sh     # arrastrar el dedo de un punto a otro (de golpe)
+TOQUES="30,170>>310,170" bash platform/3ds/captura_azahar.sh    # arrastrarlo de a poco, como un dedo: orbita
 TECLAS="z Right:700 2:600" bash platform/3ds/captura_azahar.sh  # X, circle pad a la derecha 0,7 s, ZR 0,6 s
 ```
 

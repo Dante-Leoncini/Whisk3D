@@ -4,9 +4,9 @@
 |---|---|
 | `tecla(nombre) → bool` | La tecla está apretada (mientras la mantenés). |
 | `teclaApretada(nombre) → bool` | Se apretó justo en este cuadro (una sola vez por pulsación). |
-| `boton(nombre)`, `botonApretado(nombre)` | Lo mismo con un botón del mando. |
-| `stick(["izq"\|"der"]) → x, y` | Palanca del mando, de -1 a 1 (arriba es -1). |
-| `gatillo(["izq"\|"der"]) → 0..1` | Gatillo analógico. |
+| `boton(nombre [, mando])`, `botonApretado(nombre [, mando])` | Lo mismo con un botón del mando. Con `mando` (1 a 4), el de ese mando; sin él, el de cualquiera. |
+| `stick(["izq"\|"der"] [, mando]) → x, y` | Palanca del mando, de -1 a 1 (arriba es -1). |
+| `gatillo(["izq"\|"der"] [, mando]) → 0..1` | Gatillo analógico. |
 | `controles() → n`, `control([n]) → nombre, tipo` | Cuántos mandos hay y de qué tipo (`"xbox"`, `"playstation"`, `"nintendo"`, `"generico"`). |
 | `toque() → x, y, tocando` | El dedo (o el click del mouse) en la pantalla. |
 | `dedo([n]) → x, y, activo` | Multitáctil: el dedo número n (1 a 4). |

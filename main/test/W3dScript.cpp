@@ -2,6 +2,7 @@
 #include "script/SimJuego.h"   // SimPerfDesglose (benchjuego)
 #include "WhiskUI/widgets/PopupMenu.h"
 #include "ViewPorts/PopUp/ConfirmarPopup.h"
+#include "net/W3dRed.h"   // redpermiso / redresponder: el permiso de la red
 #include "ViewPorts/PopUp/BuscarPopup.h"
 #include "app/W3dAtajos.h"   // atajos reasignables (atajo*, teclareal)
 #include "test/W3dScript.h"
@@ -4235,6 +4236,42 @@ bool W3dRunCommand(const std::string& linea, std::string& err) {
         return true;
     }
     // ---- abrirw3d <ruta> : cierra el proyecto actual y abre otro EN CALIENTE ----
+    // ---- redpermiso <ruta.w3d> [olvidar] : abre un proyecto que juega en red COMO EL USUARIO (con la pregunta del
+    //      permiso, que el arnes normalmente se saltea). "olvidar" borra antes lo decidido para ese archivo. Dice si
+    //      pregunto (el cartel queda abierto: uishot lo captura) y el permiso de la red que quedo ----
+    if (cmd == "redpermiso") {
+        std::string ruta, extra; ss >> ruta >> extra;
+        if (ruta.empty()) { err = "redpermiso: falta la ruta"; return false; }
+        extern bool g_redPreguntarEnPruebas; extern void RedOlvidar(const std::string&);
+        extern void AbrirProyectoAhora(const std::string&);
+        if (extra == "olvidar") RedOlvidar(ruta);
+        if (PopUpActive) PopUpActive->Cerrar();
+        g_redPreguntarEnPruebas = true;
+        AbrirProyectoAhora(ruta);
+        const bool pregunto = PopUpActive && PopUpActive == confirmarPopup;
+        printf("      [redpermiso] pregunto: %s%s%s; red permitida: %s\n", pregunto ? "si (\"" : "no",
+               pregunto ? confirmarPopup->mensaje.c_str() : "", pregunto ? "\")" : "",
+               w3dRed::Permitida() ? "si" : "no");
+        if (!pregunto) g_redPreguntarEnPruebas = false;
+        return true;
+    }
+    // ---- redresponder si|no [esperado] : contesta la pregunta del permiso (OK / Esc, como las teclas) y verifica
+    //      que la red quede permitida o no, y la casilla de la tarjeta File igual ----
+    if (cmd == "redresponder") {
+        std::string r; ss >> r;
+        extern bool g_redPreguntarEnPruebas; extern bool RedPermisoProyecto();
+        if (!PopUpActive || PopUpActive != confirmarPopup) { err = "redresponder: no hay pregunta abierta"; return false; }
+        confirmarPopup->Tecla(r == "si" ? LayoutKey::Accept : LayoutKey::Cancel);
+        g_redPreguntarEnPruebas = false;
+        const bool quiere = r == "si";
+        printf("      [redresponder] %s -> red permitida: %s, casilla: %s, juega: %s\n", r.c_str(),
+               w3dRed::Permitida() ? "si" : "no", RedPermisoProyecto() ? "si" : "no", PlayAnimation ? "si" : "no");
+        if (w3dRed::Permitida() != quiere || RedPermisoProyecto() != quiere) {
+            err = "redresponder: el permiso no quedo como se respondio";
+            return false;
+        }
+        return true;
+    }
     if (cmd == "abrirw3d") {
         std::string ruta; std::getline(ss, ruta);
         size_t p = ruta.find_first_not_of(" \t"); if (p!=std::string::npos) ruta = ruta.substr(p);

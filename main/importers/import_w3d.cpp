@@ -5509,6 +5509,9 @@ void AbrirW3D(const std::string& ruta) {
         PlayAnimation = (g_proyReproduciendo != 0);
         g_redraw = true;
     }
+    // LA RED (config/W3dRedPermisos.h): si sus scripts juegan en red, lo decidido para este archivo o la pregunta
+    // (una sola vez; si abria jugando, arranca al responder)
+    { extern void RedAlAbrirProyecto(const std::string&); RedAlAbrirProyecto(ruta); }
 
     W3dNombresCargando = false;
 

@@ -273,6 +273,11 @@ void W3dRutinaContar(Rutina* rt, int& verts, int& tris);
 // (editor) el viewport ya limpio el color con el fondo FIJO de su modo (Z-Buffer, Alfa, Normales: el fondo dice algo):
 // ahi "Clear color" no cambia nada y "Clear" no limpia el color (la profundidad y el estencil si)
 extern bool g_w3dLimpiarColorFijo;
+// LA PANTALLA DIVIDIDA: mientras se dibuja una mitad, su rectangulo (x, y, ancho, alto en pixeles de GL). El paso
+// "Limpiar" recorta ahi aunque el estado restaurado del constructor haya apagado el scissor: si no, la segunda mitad
+// borraba la primera
+extern bool g_w3dRecorteVistaOn;
+extern int g_w3dRecorteVista[4];
 // cuantas veces un "Clear" limpio el COLOR (crece siempre): el editor sabe si en un cuadro alguien limpio la pantalla
 extern unsigned g_w3dLimpiezasColor;
 // lo que trae todo proyecto nuevo, arriba de todo en 'raiz': el CONSTRUCTOR (con el "Clear color": 'fondo') y la

@@ -465,8 +465,14 @@ static const char* W3dJuegoNombreTecla(TInt sc){
 		case '4':               return "4";       // 4/5/6 tambien son del juego (armas del demo GTA:
 		case '5':               return "5";       // 4 = arma anterior, 5 = arma siguiente); en pausa
 		case '6':               return "6";       // siguen siendo los atajos del editor
-		default:                return 0;
+		default:                break;
 	}
+	// las LETRAS de un teclado QWERTY (E71, E72, N97...): el jugador 2 de la pantalla dividida juega con ellas.
+	// (El scancode de una letra es su mayuscula ASCII; el script las lee en minuscula, como en la PC)
+	static const char* const kLetras[26] = { "a","b","c","d","e","f","g","h","i","j","k","l","m","n","o","p","q",
+	                                         "r","s","t","u","v","w","x","y","z" };
+	if (sc >= 'A' && sc <= 'Z') return kLetras[sc - 'A'];
+	return 0;
 }
 
 TKeyResponse CWhisk3DContainer::OfferKeyEventL( const TKeyEvent& aKeyEvent,TEventCode aType ){

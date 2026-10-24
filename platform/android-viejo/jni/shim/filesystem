@@ -1,0 +1,97 @@
+// ============================================================================
+//  <filesystem> para Android 2.3 (NDK r15c): su libc++ no trae std::filesystem. Lo poco que usa el editor (que
+//  exista un archivo, si es carpeta, la ruta absoluta y recorrer una carpeta), con POSIX. El compilador lo encuentra
+//  antes que el del sistema porque esta carpeta va primera en el camino de includes (ver jni/Android.mk).
+// ============================================================================
+#ifndef W3D_FILESYSTEM_VIEJO
+#define W3D_FILESYSTEM_VIEJO
+#include <string>
+#include <system_error>
+#include <sys/stat.h>
+#include <dirent.h>
+#include <unistd.h>
+#include <limits.h>
+
+namespace std {
+namespace filesystem {
+
+class path {
+    std::string s;
+public:
+    path() {}
+    path(const std::string& x) : s(x) {}
+    path(const char* x) : s(x ? x : "") {}
+    const std::string& string() const { return s; }
+    std::string u8string() const { return s; }
+    std::string generic_string() const { return s; }
+    const char* c_str() const { return s.c_str(); }
+    bool empty() const { return s.empty(); }
+    path filename() const {
+        const size_t p = s.find_last_of('/');
+        return p == std::string::npos ? s : s.substr(p + 1);
+    }
+    path parent_path() const {
+        const size_t p = s.find_last_of('/');
+        if (p == std::string::npos) return path();
+        return p == 0 ? path("/") : path(s.substr(0, p));
+    }
+    path operator/(const path& o) const {
+        if (s.empty()) return o;
+        return path(s[s.size() - 1] == '/' ? s + o.s : s + "/" + o.s);
+    }
+};
+inline path u8path(const std::string& s) { return path(s); }
+
+inline bool exists(const path& p) { struct stat st; return stat(p.c_str(), &st) == 0; }
+inline bool exists(const path& p, std::error_code& ec) { ec.clear(); return exists(p); }
+inline bool is_directory(const path& p) { struct stat st; return stat(p.c_str(), &st) == 0 && S_ISDIR(st.st_mode); }
+inline bool is_directory(const path& p, std::error_code& ec) { ec.clear(); return is_directory(p); }
+inline bool is_regular_file(const path& p) { struct stat st; return stat(p.c_str(), &st) == 0 && S_ISREG(st.st_mode); }
+inline path current_path() { char b[PATH_MAX]; return getcwd(b, sizeof(b)) ? path(b) : path(); }
+inline void current_path(const path& p) { if (chdir(p.c_str()) != 0) {} }
+inline path absolute(const path& p) {
+    if (!p.empty() && p.string()[0] == '/') return p;
+    return current_path() / p;
+}
+
+class directory_entry {
+    path p;
+public:
+    directory_entry() {}
+    explicit directory_entry(const path& x) : p(x) {}
+    const std::filesystem::path& path() const { return p; }
+    bool is_directory() const { return std::filesystem::is_directory(p); }
+    bool is_regular_file() const { return std::filesystem::is_regular_file(p); }
+};
+
+// recorre una carpeta (sin "." ni ".."); el construido sin carpeta es el final
+class directory_iterator {
+    DIR* d;
+    std::filesystem::path base;
+    directory_entry e;
+    void Siguiente() {
+        while (d) {
+            struct dirent* x = readdir(d);
+            if (!x) { closedir(d); d = NULL; return; }
+            const std::string n = x->d_name;
+            if (n == "." || n == "..") continue;
+            e = directory_entry(base / n);
+            return;
+        }
+    }
+public:
+    directory_iterator() : d(NULL) {}
+    explicit directory_iterator(const std::filesystem::path& p) : d(opendir(p.c_str())), base(p) { Siguiente(); }
+    directory_iterator(const directory_iterator&) = delete;
+    directory_iterator& operator=(const directory_iterator&) = delete;
+    ~directory_iterator() { if (d) closedir(d); }
+    const directory_entry& operator*() const { return e; }
+    const directory_entry* operator->() const { return &e; }
+    directory_iterator& operator++() { Siguiente(); return *this; }
+    bool operator==(const directory_iterator& o) const { return d == NULL && o.d == NULL; }
+    bool operator!=(const directory_iterator& o) const { return !(*this == o); }
+};
+
+} // namespace filesystem
+} // namespace std
+#endif

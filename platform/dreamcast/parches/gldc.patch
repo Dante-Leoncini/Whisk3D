@@ -61,7 +61,7 @@
  
  #include "state.h"
  #include "private.h"
-@@ -175,39 +176,89 @@
+@@ -175,63 +176,117 @@
      float half_size = _glGetHalfPointSize();
  
      // Expands v to { v + (S/2,-S/2), v + (S/2,S/2), v + (-S/2,-S/2), (-S/2,S/2) }
@@ -143,6 +143,8 @@
  	// 3) Offseting the endpoints wrt the scaled normal
 -    float dx = ov2.xyz[0] - ov1.xyz[0];
 -    float dy = ov2.xyz[1] - ov1.xyz[1];
+-
+-    float inverse_mag = fast_rsqrt((dx*dx) + (dy*dy)) * _glGetHalfLineWidth();
 +    /* Whisk3D: esto corre ANTES de la division por w (las coordenadas son de pantalla multiplicadas por w): la
 +       direccion se mide en pantalla y el ancho se multiplica por el w de cada punta. Antes el ancho quedaba dividido
 +       por w y las lineas lejanas salian de menos de un pixel (punteadas). */
@@ -150,10 +152,14 @@
 +    const float w2 = (ov2.w > 0.000001f || ov2.w < -0.000001f) ? ov2.w : 1.0f;
 +    float dx = ov2.xyz[0] / w2 - ov1.xyz[0] / w1;
 +    float dy = ov2.xyz[1] / w2 - ov1.xyz[1] / w1;
- 
-     float inverse_mag = fast_rsqrt((dx*dx) + (dy*dy)) * _glGetHalfLineWidth();
++
++    /* Whisk3D: una linea que en pantalla mide cero (las dos puntas en el mismo pixel: de largo cero, o mirada de punta)
++       no tiene direccion: fast_rsqrt(0) es infinito y 0 por infinito da NaN, y la PVR recibiria vertices NaN (en la
++       consola de verdad la pueden colgar). Queda un cuadrilatero sin area, que no dibuja nada */
++    const float mag2 = (dx*dx) + (dy*dy);
++    float inverse_mag = (mag2 > 1e-12f) ? fast_rsqrt(mag2) * _glGetHalfLineWidth() : 0.0f;
      float nx = -dy * inverse_mag;
-@@ -215,23 +266,23 @@
+     float ny =  dx * inverse_mag;
  
      *dst = ov2;
      dst->flags = GPU_CMD_VERTEX_EOL;
@@ -185,7 +191,7 @@
      dst--;
  
      return dst;
-@@ -821,6 +872,16 @@
+@@ -821,6 +876,16 @@
      float y1;
  } ScreenRect;
  
@@ -202,7 +208,7 @@
  GL_FORCE_INLINE float scissor_plane_distance(const Vertex* v, int plane, const ScreenRect* r) {
      switch(plane) {
          case 0: return v->xyz[0] - (r->x0 * v->w);
-@@ -924,7 +985,11 @@
+@@ -924,7 +989,11 @@
          return;
      }
  
@@ -215,7 +221,7 @@
          return;
      }
  
-@@ -947,19 +1012,64 @@
+@@ -947,19 +1016,64 @@
          return;
      }
  
@@ -291,7 +297,7 @@
          }
      }
  
-@@ -1015,6 +1125,12 @@
+@@ -1015,6 +1129,12 @@
              return count * 5;
          case GL_QUADS:
              return count * 8;

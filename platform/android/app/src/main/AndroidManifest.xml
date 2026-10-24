@@ -15,6 +15,11 @@
          browser interno (opendir/fopen). Los permisos de media solo dan imagenes/videos -> no se cargaban modelos.
          "All files access": se pide en runtime (el Activity abre la pantalla de Settings). Mantiene nuestro browser. -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <!-- Jugar en red (net/W3dRed.cpp: LAN, wifi o internet por UDP). Es un permiso "normal": no se pide en
+         runtime. El permiso de cada proyecto lo da el editor (le pregunta al usuario al abrirlo). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
 
     <application
         android:requestLegacyExternalStorage="true"

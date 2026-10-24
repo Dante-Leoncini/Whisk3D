@@ -2,6 +2,8 @@
 
 Backend GLES1 + SDL2, empaquetado como APK con Gradle.
 
+Para Android 2.3 a 4.4 hay un APK aparte: [platform/android-viejo](../android-viejo/README.md).
+
 ## Requisitos
 
 - **Android NDK** (define `ANDROID_NDK` o dejalo en `/opt/android-ndk`).

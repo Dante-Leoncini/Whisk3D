@@ -837,6 +837,9 @@ static void SimPlay() {
     // volcar a disco/overlay los .lua editados en el IDE (sucios) ANTES de leerlos: sino Play corre el .lua VIEJO
     // (el cambio vivia solo en el buffer del IDE). Asi cambiar un valor en el script y dar Play YA se ve.
     { extern void IDEGuardarSucios(); IDEGuardarSucios(); }
+    // LA RED: un proyecto que juega en red sin el permiso decidido pregunta antes de arrancar (y arranca al
+    // responder). Ver config/W3dRedPermisos.h
+    { extern bool RedPuedeJugar(); if (!RedPuedeJugar()) return; }
     // ...y la vista de un clip de jerarquia que se estaba editando vuelve a su clip: lo que animObjeto()
     // reproduce es la biblioteca (compartida), no la vista
     W3dClipsVistasSincronizar();
@@ -965,6 +968,33 @@ static void EntradaPad() {
     W3dScriptBotonPad("r3",     buttonState[SDL_CONTROLLER_BUTTON_RIGHTSTICK]);
     W3dScriptBotonPad("start",  buttonState[SDL_CONTROLLER_BUTTON_START]);
     W3dScriptBotonPad("select", buttonState[SDL_CONTROLLER_BUTTON_BACK]);
+    // y CADA MANDO por separado (boton("a", 2), stick("izq", 2)...: la pantalla dividida). Igual que la mezcla, sin
+    // las flechas del teclado: el teclado lo reparte el juego (cada jugador con sus teclas)
+    static const struct { const char* n; int b; } kBotones[] = {
+        { "a", SDL_CONTROLLER_BUTTON_A }, { "b", SDL_CONTROLLER_BUTTON_B }, { "x", SDL_CONTROLLER_BUTTON_X },
+        { "y", SDL_CONTROLLER_BUTTON_Y }, { "arriba", SDL_CONTROLLER_BUTTON_DPAD_UP },
+        { "abajo", SDL_CONTROLLER_BUTTON_DPAD_DOWN }, { "izquierda", SDL_CONTROLLER_BUTTON_DPAD_LEFT },
+        { "derecha", SDL_CONTROLLER_BUTTON_DPAD_RIGHT }, { "l1", SDL_CONTROLLER_BUTTON_LEFTSHOULDER },
+        { "r1", SDL_CONTROLLER_BUTTON_RIGHTSHOULDER }, { "l3", SDL_CONTROLLER_BUTTON_LEFTSTICK },
+        { "r3", SDL_CONTROLLER_BUTTON_RIGHTSTICK }, { "start", SDL_CONTROLLER_BUTTON_START },
+        { "select", SDL_CONTROLLER_BUTTON_BACK } };
+    for (int m = 0; m < W3D_MANDOS_SDL; m++) {
+        const float* ax = axisStateM[m];
+        const bool* bt = buttonStateM[m];
+        float mx = ax[SDL_CONTROLLER_AXIS_LEFTX], my = ax[SDL_CONTROLLER_AXIS_LEFTY];
+        if (mx == 0.0f && my == 0.0f) {
+            mx = (float)((bt[SDL_CONTROLLER_BUTTON_DPAD_RIGHT] ? 1 : 0) - (bt[SDL_CONTROLLER_BUTTON_DPAD_LEFT] ? 1 : 0));
+            my = (float)((bt[SDL_CONTROLLER_BUTTON_DPAD_DOWN] ? 1 : 0) - (bt[SDL_CONTROLLER_BUTTON_DPAD_UP] ? 1 : 0));
+        }
+        W3dScriptStickDe(m, 0, mx, my);
+        W3dScriptStickDe(m, 1, ax[SDL_CONTROLLER_AXIS_RIGHTX], ax[SDL_CONTROLLER_AXIS_RIGHTY]);
+        W3dScriptGatilloDe(m, 0, ax[SDL_CONTROLLER_AXIS_TRIGGERLEFT]);
+        W3dScriptGatilloDe(m, 1, ax[SDL_CONTROLLER_AXIS_TRIGGERRIGHT]);
+        for (size_t k = 0; k < sizeof(kBotones) / sizeof(kBotones[0]); k++)
+            W3dScriptBotonPadDe(m, kBotones[k].n, bt[kBotones[k].b]);
+        W3dScriptBotonPadDe(m, "l2", ax[SDL_CONTROLLER_AXIS_TRIGGERLEFT] > 0.5f);
+        W3dScriptBotonPadDe(m, "r2", ax[SDL_CONTROLLER_AXIS_TRIGGERRIGHT] > 0.5f);
+    }
 #endif
 }
 // UN TICK DE CINEMATICA (reproducirEscena): el juego en PAUSA (ni su fisica ni sus scripts ni sus

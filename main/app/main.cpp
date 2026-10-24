@@ -7,6 +7,7 @@
 #include "render/OpcionesRender.h"   // RenderType / g_redraw: son del editor
 #include "W3dLang.h"   // config.ini: "idioma = es" fuerza el idioma por encima del SO
 #include "test/W3dScript.h" // modo test: whisk3d --script <ruta>
+#include "test/W3dMcp.h"    // whisk3d --mcp: el editor atiende a una IA (Model Context Protocol, solo en la PC)
 #include "io/CambiosProyecto.h" // lo no guardado: el cartel al cerrar y el '*' del titulo
 
 #ifdef __EMSCRIPTEN__       // WebGL: el browser es 1 hilo -> el loop es emscripten_set_main_loop
@@ -42,7 +43,7 @@ static void PCImportGlb()  { AbrirFileBrowser("Import GLB",  "Import GLB",  ".gl
 
 // hook de swap para la barra de progreso (se redibuja DENTRO del export/import bloqueante)
 static SDL_Window* g_swapWindow = NULL;
-static void PCSwapBuffers() { if (g_swapWindow) SDL_GL_SwapWindow(g_swapWindow); }
+static void PCSwapBuffers() { w3dEngine::DibujarPendiente(); if (g_swapWindow) SDL_GL_SwapWindow(g_swapWindow); }
 
 #include "ViewPorts/Properties.h" // DialogoCargarTextura
 #include "objects/Textures.h"
@@ -674,6 +675,17 @@ static void ProcesarEvento(SDL_Event& e) {
 }
 
 static void MainLoopFrame() {
+#ifdef W3D_MCP
+    // el MCP (--mcp): los pedidos de la IA se atienden aca, entre cuadros. Si el cliente se va, el editor se cierra
+    // por la misma puerta que la cruz de la ventana (con el cartel si hay cambios sin guardar)
+    if (W3dMcpActivo()) {
+        static bool clienteIdo = false;
+        if (!W3dMcpAtender() && !clienteIdo) {
+            clienteIdo = true;
+            SDL_Event q; SDL_zero(q); q.type = SDL_QUIT; SDL_PushEvent(&q);
+        }
+    }
+#endif
     // apertura de proyecto DIFERIDA (tarjeta Archivo): se procesa aca, con el
     // stack limpio, porque el boton que la pidio vive en el layout a destruir
     {
@@ -1032,6 +1044,7 @@ static void MainLoopFrame() {
         w3dEngine::C3DCuadroTerminar();
         { extern void W3d3dsCuadroDibujado(); W3d3dsCuadroDibujado(); }   // (la captura de prueba en la SD)
 #else
+        w3dEngine::DibujarPendiente();
         SDL_GL_SwapWindow(window);
 #endif
 #ifdef W3D_DREAMCAST
@@ -1061,6 +1074,11 @@ static void MainLoopFrame() {
 namespace w3dEngine { bool W3dAudioInit(int); }  // audio/W3dAudio.h (evita meter el dir al include path)
 
 int main(int argc, char* argv[]) {
+#ifdef W3D_MCP
+    // --mcp: antes que nada imprima, stdin y stdout pasan a ser del protocolo (ver test/W3dMcp.cpp)
+    for (int ai = 1; ai < argc; ai++)
+        if (std::string(argv[ai]) == "--mcp" && !W3dMcpIniciar()) { fprintf(stderr, "whisk3d --mcp: no se pudo iniciar\n"); return 1; }
+#endif
 #ifndef __EMSCRIPTEN__
     w3dRedirigirCoutAlLog();   // cout/cerr -> whisk3d.log (no la consola blanca de Windows). Impl comun en w3dlog.cpp.
 #endif
@@ -1212,7 +1230,12 @@ int main(int argc, char* argv[]) {
         cfg = loadConfig(hayUsuario ? cfgUsuario : std::string("res/config.ini"));
         // Android es de alta densidad y se usa con el dedo -> escala 3 de fabrica (el config compartido viene en 2
         // para PC). Si el usuario ya eligio una escala en Ajustes, se respeta la suya.
+    #ifdef W3D_ANDROID_VIEJO
+        // (los de Android 2.3 tienen pantallas de 320x480 o menos, con la densidad del N95: escala 1)
+        if (!hayUsuario) cfg.scale = 1;
+    #else
         if (!hayUsuario) cfg.scale = 3;
+    #endif
     #else
         cfg = loadConfig(hayUsuario ? cfgUsuario : w3dFileSystem::GetResDir() + "/config.ini");
     #endif
@@ -1226,6 +1249,11 @@ int main(int argc, char* argv[]) {
 #ifdef W3D_3DS
     // la 3DS: el editor en la pantalla de abajo (la tactil, 320x240), la UI a escala 1 y sin antialiasing
     winW = 320; winH = 240; cfg.fullscreen = true; cfg.scale = 1; cfg.enableAntialiasing = false;
+#endif
+#ifdef W3D_ANDROID_VIEJO
+    // Android 2.3: sin antialiasing. La VideoCore IV lo da (4x), pero con tiles cuatro veces mas chicos el cuadro tardaba
+    // ~300 ms en la GPU
+    cfg.enableAntialiasing = false;
 #endif
     // AUTO KEY: el config MANDA sobre el global de animacion (que arranca apagado). Reporte del
     // dueno: "no se guarda que en el timeline puse auto key" -> se prendia de nuevo en cada sesion.

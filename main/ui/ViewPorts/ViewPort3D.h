@@ -267,6 +267,9 @@ class Viewport3D : public ViewportBase, public WithBorder {
         void RenderRelantionshipsLines();
         void Render3Dcursor();
         void RenderUI();
+        // la PANTALLA DIVIDIDA de un juego (setVistas(2)): la escena una vez por mitad, cada una con su camara, y el
+        // HUD una vez encima. false = no corresponde (se dibuja como siempre)
+        bool RenderDividido();
         void Estado2D();   // el estado 2D completo tras las mallas (lo primero que hace RenderUI)
         // durante un transform reemplaza la barra de botones por una barra de
         // estado (Translate/Scale/Rotate con los valores en vivo)

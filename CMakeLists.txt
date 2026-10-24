@@ -71,6 +71,8 @@ list(APPEND SRC_FILES
     ${CMAKE_SOURCE_DIR}/libs/Whisk3DCore/physics/W3dRigido.cpp
     ${CMAKE_SOURCE_DIR}/libs/Whisk3DCore/physics/W3dColMalla.cpp
     ${CMAKE_SOURCE_DIR}/libs/Whisk3DCore/physics/W3dHitbox.cpp
+    # jugar en red (LAN, wifi, internet: UDP). Va junto a W3dScript.cpp: registra los binds red*
+    ${CMAKE_SOURCE_DIR}/libs/Whisk3DCore/net/W3dRed.cpp
     ${CMAKE_SOURCE_DIR}/libs/Whisk3DCore/io/w3dFilesystem.cpp
     ${CMAKE_SOURCE_DIR}/libs/Whisk3DCore/gfx/w3dTexture.cpp
     ${CMAKE_SOURCE_DIR}/libs/Whisk3DCore/io/w3dCompress.cpp
@@ -145,6 +147,12 @@ add_dependencies(whisk3d w3dversion)
 
 # AUDIO habilitado (efectos del juego via SDL2, ya linkeado). Sin esto el modulo es stub.
 target_compile_definitions(whisk3d PRIVATE W3D_ENABLE_AUDIO)
+
+# MCP (whisk3d --mcp, main/test/W3dMcp.cpp): el editor atiende a una IA por stdin/stdout. Solo en la PC: Android y la
+# web no lo compilan (y Symbian, Dreamcast y 3DS tienen su propio build, sin main/test)
+if(NOT ANDROID AND NOT EMSCRIPTEN)
+    target_compile_definitions(whisk3d PRIVATE W3D_MCP)
+endif()
 
 # Whisk3DCore owns graphics backend selection and native graphics dependencies.
 include(${CMAKE_SOURCE_DIR}/libs/Whisk3DCore/cmake/w3dGraphicsBackend.cmake)

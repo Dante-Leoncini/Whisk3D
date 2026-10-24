@@ -428,6 +428,19 @@ void CWhisk3D::HidKey(TInt aScanCode, TBool aDown){
 		LCtrlPressed = aDown ? true : false; // global de PC (rango/toggle)
 		return;
 	}
+	// JUGANDO, las letras van al juego (tecla("a") del lua): el jugador 2 de la pantalla dividida juega con el teclado
+	// bluetooth (el N95 no tiene letras). Lo mismo que en la PC; en pausa siguen siendo los atajos del editor
+	if (aScanCode >= 4 && aScanCode <= 29){
+		extern bool AnimEsJuego; extern bool PlayAnimation;
+		if (AnimEsJuego && PlayAnimation && W3dLayoutJuegoViewportActivo() && !W3dLayoutPopupActivo() &&
+		    !W3dLayoutMenuAbierto()){
+			static const char* const kLetras[26] = { "a","b","c","d","e","f","g","h","i","j","k","l","m","n","o",
+			                                         "p","q","r","s","t","u","v","w","x","y","z" };
+			extern void W3dScriptTecla(const char* nombre, bool apretada);
+			W3dScriptTecla(kLetras[aScanCode - 4], aDown ? true : false);
+			return;
+		}
+	}
 	if (!aDown){ return; }
 
 	switch (aScanCode){

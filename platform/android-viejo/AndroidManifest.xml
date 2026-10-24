@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Whisk3D para Android 2.3 (API 10). Otro paquete que el del Android de siempre: se pueden tener los dos -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+          package="com.whisk3d.viejo"
+          android:versionCode="1"
+          android:versionName="1.0"
+          android:installLocation="auto">
+
+    <uses-sdk android:minSdkVersion="10" android:targetSdkVersion="10" />
+    <uses-feature android:glEsVersion="0x00020000" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+
+    <application android:label="Whisk3D"
+                 android:icon="@drawable/icono"
+                 android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
+        <activity android:name=".Whisk3DActivity"
+                  android:label="Whisk3D"
+                  android:configChanges="keyboardHidden|orientation">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

@@ -385,6 +385,19 @@ void W3dDcCuadroDibujado() {
     else if (cuadro >= 6 && cuadro <= 14) SDL_WarpMouseInWindow(SDL_GetMouseFocus(), 215 + (cuadro - 5) * 9, 230 + (cuadro - 5) * 4);
     else if (cuadro == 15) EmpujarBoton(SDL_BUTTON_LEFT, false);
     else if (cuadro >= 16 && cuadro <= 22) SDL_WarpMouseInWindow(SDL_GetMouseFocus(), 380 + (cuadro & 1), 330);
+#elif W3D_DC_PRUEBA == 8
+    // PRUEBA DE ORBITA CON EL CONTROL (PRUEBA=8): lo mismo que hace el control como mouse al orbitar: X (el boton del
+    // medio) mantenido y el cursor movido de a 4 pixeles por cuadro hacia la derecha, hasta pasar varias veces el borde
+    // del viewport (ahi el editor lleva el cursor al otro borde para que el arrastre siga)
+    if (cuadro == 3) SDL_WarpMouseInWindow(SDL_GetMouseFocus(), 230, 240);
+    else if (cuadro == 4) EmpujarBoton(SDL_BUTTON_MIDDLE, true);
+    else if (cuadro >= 5 && cuadro < 400) {
+        int x = 0, y = 0;
+        SDL_GetMouseState(&x, &y);
+        x += 4; if (x > 639) x = 639;
+        SDL_WarpMouseInWindow(SDL_GetMouseFocus(), x, y);
+        if (cuadro % 5 == 0) { printf("[prueba8] cuadro %d cursor %d,%d\n", cuadro, x, y); fflush(stdout); }
+    } else if (cuadro == 400) EmpujarBoton(SDL_BUTTON_MIDDLE, false);
 #elif W3D_DC_PRUEBA == 2
     // PRUEBA DE MOVER (PRUEBA=2): G sobre el cubo seleccionado, el mouse a la derecha, X (el eje: la linea larga del
     // eje en pantalla), mas mouse y un click que confirma

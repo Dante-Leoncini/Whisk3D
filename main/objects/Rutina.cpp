@@ -28,6 +28,8 @@ bool g_w3dSoloJuego = false;    // el editor: lo prende el modo VERDE+0 (LayoutJ
 #endif
 unsigned g_w3dConstructorGen = 1;
 bool g_w3dLimpiarColorFijo = false;
+bool g_w3dRecorteVistaOn = false;
+int g_w3dRecorteVista[4] = { 0, 0, 0, 0 };
 unsigned g_w3dLimpiezasColor = 0;
 
 // ---------------------------------------------------------------------------
@@ -934,6 +936,10 @@ static void EjecutarPasoCrudo(W3dPaso& p, size_t& i, Rutina* yo) {
         if ((p.entero & LimpiarColor) && !g_w3dLimpiarColorFijo) { bits |= gfx::ColorBuffer; g_w3dLimpiezasColor++; }
         if (p.entero & LimpiarProfundidad) { bits |= gfx::DepthBuffer; gfx::DepthMask(true); }
         if (p.entero & LimpiarStencil) bits |= gfx::StencilBuffer;
+        if (bits && g_w3dRecorteVistaOn) {
+            gfx::Enable(gfx::ScissorTest);
+            gfx::Scissor(g_w3dRecorteVista[0], g_w3dRecorteVista[1], g_w3dRecorteVista[2], g_w3dRecorteVista[3]);
+        }
         if (bits) gfx::Clear(bits);
         break;
     }

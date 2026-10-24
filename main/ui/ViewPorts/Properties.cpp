@@ -52,6 +52,7 @@
 #include "PopUp/ColorPicker.h"
 #include "PopUp/FileBrowser.h" // explorador para elegir la carpeta de export
 #include "PopUp/ConfirmarPopup.h" // confirmacion de sobrescritura (render / export)
+#include "config/W3dRedPermisos.h" // la casilla de la red (tarjeta File) y el nombre del dispositivo (Ajustes)
 #include "ViewPorts/TransformUI.h" // TbVerdeBg: la operacion activa del Boolean se pinta como toggle
 #include "w3dFilesystem.h" // FileExists / GetDefaultOutputDir / JoinPath (rutas de salida)
 #include "PopUp/ProgressPopup.h" // barra "Rendering..." durante el render (clave en N95)
@@ -5754,9 +5755,29 @@ static void AccionMallasTexto() {
     g_w3dFormatoMallasProyecto = g_proyMallasTexto ? W3D_MALLAS_TEXTO : W3D_MALLAS_BINARIO;
 }
 
+// "Network access": el permiso de ESTE archivo para jugar en red. Lo pregunta el editor al abrir un proyecto que
+// usa la red; aca se cambia despues. No viaja con el proyecto (un archivo no se da permiso a si mismo): queda en el
+// editor (red.txt de la carpeta del usuario). Ver config/W3dRedPermisos.h
+static bool g_proyRed = false;
+static void RedRefrescar() { g_proyRed = RedPermisoProyecto(); }
+static void AccionProyRed() { RedSetPermisoProyecto(g_proyRed); }
+
+// Campo "Device name" de Ajustes <-> el nombre de este dispositivo en la red. Mismo patron que el campo Repo: en vivo
+// mientras se tipea; sin el foco muestra el guardado (o el del equipo, si nunca se puso uno)
+static void SincronizarDispositivoCampo(PropText* pt) {
+    if (!pt) return;
+    if (TextFieldEnVivo(&pt->field)) {
+        if (RedDispositivo() != pt->field.text) { RedSetDispositivo(pt->field.text); g_redraw = true; }
+    } else if (pt->field.text != RedDispositivo()) {
+        pt->field.SetText(RedDispositivo());
+        g_redraw = true;
+    }
+}
+
 // llena los campos de la tarjeta desde w3dPath (al abrir/guardar/cambiar)
 void ProyectoSincronizarCampos() {
     MallasTextoRefrescar();   // el formato de las mallas viaja con el proyecto
+    RedRefrescar();           // el permiso de la red es de este archivo
     if (!PropsActivo) return;
     std::string dir, nom;
     if (!w3dPath.empty()) {
@@ -7677,6 +7698,12 @@ void Properties::ConstruirGrupos(){
     propProyMallasTexto->value = &g_proyMallasTexto;
     propProyMallasTexto->onChange = AccionMallasTexto;
     propArchivo->properties.push_back(propProyMallasTexto);
+    // el permiso de la RED de este archivo (lo pregunta el editor al abrirlo; aca se cambia despues)
+    propProyRed = new PropBool(T("Network access"));
+    RedRefrescar();
+    propProyRed->value = &g_proyRed;
+    propProyRed->onChange = AccionProyRed;
+    propArchivo->properties.push_back(propProyRed);
     GroupProperties.push_back(propArchivo);
 
 
@@ -8102,6 +8129,11 @@ void Properties::ConstruirGrupos(){
     // "Save Changes" queda guardada en el config. Vacio = el editor la busca sola subiendo de carpetas.
     propAjRepo = new PropText("Repo", cfg.repoPath.c_str());
     propAjustes->properties.push_back(propAjRepo);
+
+    // el NOMBRE de este dispositivo en la red: el que ven los demas al buscar partidas (por defecto, el del equipo).
+    // Se guarda al tipearlo (red.txt, junto a los permisos de la red)
+    propAjDispositivo = new PropText(T("Device name"), RedDispositivo().c_str());
+    propAjustes->properties.push_back(propAjDispositivo);
 
     // la ESCALA del editor, en vivo (x1 = N95, x3 = default PC)
     { PropFloat* pe = new PropFloat(T("Scale"), "x");
@@ -10463,6 +10495,7 @@ void Properties::ActualizarPestanias(){
     g_renderMallasSoloGPU = W3dMallasSoloGPUActiva();
     // idem el tilde del formato de las mallas (tarjeta Archivo): lo fija el proyecto abierto
     MallasTextoRefrescar();
+    RedRefrescar();   // (y el de la red: lo cambia la pregunta al abrir)
     // la 1ra pestania ("Objeto") siempre esta (transforms). La 2da depende del
     // tipo del objeto activo: Mesh -> mesh parts (icono material); Light ->
     // color (icono luz). (Camara / objetos especiales: a futuro.)
@@ -10672,6 +10705,7 @@ void Properties::ActualizarPestanias(){
     if (propAjBackend) propAjBackend->button->text = cfg.graphicsAPI;
     if (propAjSkin)    propAjSkin->button->text    = cfg.SkinName;
     if (propAjRepo)    SincronizarRepoCampo(propAjRepo);
+    if (propAjDispositivo) SincronizarDispositivoCampo(propAjDispositivo);
     // tarjeta Animation: el dropdown muestra la animacion activa (icono camara=escena / esqueleto=clip); Delete se
     // OCULTA cuando no hay nada que borrar; Render se GRISA sin animaciones. New y Rename siempre visibles.
     // tarjeta CAPA (Mix): bindea a la capa elegida

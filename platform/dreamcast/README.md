@@ -50,7 +50,8 @@ Si algo ya está hecho, lo saltea.
 - **Líneas:**
   - se armaban antes de dividir por `w`, así que salían más finas cuanto más lejos estaban y quedaban punteadas;
   - una línea que pasaba por detrás de la cámara (el eje al mover un objeto) se recortaba recién después de hacerla rectángulo y salía como una franja enorme; ahora se recorta antes;
-  - van apenas hacia la cámara, porque GLdc no tiene `glPolygonOffset`: las aristas del modo edición ya no pelean con sus caras.
+  - van apenas hacia la cámara, porque GLdc no tiene `glPolygonOffset`: las aristas del modo edición ya no pelean con sus caras;
+  - una línea que en pantalla mide cero (las dos puntas en el mismo píxel) no tiene dirección: el ancho salía de `0 × ∞` y le mandaba NaN a la PVR. Ahora queda un cuadrilátero sin área.
 - **Puntos:** ahora llevan la textura entera (point sprites).
 - **Scissor:**
   - si nada toca los bordes no se recorta nada (antes cada triángulo de la interfaz pasaba por el recorte de 4 planos y era la mitad del cuadro);
@@ -77,6 +78,16 @@ Genera en `platform/dreamcast/build/`:
 - `whisk3d_debug.elf`: el mismo con símbolos, para traducir direcciones de un cuelgue con `sh-elf-addr2line`.
 
 Los recursos de `res/` van adentro del ejecutable, en un romdisk que se monta en `/rd`.
+
+## En la consola
+
+- **Por el adaptador de red (BBA), con dcload-ip:** se manda el ELF desde la PC. El log sale en la consola de dc-tool:
+
+  ```bash
+  dc-tool-ip -t <ip-de-la-dreamcast> -x platform/dreamcast/build/whisk3d.elf
+  ```
+
+- **Sin cable:** `whisk3d.cdi` grabado en un CD-R o cargado en una unidad que emula el lector, tipo GDEMU.
 
 ## Probar en Flycast
 
@@ -122,6 +133,7 @@ Con `PRUEBA=n` delante, antes de capturar empuja eventos de teclado y mouse, par
 - `PRUEBA=5`: modo edición y click sobre un vértice.
 - `PRUEBA=6`: trazado de rayos en el viewport.
 - `PRUEBA=7`: pintura de textura, con un trazo sobre el cubo.
+- `PRUEBA=8`: orbitar como con el control (X mantenido y el cursor a la derecha), pasando varias veces el borde del viewport, donde el editor lleva el cursor al otro lado para que el arrastre siga.
 
 Con cualquier `PRUEBA`, cada 8 cuadros sale por la consola cuánto tardaron y en qué (lógica, viewport 3D, render, swap).
 

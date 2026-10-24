@@ -8,7 +8,8 @@
 #
 #  Uso: bash platform/3ds/captura_azahar.sh [segundos=25] [salida=build/captura]
 #  TOQUES="x,y x,y" antes del comando: toques en la pantalla de abajo (pixeles de la 3DS, 0..319 x 0..239), uno por
-#  segundo despues de arrancar. "x,y>x2,y2" arrastra de un punto al otro.
+#  segundo despues de arrancar. "x,y>x2,y2" arrastra de un punto al otro; "x,y>>x2,y2", de a poco (como un dedo, en
+#  40 pasos en unos 2 segundos).
 #  TECLAS="tecla tecla:ms": despues de los toques, botones de la consola por el teclado de la PC (lo que tiene puesto
 #  Azahar): a=A s=B z=X x=Y q=L w=R 1=ZL 2=ZR m=Start n=Select, cruceta t/g/f/h, circle pad = flechas (Up Down Left
 #  Right), C-stick i/k/j/l. ":ms" la mantiene apretada ese tiempo (sin eso, 150 ms).
@@ -44,7 +45,18 @@ BARRA=22
 X0=$((X + (WIDTH - 400) / 2)); Y0=$((Y + BARRA))       # la pantalla de arriba
 XA=$((X0 + 40)); YA=$((Y0 + 240))                       # la de abajo
 for t in ${TOQUES:-}; do
-    if [[ "$t" == *">"* ]]; then
+    if [[ "$t" == *">>"* ]]; then
+        a="${t%%>>*}"; b="${t##*>>}"
+        ax=${a%%,*}; ay=${a##*,}; bx=${b%%,*}; by=${b##*,}
+        "$XDO" mousemove $((XA + ax)) $((YA + ay)) mousedown 1
+        sleep 0.2
+        for i in $(seq 1 40); do
+            "$XDO" mousemove $((XA + ax + (bx - ax) * i / 40)) $((YA + ay + (by - ay) * i / 40))
+            sleep 0.05
+        done
+        sleep 0.2
+        "$XDO" mouseup 1
+    elif [[ "$t" == *">"* ]]; then
         a="${t%%>*}"; b="${t##*>}"
         "$XDO" mousemove $((XA + ${a%%,*})) $((YA + ${a##*,})) mousedown 1
         sleep 0.3

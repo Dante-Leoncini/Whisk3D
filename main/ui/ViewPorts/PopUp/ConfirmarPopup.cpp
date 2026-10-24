@@ -16,6 +16,7 @@ static const float ROJO_BORRAR[4] = { 0.92f, 0.26f, 0.26f, 1.0f }; // rojo del b
 
 ConfirmarPopup::ConfirmarPopup() : PopUpBase("Confirmar") {
     onSi = NULL;
+    onNo = NULL;
     foco = 1; // por defecto resaltado en "Si" (la accion principal)
     btnSi = new Button(T("Yes"));
     btnNo = new Button(T("No"));
@@ -31,14 +32,46 @@ ConfirmarPopup::~ConfirmarPopup() {
 void ConfirmarPopup::Abrir(const std::string& msg, void (*cb)()) {
     mensaje = msg;
     onSi = cb;
+    onNo = NULL;
+    btnSi->text = T("Yes");
+    btnNo->text = T("No");
+    btnSi->colorTexto = ROJO_BORRAR;
     foco = 1;
     PopUpActive = this; // el layout (ancho/posicion) se calcula en Render con las metricas ACTUALES
 }
 
+void ConfirmarPopup::Preguntar(const std::string& msg, const std::string& si, const std::string& no, void (*cbSi)(),
+                               void (*cbNo)()) {
+    Abrir(msg, cbSi);
+    onNo = cbNo;
+    btnSi->text = si;
+    btnNo->text = no;
+    btnSi->colorTexto = NULL;
+}
+
+void ConfirmarPopup::ResponderNo() {
+    void (*no)() = onNo;
+    onNo = NULL;
+    Cerrar();
+    if (no) no();
+}
+
 // parte 's' en renglones de <= maxChars, cortando en un espacio si puede (la fuente es monoespaciada).
-// SIN limite de renglones: el mensaje entra completo (por eso el popup crece en alto).
+// SIN limite de renglones: el mensaje entra completo (por eso el popup crece en alto). Un '\n' corta el
+// renglon ahi (el mensaje + el nombre del archivo abajo)
+static void WrapParrafo(const std::string& s, int maxChars, std::vector<std::string>& out);
 static void WrapMensaje(const std::string& s, int maxChars, std::vector<std::string>& out) {
     out.clear();
+    size_t desde = 0;
+    for (;;) {
+        const size_t salto = s.find('\n', desde);
+        WrapParrafo(s.substr(desde, salto == std::string::npos ? std::string::npos : salto - desde), maxChars, out);
+        if (salto == std::string::npos) break;
+        desde = salto + 1;
+    }
+    if (out.empty()) out.push_back(s);
+}
+static void WrapParrafo(const std::string& s, int maxChars, std::vector<std::string>& out) {
     if (maxChars < 1) maxChars = 1;
     size_t pos = 0;
     while (pos < s.size()) {
@@ -49,7 +82,6 @@ static void WrapMensaje(const std::string& s, int maxChars, std::vector<std::str
         if (brk != std::string::npos && brk > pos) { out.push_back(s.substr(pos, brk - pos)); pos = brk + 1; }
         else { out.push_back(s.substr(pos, maxChars)); pos += maxChars; } // palabra sin espacios: partir
     }
-    if (out.empty()) out.push_back(s);
 }
 
 // BARRA al fondo, ANCHO COMPLETO de la pantalla (simula los soft keys de Symbian). Se recalcula cada frame
@@ -149,7 +181,7 @@ bool ConfirmarPopup::Motion(int mx, int my) {
 
 bool ConfirmarPopup::Click(int mx, int my) {
     Layout(); // asegura posicion/tamaño actuales para el hit-test
-    if (btnNo->Contains(mx, my)) { Cerrar(); return true; }
+    if (btnNo->Contains(mx, my)) { ResponderNo(); return true; }
     if (btnSi->Contains(mx, my)) { void (*cb)() = onSi; Cerrar(); if (cb) cb(); return true; }
     // click adentro de la barra (sin botón): lo consume (modal); afuera -> el caller cierra
     return Contains(mx, my);
@@ -163,7 +195,7 @@ bool ConfirmarPopup::Tecla(int tecla) {
             { void (*cb)() = onSi; Cerrar(); if (cb) cb(); } return true;
         case LayoutKey::Left:    // flecha izquierda / soft key izquierdo = No
         case LayoutKey::Cancel:  // Esc / C = No (cancela)
-            Cerrar(); return true;
+            ResponderNo(); return true;
     }
     return true; // modal: no le roban teclas
 }

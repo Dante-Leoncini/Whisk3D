@@ -43,6 +43,9 @@
 #include "w3dlog.h"                      // w3dLogMemoria: la memoria antes / despues de las texturas del Play
 // la sim del juego (scripts lua) esta cargada? (play O pausa; false tras Stop)
 static bool JuegoSimActiva() { extern bool SimActiva(); return SimActiva(); }
+// dibujando una MITAD de la pantalla dividida (RenderDividido): la mitad es la imagen entera (sin encuadre ni bandas)
+// y el Render no vuelve a partir
+static bool gVistaPartida = false;
 #include "ViewPorts/LayoutInput.h" // LayoutDeleteEdit (menu Delete en edit mode)
 #include "ViewPorts/UVEditor.h"    // roles TBR_Pincel*/TBR_Grupo (toolbar del modo Weight Paint, compartidos con el UV)
 #include "edit/WeightPaint.h"      // pincel + escritura de pesos (modo Weight Paint)
@@ -56,6 +59,7 @@ static bool JuegoSimActiva() { extern bool SimActiva(); return SimActiva(); }
 #include "importers/import_obj.h"           // TexturasPendientes / CargarTodasTexturasPendientes
 void RebindMaterialMeshPart(); // (def en Properties.cpp) refresca el panel de material tras undo/redo
 #include "W3dProfile.h" // g_profShow (ms por categoria) para el overlay Statistics; se define en config/W3dProfile.cpp
+#include "script/W3dScript.h"   // la pantalla dividida (W3dVistas*: setVistas / setVistaCamara de lua)
 #ifdef W3D_SYMBIAN
 extern int W3dPantallaAlto; // los headers GLES + tipos GL los da GeometriaUI.h (via ViewPort3D.h)
 #ifndef GL_POINT_SPRITE
@@ -1786,6 +1790,8 @@ static void WP3DRenderPincel(Viewport3D* vp) {
 }
 
 void Viewport3D::Render() {
+    // la PANTALLA DIVIDIDA (setVistas(2) de un juego): las dos mitades y el HUD, ver RenderDividido
+    if (!gVistaPartida && W3dVistasCuantas() > 1 && RenderDividido()) return;
     double _tVp0 = W3dNowMs(); // profiler: tiempo total de este viewport 3D
     ReloadLights();
 
@@ -1814,10 +1820,10 @@ void Viewport3D::Render() {
         // pantalla (vertical u horizontal) y el culling publicado es EXACTAMENTE lo
         // que se ve -- nada se esfuma en los bordes. La UI del juego se encaja al
         // marco, asi que se adapta sola al viewport y los contadores quedan visibles.
-        if (g_juegoPuro == 2) ra = va;
-        camFrameLetterbox = (CameraActive->AspectoDeclarado() > 0.01f) && g_juegoPuro != 2 &&
+        if (g_juegoPuro == 2 || gVistaPartida) ra = va;   // (una mitad de la pantalla dividida: igual, la mitad entera)
+        camFrameLetterbox = (CameraActive->AspectoDeclarado() > 0.01f) && g_juegoPuro != 2 && !gVistaPartida &&
                             AnimEsJuego && (PlayAnimation || JuegoSimActiva());
-        const float margin = (camFrameLetterbox || g_juegoPuro == 2) ? 1.0f : 0.92f; // jugando encuadrado: sin aire
+        const float margin = (camFrameLetterbox || g_juegoPuro == 2 || gVistaPartida) ? 1.0f : 0.92f; // jugando encuadrado: sin aire
         // LA cuenta del encuadre vive en main/render/EscenaRender.cpp: el runtime del
         // juego compilado llama a la MISMA, asi el .deb/APK encuadra igual que el Play.
         W3dEncuadreMarco(va, ra, margin, &camNX, &camNY);
@@ -1854,7 +1860,7 @@ void Viewport3D::Render() {
     if (vst.ortoSize < 0.001f) vst.ortoSize = 0.001f;
     vst.aspectoVista  = (aspect > 1e-4f) ? aspect : 1.0f;
     // en COVER (juego puro 2) la imagen es la del VIEWPORT: sin encuadre declarado
-    vst.aspectoImagen = (camFrame && g_juegoPuro != 2) ? W3dAspectoJuego() : vst.aspectoVista;
+    vst.aspectoImagen = (camFrame && g_juegoPuro != 2 && !gVistaPartida) ? W3dAspectoJuego() : vst.aspectoVista;
     vst.marcoNX       = camNX;
     vst.marcoNY       = camNY;
     vst.altoImagenPx  = (float)height * ((camNY > 1e-4f) ? camNY : 1.0f) * ((camFrame && camViewZoom > 0.0f) ? camViewZoom : 1.0f);
@@ -1898,7 +1904,8 @@ void Viewport3D::Render() {
     const bool proyectoLimpia = W3dHayConstructor() && W3dEscena3DActiva();   // (lua dibujar3D(false): no corre)
     const bool limpiaElProyecto = proyectoLimpia && !modoAnalisis;
     g_w3dLimpiarColorFijo = proyectoLimpia && modoAnalisis;
-    const bool recortarEscena = proyectoLimpia && !g_juegoPuro;
+    // (una mitad de la pantalla dividida recorta siempre: el "Clear" del proyecto no borra la otra)
+    const bool recortarEscena = proyectoLimpia && (!g_juegoPuro || gVistaPartida);
     const bool pisoDespues = limpiaElProyecto;
     if (limpiaElProyecto) {
         // (nada: ni color ni profundidad)
@@ -2910,6 +2917,64 @@ void Viewport3D::Estado2D() {
     w3dEngine::DisableArray(w3dEngine::ColorArray);
 }
 
+// LA PANTALLA DIVIDIDA de un juego (setVistas(2), script/W3dScript.h): el cuadro del juego -- el marco de la camara,
+// encajado como siempre -- partido en dos (lado a lado o una arriba de la otra, con una raya negra en el medio), la
+// escena una vez en cada mitad con la camara de esa vista (antes, el script reorienta lo suyo: antesDeVista) y el HUD
+// UNA vez encima del cuadro entero (los medidores de los dos jugadores ya van uno a cada lado). Cada mitad es su
+// imagen entera: el aspecto de la mitad, sin bandas. Solo el viewport activo, jugando y mirando por la camara
+bool Viewport3D::RenderDividido() {
+    extern bool AnimEsJuego; extern bool PlayAnimation;
+    if (Viewport3DActive != this || !ViewFromCameraActive || !CameraActive || !AnimEsJuego) return false;
+    if (!(PlayAnimation || JuegoSimActiva()) || width < 8 || height < 8) return false;
+    // el marco del juego en este viewport (la cuenta de Render: el aspecto declarado, sin aire)
+    const float va = (aspect > 1e-4f) ? aspect : 1.0f;
+    float ra = (g_juegoPuro == 2) ? va : W3dAspectoJuego();
+    if (ra < 1e-4f) ra = va;
+    float nx = 1.0f, ny = 1.0f;
+    W3dEncuadreMarco(va, ra, 1.0f, &nx, &ny);
+    const int fw = (int)((float)width * nx + 0.5f), fh = (int)((float)height * ny + 0.5f);
+    const int fx = x + (width - fw) / 2, fy = y + (height - fh) / 2;
+    // negro en todo el viewport: las bandas y la raya entre las mitades
+    const int glY = W3dPantallaAlto - y - height;
+    w3dEngine::Enable(w3dEngine::ScissorTest);
+    w3dEngine::Scissor(x, glY, width, height);
+    w3dEngine::ClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    w3dEngine::Clear(w3dEngine::ColorBuffer | w3dEngine::DepthBuffer);
+    w3dEngine::Disable(w3dEngine::ScissorTest);
+    // las dos mitades (cada una se dibuja con el Render de siempre, achicado a su rectangulo y con su camara)
+    const int x0 = x, y0 = y, w0 = width, h0 = height;
+    const GLfloat a0 = aspect;
+    Camera* cam0 = CameraActive;
+    const bool lado = W3dVistasModo() == 0;
+    const int raya = 1;   // (media raya: 2 px entre las dos)
+    gVistaPartida = true;
+    for (int v = 0; v < 2; v++) {
+        if (lado) { width = fw / 2 - raya; height = fh; x = v ? fx + fw - width : fx; y = fy; }
+        else      { width = fw; height = fh / 2 - raya; x = fx; y = v ? fy + fh - height : fy; }
+        aspect = (GLfloat)width / (GLfloat)(height > 0 ? height : 1);
+        Object* c = W3dVistaCamara(v);
+        CameraActive = (c && c->getType() == ObjectType::camera) ? (Camera*)c : cam0;
+        W3dVistaAntes(v);
+        // (el "Limpiar" del proyecto, solo en esta mitad)
+        g_w3dRecorteVistaOn = true;
+        g_w3dRecorteVista[0] = x; g_w3dRecorteVista[1] = W3dPantallaAlto - y - height;
+        g_w3dRecorteVista[2] = width; g_w3dRecorteVista[3] = height;
+        soloEscena = true;
+        Render();
+        soloEscena = false;
+    }
+    g_w3dRecorteVistaOn = false;
+    gVistaPartida = false;
+    W3dVistaDespues();
+    x = x0; y = y0; width = w0; height = h0; aspect = a0;
+    CameraActive = cam0;
+    // el HUD sobre el cuadro entero: el marco de este viewport, como lo dejaria Render
+    camFrameOn = true; camFrameNX = nx; camFrameNY = ny;
+    w3dEngine::Viewport(x, glY, width, height);
+    RenderUI();
+    return true;
+}
+
 void Viewport3D::RenderUI() {
     // barra de botones 2D del area: NO es un overlay, es chrome del area (como
     // los bordes). Se dibuja SIEMPRE, aunque "Show Overlays" este off (la opcion
@@ -3541,7 +3606,8 @@ void Viewport3D::event_mouse_motion(int mx, int my){
     // (en tactil se confirma con el tilde de la barra de herramientas, no soltando).
     // modo VIEW (toggle de Edit Mode): con 1 dedo se ORBITA aunque haya una operacion en curso (mover/rotar/
     // extrude/strip) -> se puede mirar desde otro angulo sin cancelar; se apaga View y sigue editando.
-    #if defined(__ANDROID__) || defined(__EMSCRIPTEN__)
+    // (la 3DS tambien: su "mouse" es siempre el dedo de la pantalla tactil)
+    #if defined(__ANDROID__) || defined(__EMSCRIPTEN__) || defined(W3D_3DS)
         bool viewOrbita = (g_viewEditMode && (InteractionMode == EditMode || WP3DModoPintura()));   // pintura: vista ON = el dedo orbita
         if (middleMouseDown || (leftMouseDown && (estado == editNavegacion || viewOrbita || g_altNavActivo))) {
     #else

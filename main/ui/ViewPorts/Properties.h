@@ -568,6 +568,7 @@ class Properties : public ViewportBase, public WithBorder, public Scrollable {
         PropButton* propProyComo;
         PropButton* propProyExtraer; // "Extraer assets": saca lo de adentro del .w3d a una carpeta
         PropBool*   propProyMallasTexto; // "Meshes as text": la opcion "formatoMallas" del proyecto
+        PropBool*   propProyRed;    // "Network access": el permiso de la red de este archivo (W3dRedPermisos.h)
         GroupPropertie* propRender;  // pestania RENDER: tarjeta "Render" (output)
         GroupPropertie* propAnimation; // pestania ANIMACION (9): tarjeta "Animation" (selector + New/Delete)
         // ===== pestania ANIMACION (9): el MIX de animaciones (capas estilo Maya) =====
@@ -908,6 +909,7 @@ class Properties : public ViewportBase, public WithBorder, public Scrollable {
         PropButton* propAjSkin;     // dropdown del skin
         PropButton* propAjLogs;      // nivel de los logs del editor (todo / avisos / errores / nada)
         PropText*   propAjRepo;     // raiz del repo para Compilar (editor instalado)
+        PropText*   propAjDispositivo; // el nombre de este dispositivo en la red (el que ven al buscar partidas)
 
 #ifndef W3D_SYMBIAN
         void mouse_button_up(int boton) W3D_OVERRIDE;

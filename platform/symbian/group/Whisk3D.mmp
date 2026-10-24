@@ -152,6 +152,7 @@ SOURCE          W3dTeclado.cpp // teclado en pantalla (Android); en Symbian son 
 SOURCEPATH      ..\..\..\main\config
 SOURCE          W3dLang.cpp   // idiomas del editor (T() + deteccion del idioma del telefono)
 SOURCE          W3dConfigGuardar.cpp // escribe el config.ini (la tarjeta "Ajustes" de Properties)
+SOURCE          W3dRedPermisos.cpp   // el permiso de la red de cada proyecto y el nombre del dispositivo
 SOURCE          W3dProfile.cpp // reloj de pared + tiempos por categoria del frame (overlay Statistics)
 SOURCEPATH      ..\..\..\main\undo
 SOURCE          Undo.cpp // Ctrl+Z (undo por comandos; lo llaman ObjectMode/LayoutInput/Properties)
@@ -258,6 +259,9 @@ SOURCE          W3dRigido.cpp
 SOURCE          W3dColMalla.cpp
 // hitbox del Core (cajas de deteccion + eventos alEntrar/alSalir/alTocar para lua)
 SOURCE          W3dHitbox.cpp
+// jugar en red (LAN, wifi, internet: UDP por los sockets de Open C; pide NetworkServices)
+SOURCEPATH      ..\..\..\libs\Whisk3DCore\net
+SOURCE          W3dRed.cpp
 SOURCEPATH      ..\..\..\main\script
 // ScriptUI.cpp: engancha gBindExtra (constructor estatico) -> registra los binds de JUEGO
 // (sonido/setTexto/posPx/pantalla/...). Sin esto, un .lua que llama sonido() da "nil value".
@@ -359,7 +363,8 @@ END
 // N95: con cualquiera de las dos el telefono rechaza el binario self-signed
 // ("funcion no admitida"). La app no las usaba (el acelerometro esta
 // comentado); si algun dia hacen falta, hay que firmarse con Open Signed.
-CAPABILITY ReadUserData WriteUserData
+// NetworkServices (auto-firmable): los juegos en red (net/W3dRed.cpp); el telefono pregunta por el punto de acceso
+CAPABILITY ReadUserData WriteUserData NetworkServices
 
 SOURCEPATH ..\..\..\main\ui\ViewPorts\PopUp
 SOURCE NumPad.cpp

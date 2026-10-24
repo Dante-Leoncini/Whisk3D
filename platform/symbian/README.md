@@ -4,8 +4,6 @@ Backend OpenGL ES 1.1. El objetivo insignia del proyecto: correr en un teléfono
 
 ## Instalar (usuario final)
 
-Necesitás tener instalado **PyS60**, o el programa no se ejecuta. El instalador está en la carpeta `Dependencies` del repo.
-
 La última versión está siempre en la carpeta `sis` como `Whisk3D_gcce.sisx` (puede no funcionar del todo; está en desarrollo constante). La versión **verificada** está en `releases`, con la fecha en el nombre, referenciando los videos/imágenes de demostración de [Instagram](https://www.instagram.com/dante_leoncini).
 
 > Ojo: algunas features van y vienen entre versiones. Por ejemplo el modelado 3D se sacó en las últimas; si querés esa función, usá una versión anterior como `Whisk3D_gcce_beta_24-08-15_FERNET.sisx`.

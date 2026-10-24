@@ -50,6 +50,11 @@
 extern float axisState[SDL_CONTROLLER_AXIS_MAX];
 extern bool buttonState[SDL_CONTROLLER_BUTTON_MAX];
 extern GLfloat deadzone;
+// ...y CADA MANDO por separado (hasta 4, en el orden en que se movieron por primera vez): los dos jugadores de la
+// pantalla dividida. axisState / buttonState siguen siendo la mezcla de todos (lo que lee un juego de uno)
+enum { W3D_MANDOS_SDL = 4 };
+extern float axisStateM[W3D_MANDOS_SDL][SDL_CONTROLLER_AXIS_MAX];
+extern bool buttonStateM[W3D_MANDOS_SDL][SDL_CONTROLLER_BUTTON_MAX];
 
 // Refresca axisState/buttonState desde un evento SDL
 void RefreshInputControllerSDL(SDL_Event &e);

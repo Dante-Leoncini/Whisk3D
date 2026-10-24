@@ -1197,7 +1197,7 @@ static bool EscribirMain(const std::string& ruta, const std::string& fontRel,
     fputs("#ifdef __ANDROID__\nSDL_Quit();exit(0);\n#endif\n", f);
     fputs("g_run=false;return;}\n#endif\n", f);
     fputs("#ifdef __ANDROID__\nactualizarSafeArea();\n#endif\n", f);
-    fputs("int w,h;tamActual(&w,&h);W3dGameRender(w,h);SDL_GL_SwapWindow(g_win);}\n", f);
+    fputs("int w,h;tamActual(&w,&h);W3dGameRender(w,h);gfx::DibujarPendiente();SDL_GL_SwapWindow(g_win);}\n", f);
     fputs("int main(int,char**){\n", f);
     if (empaquetar)   // ANTES de cargar nada: que icono/fuente/escenas ya salgan del pak
         fputs("w3dFileSystem::W3dPakRegistrar(g_w3dPakDatos,g_w3dPakTam);\n", f);
@@ -1443,6 +1443,7 @@ static const char* kFuentesBase[] = {
     "${CORE}/physics/W3dRigido.cpp", "${CORE}/physics/W3dColMalla.cpp",
     // ...y los de HITBOX (hitboxActivo/hitboxDentro/...) + el despacho de alEntrar/alTocar
     "${CORE}/physics/W3dHitbox.cpp",
+    "${CORE}/net/W3dRed.cpp",
     "${UILIB}/text/W3dFont.cpp", "${UILIB}/text/bitmapText.cpp", "${UILIB}/text/font.cpp",
     "${UILIB}/draw/glesdraw.cpp", "${UILIB}/draw/W3dAtlasPacker.cpp",
     "${UILIB}/core/UI.cpp", "${UILIB}/theme/colores.cpp",
@@ -1604,6 +1605,8 @@ static bool EscribirCMake(const std::string& ruta, const std::string& nombre,
         for (int i = 0; kIncludes3D[i]; i++) fprintf(f, "  %s\n", kIncludes3D[i]);
     fputs("  ${LUA})\n", f);
     fprintf(f, "target_link_libraries(%s PRIVATE SDL2::SDL2 OpenGL::GL OpenGL::GLU)\n", nombre.c_str());
+    // (los sockets de net/W3dRed.cpp: en Windows vienen aparte)
+    fprintf(f, "if(WIN32)\n  target_link_libraries(%s PRIVATE ws2_32)\nendif()\n", nombre.c_str());
     if (!empaquetar) {
         // TODOS los assets del juego (multi-escena) al lado del binario y en el paquete: por glob
         // (no por nombre) -> sirve para 1 o N escenas + las texturas/fuente que sea.
@@ -1840,6 +1843,10 @@ static bool EscribirBuildAndroid(const std::string& ruta, const std::string& rep
               "sed -i 's#<application #<application android:icon=\"@mipmap/ic_launcher\" #' "
               "\"$AND/app/src/main/AndroidManifest.xml\"\n", f);
     }
+    // 2b''') la red (net/W3dRed.cpp): el permiso INTERNET en la COPIA del manifest (es "normal": no se pide en runtime)
+    fputs("grep -q 'android.permission.INTERNET' \"$AND/app/src/main/AndroidManifest.xml\" || "
+          "sed -i 's#<application #<uses-permission android:name=\"android.permission.INTERNET\" />\\n    <application #' "
+          "\"$AND/app/src/main/AndroidManifest.xml\"\n", f);
     // 2c) orientacion clavada: android:screenOrientation en la COPIA del manifest (la
     // referencia es la calculadora, que fija portrait en su manifest + hint del main)
     if (orientacion == 1 || orientacion == 2) {

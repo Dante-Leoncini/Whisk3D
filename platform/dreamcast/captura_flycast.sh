@@ -11,7 +11,7 @@
 #  PRUEBA=n antes del comando: antes de capturar empuja eventos de teclado y mouse (1: Tab + click en el menu del modo;
 #  2: mover el cubo con G, X y el mouse; 3: seleccionar con click; 4: arrastrar el borde de un viewport;
 #  5: modo edicion y click en un vertice; 6: trazado de rayos;
-#  7: pintura de textura).
+#  7: pintura de textura; 8: orbitar con el control, pasando varias veces el borde del viewport).
 #  (el editor solo dibuja cuando algo cambia: quieto se queda en los primeros cuadros. La consola serie emulada es
 #  lenta: una captura de 640x480 tarda cerca de un minuto)
 # ---------------------------------------------------------------------------------------------------------------

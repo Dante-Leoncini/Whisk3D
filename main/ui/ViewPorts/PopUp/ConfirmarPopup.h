@@ -15,6 +15,7 @@ class ConfirmarPopup : public PopUpBase {
         std::string mensaje;
         std::vector<std::string> lineas; // mensaje partido en renglones (word-wrap al ancho disponible)
         void (*onSi)();   // callback al confirmar (Si)
+        void (*onNo)();   // callback al decir que no (el boton No o Esc; cerrarlo de otra forma no responde)
         Button* btnSi;    // "Si" (rojo, derecha) = soft key derecho / Accept / flecha derecha
         Button* btnNo;    // "No" (izquierda)     = soft key izquierdo / Cancel / flecha izquierda
         int foco;         // 0 = No, 1 = Si (resaltado por teclado)
@@ -24,6 +25,11 @@ class ConfirmarPopup : public PopUpBase {
 
         // arma la barra inferior (ancho completo) con el mensaje + callback de Si
         void Abrir(const std::string& msg, void (*cb)());
+        // una PREGUNTA (no un borrado): los dos botones con su texto, el Si sin el rojo y una respuesta para el No
+        // (el boton o Esc; un click afuera la cierra sin responder)
+        void Preguntar(const std::string& msg, const std::string& si, const std::string& no, void (*cbSi)(),
+                       void (*cbNo)());
+        void ResponderNo();   // el No: cierra y avisa
         void Layout(); // recalcula posicion/tamaño (ancho completo, abajo) con las metricas actuales
         int Padding() const;   // padding UNIFORME de la ventana (4 lados)
         int LineHeight() const; // alto de un renglon de mensaje
